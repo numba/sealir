@@ -51,8 +51,10 @@ class LamBuilder:
             return expr
 
     def _intercept_cells(self, fn):
-        new_closure = []
+        if fn.__closure__ is None:
+            return fn
         changed = False
+        new_closure = []
         for i, cell in enumerate(fn.__closure__):
             val = cell.cell_contents
             if isinstance(val, ase.Expr):

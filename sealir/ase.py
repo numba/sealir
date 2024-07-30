@@ -23,7 +23,9 @@ from enum import IntEnum
 from pprint import pformat
 from functools import cached_property
 from collections import deque
+import html
 
+from .graphviz_support import graphviz_function
 
 class Context:
     _tls_context = threading.local()
@@ -146,6 +148,43 @@ class Tree:
         buf.append("\n")
         return "".join(buf)
 
+    @graphviz_function
+    def render_dot(self, *, gv):
+        def make_label(i, x):
+            if isinstance(x, Expr):
+                return f"<{i}> [{x._handle}]"
+            else:
+                return html.escape(f"{x!r} :{type(x).__name__}")
+        g = gv.Digraph(node_attr={'shape': 'record'})
+
+        crawler = TreeCrawler(self)
+
+        # Records that are children of the last node
+        crawler.seek(self.last())
+        reachable = set()
+        for _, child_rec in crawler.walk_descendants():
+            reachable.add(child_rec.handle)
+
+        crawler.move_to_first_record()
+        edges = []
+        for record in crawler.walk():
+            idx = record.handle
+            head = record.read_head()
+            args = record.read_args()
+            label = '|'.join(make_label(i, v) for i, v in enumerate(args))
+            kwargs = {}
+            if idx in reachable:
+                kwargs['color'] = 'red'
+            g.node(f"node{idx}", label=f"[{idx}] {head}|{label}",
+                   rank=str(record.handle), **kwargs)
+            for i, arg in enumerate(args):
+                if isinstance(arg, Expr):
+                    edges.append((f"node{arg._handle}", f"node{idx}:{i}"))
+        for edge in edges:
+            g.edge(*edge)
+
+        return g
+
     # Raw Access API
 
     def get(self, pos: handle_type) -> handle_type:
@@ -156,6 +195,9 @@ class Tree:
         self, start: handle_type, stop: handle_type
     ) -> tuple[handle_type, ...]:
         return tuple(self._heap[start:stop])
+
+    def last(self) -> handle_type:
+        return self.rindex(HandleSentry.BEGIN, len(self._heap) - 1)
 
     # Search API
 
@@ -409,7 +451,7 @@ class Expr:
         It will visit more that the subtree under `self`.
         """
         crawler = TreeCrawler(self._tree)
-        crawler.step()
+        crawler.move_to_first_record()
         for rec in crawler.walk():
             if rec.handle <= self._handle:  # visit all younger
                 visitor.visit(rec.to_expr())
@@ -434,6 +476,9 @@ class TreeCrawler:
     def __init__(self, tree: Tree) -> None:
         self._tree = tree
         self._pos = 0
+
+    def move_to_first_record(self) -> None:
+        self._pos = 1
 
     @property
     def pos(self) -> handle_type:
