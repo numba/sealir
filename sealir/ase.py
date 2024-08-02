@@ -267,6 +267,7 @@ class Tree:
         self._heap.append(ref)
 
     def write_token(self, token: token_type) -> None:
+        assert isinstance(token, (int, str, float))
         last = -len(self._tokens)
         handle = self._tokenmap.get(token, last)
         if handle == last:
