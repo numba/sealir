@@ -25,6 +25,8 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
     def visit(self, expr: ase.Expr) -> None:
         with expr.tree:
             res = self._dispatch(expr)
+            if res is self.PassThru:
+                res = expr
             self.memo[expr] = res
 
     def _dispatch(self, old: ase.Expr) -> Union[T, ase.Expr]:
