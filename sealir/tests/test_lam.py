@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from textwrap import dedent
+
 from sealir.lam import LamBuilder
 
 
@@ -152,3 +154,21 @@ def test_lam_abstract_deeper():
     print(lambar.format(func_body))
     assert expected_func_body.str() == func_body.str()
     print(func_body.str())
+
+
+def test_lam_identity():
+    lambar = LamBuilder()
+
+    @lambar.lam_func
+    def func_body(x):
+        return x
+
+    # This is a special case for the formatter to only contain a simple expr
+    out = lambar.format(func_body)
+    expected_str = dedent("""
+        let $1 = λ {
+        (arg 0)
+        }
+    """)
+    assert out.strip() == expected_str.strip()
+    assert func_body.str() == "(lam (arg 0))"

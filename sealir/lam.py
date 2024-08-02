@@ -53,6 +53,14 @@ class LamBuilder:
                 expr = self.lam(expr)
             return expr
 
+    # Helper API
+
+    def unpack(self, tup: ase.Expr, nelem: int) -> tuple[ase.Expr, ...]:
+        """Unpack a tuple with known size with `(tuple.getitem )`
+        """
+        return tuple(map(lambda i: self.expr("tuple.getitem", tup, i),
+                         range(nelem)))
+
     def _intercept_cells(self, fn):
         if fn.__closure__ is None:
             return fn
@@ -339,7 +347,13 @@ def format_lambda(expr: ase.Expr):
                         "λ" * (child_scope.lambda_depth),
                     )
                     wr.write("{")
-                    wr.extend(child_scope.writer.items)
+                    if child_scope.writer.items:
+                        wr.extend(child_scope.writer.items)
+                    else:
+                        # empty child?
+                        assert len(child_scope.formatted) == 1
+                        [out] = child_scope.formatted.values()
+                        wr.write(out)
                     wr.write("}")
                     formatted[child] = f"${ident}"
                 else:
