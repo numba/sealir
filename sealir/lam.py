@@ -143,6 +143,17 @@ class LamBuilder:
         """Multi-line formatting of the S-expression"""
         return format_lambda(expr).get()
 
+    def simplify(self) -> LamBuilder:
+        """Make a copy and remove dead node. Last node is assumed to be root.
+        """
+        last = ase.Expr(self._tree, self._tree.last())
+        new_tree = ase.Tree()
+        last.copy_tree_into(new_tree)
+        return LamBuilder(new_tree)
+
+    def render_dot(self):
+        return self._tree.render_dot()
+
     def run_abstraction_pass(self, root_expr: ase.Expr):
         """Convert expressions that would otherwise require a let-binding
         to use lambda-abstraction with an application.
