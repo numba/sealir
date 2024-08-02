@@ -45,6 +45,9 @@ class LamBuilder:
             args = [self.arg(i) for i in range(len(argnames))]
             # intercept cell variables
             fn = self._intercept_cells(fn)
+            # Reverse arguments so that arg0 refers to the innermost lambda.
+            # And, it is the rightmost argument in Python.
+            # That way, first `(app )` will replace the leftmost Python argument
             expr = fn(*reversed(args))
             for _ in args:
                 expr = self.lam(expr)
