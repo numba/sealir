@@ -23,15 +23,14 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         self.memo = {}
 
     def visit(self, expr: ase.Expr) -> None:
-        with expr.tree:
-            res = self._dispatch(expr)
-            if res is self.PassThru:
-                res = expr
-            self.memo[expr] = res
+        res = self._dispatch(expr)
+        if res is self.PassThru:
+            res = expr
+        self.memo[expr] = res
 
-    def _dispatch(self, old: ase.Expr) -> Union[T, ase.Expr]:
-        head = old.head
-        args = old.args
+    def _dispatch(self, orig: ase.Expr) -> Union[T, ase.Expr]:
+        head = orig.head
+        args = orig.args
         updated = False
 
         def _lookup(val):
@@ -46,18 +45,18 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         fname = f"rewrite_{head}"
         fn = getattr(self, fname, None)
         if fn is not None:
-            return fn(*args)
+            return fn(orig, *args)
         else:
-            return self.rewrite_generic(old, args, updated)
+            return self.rewrite_generic(orig, args, updated)
 
     def rewrite_generic(
-        self, old: ase.Expr, args: tuple[Any, ...], updated: bool
+        self, orig: ase.Expr, args: tuple[Any, ...], updated: bool
     ) -> Union[T, ase.Expr]:
         """Default implementation will automatically create a new node if
         children are updated; otherwise, returns the original expression if
         its children are unmodified.
         """
         if updated:
-            return ase.expr(old.head, *args)
+            return ase.expr(orig.head, *args)
         else:
-            return old
+            return orig

@@ -5,22 +5,22 @@ from sealir.rewriter import TreeRewriter
 def test_rewrite():
 
     class RewriteCalcMachine(TreeRewriter[ase.Expr]):
-        def rewrite_add(self, lhs, rhs):
+        def rewrite_add(self, orig, lhs, rhs):
             [x] = lhs.args
             [y] = rhs.args
             return ase.expr("num", x + y)
 
-        def rewrite_sub(self, lhs, rhs):
+        def rewrite_sub(self, orig, lhs, rhs):
             [x] = lhs.args
             [y] = rhs.args
             return ase.expr("num", x - y)
 
-        def rewrite_mul(self, lhs, rhs):
+        def rewrite_mul(self, orig, lhs, rhs):
             [x] = lhs.args
             [y] = rhs.args
             return ase.expr("num", x * y)
 
-    with ase.Tree():
+    with ase.Tree() as tree:
         a = ase.expr("num", 123)
         b = ase.expr("num", 321)
         c = ase.expr("add", a, a)
@@ -28,7 +28,8 @@ def test_rewrite():
         e = ase.expr("mul", b, d)
 
     calc = RewriteCalcMachine()
-    e.apply_bottomup(calc)
+    with tree:
+        e.apply_bottomup(calc)
     print(e.tree.dump())
     reduced = calc.memo[e]
     [result] = reduced.args

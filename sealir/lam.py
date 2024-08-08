@@ -18,6 +18,12 @@ class LamBuilder:
     def __init__(self, tree: ase.Tree | None = None):
         self._tree = tree or ase.Tree()
 
+    def get_tree(self) -> ase.Tree:
+        return self._tree
+
+    def get_root(self) -> ase.Expr:
+        return ase.Expr(self._tree, self._tree.last())
+
     def expr(self, head: str, *args) -> ase.Expr:
         """Makes a user defined expression"""
         with self._tree:
@@ -135,7 +141,8 @@ class LamBuilder:
 
         assert arg2repl
         br = BetaReduction(drops, arg2repl)
-        target.apply_bottomup(br)
+        with self._tree:
+            target.apply_bottomup(br)
         out = br.memo[target]
         return out
 
@@ -203,7 +210,8 @@ class LamBuilder:
                     return super().rewrite_generic(old, args, updated)
 
             rewriter = RewriteProgram()
-            root_expr.apply_bottomup(rewriter)
+            with self.get_tree():
+                root_expr.apply_bottomup(rewriter)
             root_expr = rewriter.memo[root_expr]
 
         return root_expr
@@ -244,21 +252,22 @@ def rewrite_into_abstraction(
     # in body, shift de bruijin index + 1 for those referring to
     # outer lambdas before introducing new (arg 0)
     class RewriteAddArg(TreeRewriter):
-        def rewrite_arg(self, index: int):
+        def rewrite_arg(self, orig: ase.Expr, index: int):
             if index < arg_index:
                 return self.PassThru
             else:
                 return lambar.arg(index + 1)
 
         def rewrite_generic(
-            self, old: ase.Expr, args: tuple[Any, ...], updated: bool
+            self, orig: ase.Expr, args: tuple[Any, ...], updated: bool
         ) -> Any | ase.Expr:
-            if old == anchor:
+            if orig == anchor:
                 return lambar.arg(arg_index)
-            return super().rewrite_generic(old, args, updated)
+            return super().rewrite_generic(orig, args, updated)
 
     rewrite = RewriteAddArg()
-    root.apply_bottomup(rewrite)
+    with lambar.get_tree():
+        root.apply_bottomup(rewrite)
     out_expr = rewrite.memo[root]
     return out_expr
 

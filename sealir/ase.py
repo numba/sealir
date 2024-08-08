@@ -16,7 +16,7 @@ to process such a S-expression tree.
 
 from __future__ import annotations
 import threading
-from typing import TypeAlias, Union, Iterator, Callable
+from typing import TypeAlias, Union, Iterator, Callable, Any
 
 from dataclasses import dataclass
 from enum import IntEnum
@@ -113,6 +113,12 @@ class Tree:
         out = Context.pop()
         if out is not self:
             raise MalformedContextError("malformed stack: top is not self")
+
+    def iter_expr(self) -> Iterator[Expr]:
+        crawler = TreeCrawler(self)
+        crawler.move_to_first_record()
+        for rec in crawler.walk():
+            yield rec.to_expr()
 
     # Debug API
 
@@ -256,6 +262,8 @@ class Tree:
         self.write_token(head)
         for a in args:
             if isinstance(a, Expr):
+                if a._tree is not self:
+                    raise ValueError(f"invalid to assign Expr({a.str()}) to a different tree")
                 self._heap.append(a._handle)
             else:
                 self.write_token(a)
@@ -267,7 +275,8 @@ class Tree:
         self._heap.append(ref)
 
     def write_token(self, token: token_type) -> None:
-        assert isinstance(token, (int, str, float))
+        if not isinstance(token, (int, str, float)):
+            raise TypeError(f"invalid token type for {type(token)}")
         last = -len(self._tokens)
         handle = self._tokenmap.get(token, last)
         if handle == last:
@@ -332,6 +341,23 @@ class Expr:
     def args(self) -> tuple[value_type, ...]:
         tree = self._tree
         return tree.read_args(self._handle)
+
+    def as_tuple(self, depth: int = 1) -> tuple[Any, ...]:
+        """
+        Recursively converts an Expr object to a tuple, with a specified depth
+        limit.
+
+        Args:
+            depth (int): The maximum depth to traverse the Expr object.
+
+        """
+        def recur(obj, depth):
+            if depth > 0 and isinstance(obj, Expr):
+                return obj.as_tuple(depth)
+            else:
+                return obj
+
+        return (self.head, *map(lambda x: recur(x, depth - 1), self.args))
 
     def __str__(self):
         return f"Expr({self.head}, {', '.join(map(repr, self.args))})"

@@ -1,4 +1,4 @@
-# S-Expression And Lambda Intemediate Representation (SEALIR)
+# S-Expression And Lambda Intermediate Representation (SEALIR)
 
 
 

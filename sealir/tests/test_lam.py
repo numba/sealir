@@ -167,7 +167,7 @@ def test_lam_identity():
     out = lambar.format(func_body)
     expected_str = dedent("""
         let $1 = λ {
-        (arg 0)
+          (arg 0)
         }
     """)
     assert out.strip() == expected_str.strip()
