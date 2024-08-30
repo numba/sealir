@@ -100,7 +100,8 @@ class LamBuilder:
         )
 
     def arg(self, index: int) -> ase.Expr:
-        return ase.expr("arg", index)
+        with self._tree:
+            return ase.expr("arg", index)
 
     def app(self, lam, arg0, *more_args) -> ase.Expr:
         """Makes an apply expression."""
@@ -343,6 +344,12 @@ def format_lambda(expr: ase.Expr):
             expr = expr.args[0]
         return depth
 
+    def flush(child_scope, wr):
+        assert child_scope.formatted
+        assert len(child_scope.formatted) == 1
+        [out] = child_scope.formatted.values()
+        wr.write(out)
+
     grouped: defaultdict[ase.Expr | None, LamScope]
     grouped = defaultdict(LamScope)
 
@@ -370,13 +377,12 @@ def format_lambda(expr: ase.Expr):
                     if child_scope.writer.items:
                         wr.extend(child_scope.writer.items)
                     else:
-                        # empty child?
-                        assert len(child_scope.formatted) == 1
-                        [out] = child_scope.formatted.values()
-                        wr.write(out)
+                        flush(child_scope, wr)
                     wr.write("}")
                     formatted[child] = f"${ident}"
                 else:
+                    if not child_scope.writer.items:
+                        flush(child_scope, wr)
                     wr.extend(child_scope.writer.items)
             else:
                 wr.write(
