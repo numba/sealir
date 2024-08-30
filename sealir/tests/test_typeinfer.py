@@ -183,6 +183,12 @@ class MakeTypeInferRules(TreeRewriter[ase.Expr]):
 
                 tv = self.new_typevar(orig)
                 self.new_equiv(tv, *branches_tvs)
+                raise AssertionError(
+                    """
+Solve the merge type.
+Currently it doesn't propagate
+"""
+                )
                 # self.new_equiv(tv, self.new_type("Merge", cond, *branches_tvs))
                 self.new_proof(tv, self.new_proof_of(cond))
                 return tv
@@ -406,13 +412,16 @@ def do_egglog(equiv_list):
             f_equiv( b, vec1[i] ),
         ),
         # Arrow rules
-        rule(
+        rule( # Given
+            # a = lam b c
             eq( a ).to( f_lam(b, c) ),
+            # d = typevar(i)
             eq( d ).to( TypeInfo.typevar(i) ),
+            # a = b
             eq( a ).to( d ),
         ).then(
+            # then a = c -> b
             f_equiv( a, TypeInfo.arrow(c, b) ),
-            union( f_proof(d) ).with_( TypeProof.arrow(f_proof(c), f_proof(b)) )
         ),
         # App rules
         rule(
@@ -766,6 +775,16 @@ def test_typeinfer():
     def my_function(lambar):
         @lambar.lam_func
         def func_body(x, y):
+            """
+            Same as
+
+            def func_body(x, y):
+                if x < y:
+                    out = x * y
+                else:
+                    out = x * 1
+                return out
+            """
             cond = lambar.expr("lt", x, y) # (lt x y)
 
             @scf.region(lambar)
