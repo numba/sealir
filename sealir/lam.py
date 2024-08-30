@@ -224,20 +224,18 @@ def replace_by_abstraction(
     """
     Returns a `( old_node, (app (lam rewritten_old_node) anchor) )` tuple.
     """
-    # Find lambda depth of children in the lambda node,
-    # where the children are younger than the anchor node
-    lam_depth = 0
+    # Find lambda depth of children in the lambda node
+    lam_depth_map = {}
     for parents, child in lamexpr.walk_descendants():
-        if parents and child > anchor:
-            lam_depth = max(
-                lam_depth, len([p for p in parents if p.head == "lam"])
-            )
+        lam_depth_map[child] = len([p for p in parents if p.head == "lam"])
+
+    lam_depth = lam_depth_map[child]
 
     # rewrite these children nodes into a new lambda abstraction
     # replacing the `anchor` node with an arg node.
     [old_node] = lamexpr.args
     new_node = rewrite_into_abstraction(
-        lambar, old_node, anchor, lam_depth - 1
+        lambar, old_node, anchor, lam_depth_map
     )
     repl = lambar.app(lambar.lam(new_node), anchor)
     return old_node, repl
@@ -247,14 +245,20 @@ def rewrite_into_abstraction(
     lambar: LamBuilder,
     root: ase.Expr,
     anchor: ase.Expr,
-    arg_index: int,
+    lam_depth_map: dict[ase.Expr, int],
 ) -> ase.Expr:
+
+    arg_index = lam_depth_map[anchor] - 1
+
     # replace remaining program as (app (lam body) expr)
     # in body, shift de bruijin index + 1 for those referring to
     # outer lambdas before introducing new (arg 0)
     class RewriteAddArg(TreeRewriter):
         def rewrite_arg(self, orig: ase.Expr, index: int):
-            if index < arg_index:
+            if orig not in lam_depth_map:
+                return self.PassThru
+            depth_offset = lam_depth_map[orig] - lam_depth_map[anchor]
+            if index - depth_offset < arg_index:
                 return self.PassThru
             else:
                 return lambar.arg(index + 1)
