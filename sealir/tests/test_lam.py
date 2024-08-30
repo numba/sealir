@@ -64,7 +64,7 @@ def test_lam_loop():
     print(toplevel.str())
     print(lambar.format(toplevel))
 
-    print(lambar._tree.dump())
+    print(lambar._tape.dump())
 
 
 def test_lam_abstract():
@@ -165,10 +165,12 @@ def test_lam_identity():
 
     # This is a special case for the formatter to only contain a simple expr
     out = lambar.format(func_body)
-    expected_str = dedent("""
+    expected_str = dedent(
+        """
         let $1 = λ {
           (arg 0)
         }
-    """)
+    """
+    )
     assert out.strip() == expected_str.strip()
     assert func_body.str() == "(lam (arg 0))"

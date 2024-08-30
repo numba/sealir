@@ -13,25 +13,26 @@ from sealir.itertools import first
 class LamBuilder:
     """Helper for building lambda calculus expression"""
 
-    _tree: ase.Tree
+    _tape: ase.Tape
 
-    def __init__(self, tree: ase.Tree | None = None):
-        self._tree = tree or ase.Tree()
+    def __init__(self, tape: ase.Tape | None = None):
+        self._tape = tape or ase.Tape()
 
-    def get_tree(self) -> ase.Tree:
-        return self._tree
+    @property
+    def tape(self) -> ase.Tape:
+        return self._tape
 
     def get_root(self) -> ase.Expr:
-        return ase.Expr(self._tree, self._tree.last())
+        return ase.Expr(self._tape, self._tape.last())
 
     def expr(self, head: str, *args) -> ase.Expr:
         """Makes a user defined expression"""
-        with self._tree:
+        with self._tape:
             return ase.expr("expr", head, *args)
 
     def lam(self, body_expr: ase.Expr) -> ase.Expr:
         """Makes a lambda abstraction"""
-        with self._tree:
+        with self._tape:
             return ase.expr("lam", body_expr)
 
     def lam_func(self, fn):
@@ -43,7 +44,7 @@ class LamBuilder:
         assert not argspec.varargs
         assert not argspec.kwonlyargs
 
-        with self._tree:
+        with self._tape:
             # use De Bruijn index starting from 0
             # > lam (lam arg0 arg1)
             #         ^---|     |
@@ -62,10 +63,10 @@ class LamBuilder:
     # Helper API
 
     def unpack(self, tup: ase.Expr, nelem: int) -> tuple[ase.Expr, ...]:
-        """Unpack a tuple with known size with `(tuple.getitem )`
-        """
-        return tuple(map(lambda i: self.expr("tuple.getitem", tup, i),
-                         range(nelem)))
+        """Unpack a tuple with known size with `(tuple.getitem )`"""
+        return tuple(
+            map(lambda i: self.expr("tuple.getitem", tup, i), range(nelem))
+        )
 
     def _intercept_cells(self, fn):
         if fn.__closure__ is None:
@@ -100,13 +101,13 @@ class LamBuilder:
         )
 
     def arg(self, index: int) -> ase.Expr:
-        with self._tree:
+        with self._tape:
             return ase.expr("arg", index)
 
     def app(self, lam, arg0, *more_args) -> ase.Expr:
         """Makes an apply expression."""
         args = (arg0, *more_args)
-        with self._tree:
+        with self._tape:
             stack = list(args)
             out = lam
             while stack:
@@ -142,7 +143,7 @@ class LamBuilder:
 
         assert arg2repl
         br = BetaReduction(drops, arg2repl)
-        with self._tree:
+        with self._tape:
             target.apply_bottomup(br)
         out = br.memo[target]
         return out
@@ -152,15 +153,14 @@ class LamBuilder:
         return format_lambda(expr).get()
 
     def simplify(self) -> LamBuilder:
-        """Make a copy and remove dead node. Last node is assumed to be root.
-        """
-        last = ase.Expr(self._tree, self._tree.last())
-        new_tree = ase.Tree()
+        """Make a copy and remove dead node. Last node is assumed to be root."""
+        last = ase.Expr(self._tape, self._tape.last())
+        new_tree = ase.Tape()
         last.copy_tree_into(new_tree)
         return LamBuilder(new_tree)
 
-    def render_dot(self):
-        return self._tree.render_dot()
+    def render_dot(self, **kwargs):
+        return self._tape.render_dot(**kwargs)
 
     def run_abstraction_pass(self, root_expr: ase.Expr):
         """Convert expressions that would otherwise require a let-binding
@@ -177,7 +177,9 @@ class LamBuilder:
                     if expr not in seen:
                         seen.add(expr)
                         for arg in expr.args:
-                            if isinstance(arg, ase.Expr) and not is_simple(arg):
+                            if isinstance(arg, ase.Expr) and not is_simple(
+                                arg
+                            ):
                                 ctr.update([arg])
 
             root_expr.apply_topdown(Occurrences())
@@ -211,7 +213,7 @@ class LamBuilder:
                     return super().rewrite_generic(old, args, updated)
 
             rewriter = RewriteProgram()
-            with self.get_tree():
+            with self.tape:
                 root_expr.apply_bottomup(rewriter)
             root_expr = rewriter.memo[root_expr]
 
@@ -271,7 +273,7 @@ def rewrite_into_abstraction(
             return super().rewrite_generic(orig, args, updated)
 
     rewrite = RewriteAddArg()
-    with lambar.get_tree():
+    with lambar.tape:
         root.apply_bottomup(rewrite)
     out_expr = rewrite.memo[root]
     return out_expr

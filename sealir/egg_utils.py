@@ -53,36 +53,36 @@ class EClassData:
         return self._eclasses
 
 
-
 def extract_eclasses(egraph: EGraph) -> EClassData:
     serialized = egraph._egraph.serialize([])
     serialized.map_ops(egraph._state.op_mapping())
     jsdata = json.loads(serialized.to_json())
-    terms = reconstruct(jsdata['nodes'], jsdata['class_data'])
+    terms = reconstruct(jsdata["nodes"], jsdata["class_data"])
     return EClassData(terms)
 
 
-
-def reconstruct(nodes: dict[str, dict], class_data: dict[str, str]) -> dict[str, Term]:
+def reconstruct(
+    nodes: dict[str, dict], class_data: dict[str, str]
+) -> dict[str, Term]:
     done: dict[str, Term] = {}
 
     # First pass map keys ot TermRefs
     key_to_termref = {}
     for key in nodes:
         node_data = nodes[key]
-        eclass = node_data['eclass']
-        typ = class_data[eclass]['type']
-        op = node_data['op'].strip('"')
+        eclass = node_data["eclass"]
+        typ = class_data[eclass]["type"]
+        op = node_data["op"].strip('"')
 
         key_to_termref[key] = TermRef(key=key, type=typ, op=op, eclass=eclass)
 
     # Second pass map keys to Terms
     for key, termref in key_to_termref.items():
         node_data = nodes[key]
-        cost = node_data['cost']
-        children = tuple(key_to_termref[x] for x in node_data['children'])
-        done[key] = Term(key, termref.type, termref.op, children,
-                         termref.eclass, cost)
+        cost = node_data["cost"]
+        children = tuple(key_to_termref[x] for x in node_data["children"])
+        done[key] = Term(
+            key, termref.type, termref.op, children, termref.eclass, cost
+        )
 
     return done
-

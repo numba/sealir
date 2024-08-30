@@ -1,4 +1,5 @@
 from functools import wraps
+
 try:
     import graphviz as gv
 except ImportError:
@@ -14,4 +15,5 @@ def graphviz_function(fn):
     @wraps(fn)
     def wrapped(*args, **kwargs):
         return fn(*args, **kwargs, gv=gv)
+
     return wrapped

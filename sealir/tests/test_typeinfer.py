@@ -18,9 +18,10 @@ from .test_scf import make_sum_reduce_loop
 from sealir import scf
 from sealir import egg_utils
 
-class MakeTypeInferRules(TreeRewriter[ase.Expr]):
-    type_expr_tree: ase.Tree
 
+class MakeTypeInferRules(TreeRewriter[ase.Expr]):
+    flag_save_history = False
+    type_expr_tree: ase.Tape
 
     def __init__(self, type_expr_tree):
         super().__init__()
@@ -64,8 +65,8 @@ class MakeTypeInferRules(TreeRewriter[ase.Expr]):
 
     def find_arg(self, orig_body: ase.Expr) -> Iterator[ase.Expr]:
         for parents, child in orig_body.walk_descendants():
-            if child.head == 'arg':
-                lam_depth = len([p for p in parents if p.head == 'lam'])
+            if child.head == "arg":
+                lam_depth = len([p for p in parents if p.head == "lam"])
                 [argidx] = child.args
                 if argidx == lam_depth:
                     yield child
@@ -74,7 +75,9 @@ class MakeTypeInferRules(TreeRewriter[ase.Expr]):
         for arg_node in self.find_arg(orig_body):
             self.new_equiv(arg, self.memo[arg_node])
 
-    def rewrite_generic(self, orig: ase.Expr, args: tuple[Any, ...], updated: bool):
+    def rewrite_generic(
+        self, orig: ase.Expr, args: tuple[Any, ...], updated: bool
+    ):
         raise NotImplementedError(orig)
 
     def rewrite_arg(self, orig: ase.Expr, argindex: int):
@@ -105,11 +108,12 @@ class MakeTypeInferRules(TreeRewriter[ase.Expr]):
 
             # Traits
             Isa = self.new_isa
-            self.new_proof(tv,
+            self.new_proof(
+                tv,
                 self.new_or(
                     Isa(lhs, self.new_trait(lproto, rhs)),
                     Isa(rhs, self.new_trait(rproto, lhs)),
-                )
+                ),
             )
             return tv
 
@@ -124,11 +128,12 @@ class MakeTypeInferRules(TreeRewriter[ase.Expr]):
 
             # Traits
             Isa = self.new_isa
-            self.new_proof(tv,
+            self.new_proof(
+                tv,
                 self.new_or(
                     Isa(lhs, self.new_trait(lproto, rhs)),
                     Isa(rhs, self.new_trait(rproto, lhs)),
-                )
+                ),
             )
             return tv
 
@@ -162,7 +167,9 @@ class MakeTypeInferRules(TreeRewriter[ase.Expr]):
                         case _:
                             raise NotImplementedError(orig_idx)
                 else:
-                    self.new_equiv(tv, self.new_type("TupleGetitem", tup, orig_idx))
+                    self.new_equiv(
+                        tv, self.new_type("TupleGetitem", tup, orig_idx)
+                    )
                 return tv
             case "scf.dowhile":
                 [loop_body, loop_arg] = args
@@ -190,8 +197,6 @@ class MakeTypeInferRules(TreeRewriter[ase.Expr]):
                 raise NotImplementedError(opname)
 
 
-
-
 def find_relevant_rules(root: ase.Expr, equiv_list: list[ase.Expr]):
     relset = {root}
 
@@ -211,8 +216,10 @@ def find_relevant_rules(root: ase.Expr, equiv_list: list[ase.Expr]):
     for equiv in reversed(equiv_list):
         update_relevant(equiv)
 
-    return sorted([rule for rule in relset if rule.head == "equiv"],
-                  key=lambda x: x._handle)
+    return sorted(
+        [rule for rule in relset if rule.head == "equiv"],
+        key=lambda x: x._handle,
+    )
 
 
 def replace_equivalent(equiv_list: list[ase.Expr]):
@@ -225,10 +232,12 @@ def replace_equivalent(equiv_list: list[ase.Expr]):
         equiv_map[tv] |= set(others)
 
     for equiv in equiv_list:
+
         def get_typevars():
             for arg in equiv.args:
                 if arg.head == "typevar":
                     yield arg
+
         if tvs := list(get_typevars()):
             [first, *others] = tvs
             match(first, others)
@@ -251,7 +260,8 @@ def replace_equivalent(equiv_list: list[ase.Expr]):
         for v in vs:
             repl_map[v] = k
     for k, v in repl_map.items():
-        print('equiv', k.str(), v.str())
+        print("equiv", k.str(), v.str())
+
     # rewrite to simplify
     class Replace(TreeRewriter):
         pass
@@ -274,13 +284,27 @@ def replace_equivalent(equiv_list: list[ase.Expr]):
 def do_egglog(equiv_list):
 
     from egglog import (
-        EGraph, Expr, i64Like, i64, String, rewrite, vars_, eq, rule, union,
-        set_, Set, function, Vec, var, method,
-        ruleset, birewrite
+        EGraph,
+        Expr,
+        i64Like,
+        i64,
+        String,
+        rewrite,
+        vars_,
+        eq,
+        rule,
+        union,
+        set_,
+        Set,
+        function,
+        Vec,
+        var,
+        method,
+        ruleset,
+        birewrite,
     )
 
     egraph = EGraph()
-
 
     class TypeInfo(Expr):
         # @classmethod
@@ -288,69 +312,52 @@ def do_egglog(equiv_list):
         #     ...
 
         @classmethod
-        def type(cls, name: String) -> TypeInfo:
-            ...
+        def type(cls, name: String) -> TypeInfo: ...
         @classmethod
-        def typevar(cls, ident: i64Like) -> TypeInfo:
-            ...
+        def typevar(cls, ident: i64Like) -> TypeInfo: ...
 
         @classmethod
-        def tuple(cls, type_list: Vec[TypeInfo]) -> TypeInfo:
-            ...
+        def tuple(cls, type_list: Vec[TypeInfo]) -> TypeInfo: ...
 
         @classmethod
-        def arrow(cls, arg: TypeInfo, res: TypeInfo) -> TypeInfo:
-            ...
+        def arrow(cls, arg: TypeInfo, res: TypeInfo) -> TypeInfo: ...
 
         @classmethod
-        def merge(cls, cond: TypeInfo, args: Vec[TypeInfo]) -> TypeInfo:
-            ...
+        def merge(cls, cond: TypeInfo, args: Vec[TypeInfo]) -> TypeInfo: ...
 
     class TypeProof(Expr):
         @classmethod
-        def trait(cls, name: String, args: Vec[TypeInfo]) -> TypeProof:
-            ...
+        def trait(cls, name: String, args: Vec[TypeInfo]) -> TypeProof: ...
 
         @classmethod
-        def arrow(cls, arg: TypeProof, res: TypeProof) -> TypeProof:
-            ...
+        def arrow(cls, arg: TypeProof, res: TypeProof) -> TypeProof: ...
 
         @classmethod
-        def isa(cls, lhs: TypeProof, rhs: TypeProof) -> TypeProof:
-            ...
+        def isa(cls, lhs: TypeProof, rhs: TypeProof) -> TypeProof: ...
 
         @classmethod
-        def or_(self, lhs: TypeProof, rhs: TypeProof) -> TypeProof:
-            ...
-
+        def or_(self, lhs: TypeProof, rhs: TypeProof) -> TypeProof: ...
 
     @function
-    def f_tuple_getitem(tup: TypeInfo, idx: i64Like) -> TypeInfo:
-        ...
+    def f_tuple_getitem(tup: TypeInfo, idx: i64Like) -> TypeInfo: ...
 
     @function
-    def f_lam(body: TypeInfo, arg: TypeInfo) -> TypeInfo:
-        ...
+    def f_lam(body: TypeInfo, arg: TypeInfo) -> TypeInfo: ...
 
     @function
-    def f_app(lam: TypeInfo, arg: TypeInfo) -> TypeInfo:
-        ...
+    def f_app(lam: TypeInfo, arg: TypeInfo) -> TypeInfo: ...
 
     @function
-    def f_result_of(func: TypeInfo) -> TypeInfo:
-        ...
+    def f_result_of(func: TypeInfo) -> TypeInfo: ...
 
     @function
-    def f_proof(tv: TypeInfo) -> TypeProof:
-        ...
+    def f_proof(tv: TypeInfo) -> TypeProof: ...
 
     @function
-    def f_equiv(a: TypeInfo, b: TypeInfo) -> TypeInfo:
-        ...
+    def f_equiv(a: TypeInfo, b: TypeInfo) -> TypeInfo: ...
 
     @function
-    def f_func(opname: String, args: Vec[TypeInfo]) -> TypeInfo:
-        ...
+    def f_func(opname: String, args: Vec[TypeInfo]) -> TypeInfo: ...
 
     def make_tuple(*elems):
         return TypeInfo.tuple(Vec(*elems))
@@ -370,12 +377,12 @@ def do_egglog(equiv_list):
         else:
             return TypeProof.trait(name, Vec[TypeInfo](*args))
 
-    type_facts, proof_facts, target, tvs = build_egglog_statements(equiv_list, SimpleNamespace(**locals()))
-
+    type_facts, proof_facts, target, tvs = build_egglog_statements(
+        equiv_list, SimpleNamespace(**locals())
+    )
 
     # ty = lambda x: TypeInfo.type(x)
     # tup_type = TypeInfo.tuple(Vec(ty("Int"), ty("Real")))
-
 
     a, b, c, d = vars_("a b c d", TypeInfo)
     i, j = vars_("i j", i64)
@@ -388,55 +395,50 @@ def do_egglog(equiv_list):
         rule(
             f_equiv(a, b),
         ).then(
-            union( a ).with_( b ),
-            union( f_proof(a) ).with_( f_proof(b) ),
+            union(a).with_(b),
+            union(f_proof(a)).with_(f_proof(b)),
         ),
-
-        rule(
-            eq( c ).to( TypeInfo.arrow(a, b) )
-        ).then(
-            union( f_proof(c) ).with_( TypeProof.arrow(f_proof(a), f_proof(b)))
+        rule(eq(c).to(TypeInfo.arrow(a, b))).then(
+            union(f_proof(c)).with_(TypeProof.arrow(f_proof(a), f_proof(b)))
         ),
-
         # Tuple rules
         rule(
-            eq( a ).to( TypeInfo.tuple(vec1) ),
-            eq( b ).to( f_tuple_getitem(a, i) ),
+            eq(a).to(TypeInfo.tuple(vec1)),
+            eq(b).to(f_tuple_getitem(a, i)),
         ).then(
-            f_equiv( b, vec1[i] ),
+            f_equiv(b, vec1[i]),
         ),
         # Arrow rules
         rule(
-            eq( a ).to( f_lam(b, c) ),
-            eq( d ).to( TypeInfo.typevar(i) ),
-            eq( a ).to( d ),
+            eq(a).to(f_lam(b, c)),
+            eq(d).to(TypeInfo.typevar(i)),
+            eq(a).to(d),
         ).then(
-            f_equiv( a, TypeInfo.arrow(c, b) ),
-            union( f_proof(d) ).with_( TypeProof.arrow(f_proof(c), f_proof(b)) )
+            f_equiv(a, TypeInfo.arrow(c, b)),
+            union(f_proof(d)).with_(TypeProof.arrow(f_proof(c), f_proof(b))),
         ),
         # App rules
         rule(
-            eq( a ).to( f_app( TypeInfo.arrow(b, c), d) ),
+            eq(a).to(f_app(TypeInfo.arrow(b, c), d)),
         ).then(
             f_equiv(a, c),
             f_equiv(b, d),
-
         ),
     ]
 
     rules += [
         rule(
-            eq( a ).to( make_func("mul", b, c) ),
-            eq( b ).to( TypeInfo.type("Int") ),
-            eq( c ).to( TypeInfo.type("Int") ),
+            eq(a).to(make_func("mul", b, c)),
+            eq(b).to(TypeInfo.type("Int")),
+            eq(c).to(TypeInfo.type("Int")),
         ).then(
-            f_equiv( f_result_of(a), TypeInfo.type("Int") ),
+            f_equiv(f_result_of(a), TypeInfo.type("Int")),
         )
     ]
     for a, b in type_facts:
-        rules.append( f_equiv(a, b) )
+        rules.append(f_equiv(a, b))
     for a, b in proof_facts:
-        rules.append( union(a).with_(b) )
+        rules.append(union(a).with_(b))
 
     # for tv in tvs:
     #     rules.append( f_proof(TypeInfo.typevar(tv)) )
@@ -461,7 +463,6 @@ def do_egglog(equiv_list):
     tyinferdata = TypeInferData(egraph)
     tyinferdata.get_eclasses()
 
-
     # namer = UnknownNamer()
     # for eclass, tyset in tyinferdata.eclass_to_types.items():
     #     pp = tyinferdata.prettyprint_typeset(tyset, namer)
@@ -482,11 +483,10 @@ class UnknownNamer:
             i = 1
             while True:
                 for ch in string.ascii_lowercase:
-                    yield f'{ch}{i}'
+                    yield f"{ch}{i}"
                 i += 1
 
         self._namer = iter(gen())
-
 
     def get(self, key) -> str:
         if key not in self._stored:
@@ -495,7 +495,6 @@ class UnknownNamer:
         else:
             name = self._stored[key]
         return name
-
 
 
 class TypeInferData:
@@ -508,15 +507,18 @@ class TypeInferData:
         eclass_data = egg_utils.extract_eclasses(egraph)
         self.eclass_data = eclass_data
 
-
         # determine type of each eclass
         eclass_to_types = {}
         for ec, members in eclass_data.eclasses.items():
+
             def is_type(x):
-                return (x.type == "TypeInfo" and
-                        x.op != "TypeInfo.typevar" and
-                        not x.op.startswith("f_"))
-            types = {eclass_data.terms[x.key] for x in members if is_type(x) }
+                return (
+                    x.type == "TypeInfo"
+                    and x.op != "TypeInfo.typevar"
+                    and not x.op.startswith("f_")
+                )
+
+            types = {eclass_data.terms[x.key] for x in members if is_type(x)}
             if types:
                 eclass_to_types[ec] = types
         self.eclass_to_types = eclass_to_types
@@ -536,12 +538,15 @@ class TypeInferData:
         # build map of eclass to trait
         eclass_to_trait = {}
         for ec, members in eclass_data.eclasses.items():
+
             def is_trait(x):
                 return x.type == "TypeProof" and not x.op.startswith("f_")
 
             traits = set(filter(is_trait, members))
             if traits:
-                eclass_to_trait[ec] = set(map(lambda x: eclass_data.terms[x.key], traits))
+                eclass_to_trait[ec] = set(
+                    map(lambda x: eclass_data.terms[x.key], traits)
+                )
         self.eclass_to_trait = eclass_to_trait
         # pprint(self.eclass_to_trait)
 
@@ -553,7 +558,9 @@ class TypeInferData:
         typevar_to_proof_eclass = {}
 
         for ec, members in eclass_data.eclasses.items():
-            proofs = [eclass_data.terms[x.key] for x in members if x.op == "f_proof"]
+            proofs = [
+                eclass_data.terms[x.key] for x in members if x.op == "f_proof"
+            ]
             for proof in proofs:
                 [child] = proof.children
                 tv_eclass = child.eclass
@@ -562,7 +569,9 @@ class TypeInferData:
         self.typevar_to_proof_eclass = typevar_to_proof_eclass
         # pprint(self.typevar_to_proof_eclass)
 
-    def prettyprint_typeset(self, tyset: set[egg_utils.Term], namer, *, use_trait=False):
+    def prettyprint_typeset(
+        self, tyset: set[egg_utils.Term], namer, *, use_trait=False
+    ):
 
         parts = []
         for term in tyset:
@@ -573,7 +582,7 @@ class TypeInferData:
                 parts = [f"({x})" for x in parts]
             return "*".join(parts)
         else:
-            return '|'.join(parts)
+            return "|".join(parts)
 
     def prettyprint_eclass(self, ec: str, namer, *, use_trait=False):
         if ec in stack:
@@ -584,25 +593,32 @@ class TypeInferData:
 
         stack.append(ec)
         with ExitStack() as raii:
+
             @raii.push
             def _(*exc):
                 stack.pop()
 
             tyset: set[egg_utils.Term]
             if use_trait:
+
                 def get_concrete(ec):
                     tys = self.eclass_to_types.get(ec)
                     # if tys:
                     #     return {t for t in tys if t.op != "TypeInfo.arrow"}
                     return tys
+
                 if concrete := get_concrete(ec):
-                    return self.prettyprint_typeset(concrete, namer, use_trait=False)
+                    return self.prettyprint_typeset(
+                        concrete, namer, use_trait=False
+                    )
                 else:
                     lookup = self.eclass_to_trait
             else:
-                lookup =self.eclass_to_types
-            if tyset:= lookup.get(ec):
-                return self.prettyprint_typeset(tyset, namer, use_trait=use_trait)
+                lookup = self.eclass_to_types
+            if tyset := lookup.get(ec):
+                return self.prettyprint_typeset(
+                    tyset, namer, use_trait=use_trait
+                )
             else:
                 return namer.get(ec)
 
@@ -618,8 +634,10 @@ class TypeInferData:
                 return f"{pp(ec_arg)}->{pp(ec_res)}"
             case "TypeInfo.tuple":
                 [args] = ty.children
-                eclasses = [x.eclass for x in self.eclass_data.terms[args.key].children]
-                parts = ', '.join(pp(x) for x in eclasses)
+                eclasses = [
+                    x.eclass for x in self.eclass_data.terms[args.key].children
+                ]
+                parts = ", ".join(pp(x) for x in eclasses)
                 return f"tuple[{parts}]"
             case "TypeInfo.typevar":
                 [arg] = ty.children
@@ -628,13 +646,17 @@ class TypeInferData:
             case "TypeInfo.merge":
                 [cond, args] = ty.children
                 # args must be a Vec
-                eclasses = [x.eclass for x in self.eclass_data.terms[args.key].children]
-                parts = ', '.join(pp(x) for x in eclasses)
+                eclasses = [
+                    x.eclass for x in self.eclass_data.terms[args.key].children
+                ]
+                parts = ", ".join(pp(x) for x in eclasses)
                 return f"Merge({pp(cond)}, {parts})"
             case "TypeProof.trait":
                 [op, args] = ty.children
                 # args must be a Vec
-                eclasses = [x.eclass for x in self.eclass_data.terms[args.key].children]
+                eclasses = [
+                    x.eclass for x in self.eclass_data.terms[args.key].children
+                ]
                 return f"(!{op.op} {' '.join(map(pp, eclasses))})"
             case "TypeProof.isa":
                 [lhs, rhs] = ty.children
@@ -648,7 +670,9 @@ class TypeInferData:
             case x:
                 assert False, x
 
+
 stack = []
+
 
 @dataclass(frozen=True)
 class TypeRef:
@@ -697,20 +721,28 @@ def build_egglog_statements(equiv_list, node_dct):
                         return node_dct.TypeInfo.type(name)
                     case ("TupleGetitem", tup_tv, idx):
                         assert isinstance(idx, int)
-                        return node_dct.f_tuple_getitem(proc_second(tup_tv), idx)
+                        return node_dct.f_tuple_getitem(
+                            proc_second(tup_tv), idx
+                        )
                     case ("Tuple", *elems):
                         return node_dct.make_tuple(*map(proc_second, elems))
                     case ("Lam", bodyexpr, argexpr):
-                        return node_dct.f_lam(proc_second(bodyexpr),
-                                              proc_second(argexpr))
+                        return node_dct.f_lam(
+                            proc_second(bodyexpr), proc_second(argexpr)
+                        )
                     case ("App", bodyexpr, argexpr):
-                        return node_dct.f_app(proc_second(bodyexpr),
-                                              proc_second(argexpr))
+                        return node_dct.f_app(
+                            proc_second(bodyexpr), proc_second(argexpr)
+                        )
                     case ("Func", opname, *args):
                         assert isinstance(opname, str)
-                        return node_dct.make_func(opname, *map(proc_second, args))
+                        return node_dct.make_func(
+                            opname, *map(proc_second, args)
+                        )
                     case ("Merge", cond, *args):
-                        return node_dct.make_merge(proc_second(cond), *map(proc_second, args))
+                        return node_dct.make_merge(
+                            proc_second(cond), *map(proc_second, args)
+                        )
                     case unknown:
                         raise ValueError(unknown)
             case ("result-of", func):
@@ -718,9 +750,13 @@ def build_egglog_statements(equiv_list, node_dct):
             case ("proof-of", func):
                 return node_dct.f_proof(proc_second(func))
             case ("isa", lhs, rhs):
-                return node_dct.TypeProof.isa(node_dct.f_proof(proc_second(lhs)), proc_second(rhs))
+                return node_dct.TypeProof.isa(
+                    node_dct.f_proof(proc_second(lhs)), proc_second(rhs)
+                )
             case ("or", lhs, rhs):
-                return node_dct.TypeProof.or_(proc_second(lhs), proc_second(rhs))
+                return node_dct.TypeProof.or_(
+                    proc_second(lhs), proc_second(rhs)
+                )
             case _:
                 raise ValueError(rhs.str())
 
@@ -749,7 +785,7 @@ def build_egglog_statements(equiv_list, node_dct):
 
 
 def test_typeinfer():
-    my_function =  make_sum_reduce_loop
+    my_function = make_sum_reduce_loop
 
     def my_function(lambar):
         @lambar.lam_func
@@ -766,7 +802,7 @@ def test_typeinfer():
     def my_function(lambar):
         @lambar.lam_func
         def func_body(x, y):
-            cond = lambar.expr("lt", x, y) # (lt x y)
+            cond = lambar.expr("lt", x, y)  # (lt x y)
 
             @scf.region(lambar)
             def true_branch(x, y):
@@ -774,7 +810,9 @@ def test_typeinfer():
 
             @scf.region(lambar)
             def false_branch(x, y):
-                return lambar.expr("mul", x, lambar.expr("int", 1))  # (mul x (int 1))
+                return lambar.expr(
+                    "mul", x, lambar.expr("int", 1)
+                )  # (mul x (int 1))
 
             tup = lambar.expr("tuple", x, y)
             n = lambar.expr("scf.switch", cond, tup, true_branch, false_branch)
@@ -793,18 +831,21 @@ def test_typeinfer():
 
     print(lambar.format(func_body))
 
-    type_expr_tree = ase.Tree()
+    type_expr_tree = ase.Tape()
     typeinfer = MakeTypeInferRules(type_expr_tree)
     func_body.apply_bottomup(typeinfer)
     map_op_to_typevar = typeinfer.memo
 
-    equiv_list = [expr for expr in type_expr_tree.iter_expr()
-                  if expr.head.startswith("rule-")]
+    equiv_list = [
+        expr
+        for expr in type_expr_tree.iter_expr()
+        if expr.head.startswith("rule-")
+    ]
 
-    print('equiv'.center(80, '-'))
+    print("equiv".center(80, "-"))
     for equiv in equiv_list:
         print(equiv.str())
-    print('=' * 80)
+    print("=" * 80)
 
     tyinferdata = do_egglog(equiv_list)
     namer = UnknownNamer()
@@ -813,10 +854,18 @@ def test_typeinfer():
         tv_key = str(op._handle)
 
         eclass = tyinferdata.typevar_to_eclass.get(tv_key)
-        print(f"typevar {tv_key} eclass {eclass}".center(80, '-'))
+        print(f"typevar {tv_key} eclass {eclass}".center(80, "-"))
         print("op", op.str())
-        print(f" type  {namer.get(eclass)} :: ", tyinferdata.prettyprint_eclass(eclass, namer))
+        print(
+            f" type  {namer.get(eclass)} :: ",
+            tyinferdata.prettyprint_eclass(eclass, namer),
+        )
 
         trait_eclass = tyinferdata.typevar_to_proof_eclass.get(tv_key)
-        print(f" proof {namer.get(trait_eclass)} :: ", last:=tyinferdata.prettyprint_eclass(trait_eclass, namer, use_trait=True))
-        print('trait_eclass', trait_eclass)
+        print(
+            f" proof {namer.get(trait_eclass)} :: ",
+            last := tyinferdata.prettyprint_eclass(
+                trait_eclass, namer, use_trait=True
+            ),
+        )
+        print("trait_eclass", trait_eclass)
