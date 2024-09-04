@@ -1,8 +1,11 @@
 from __future__ import annotations
 import sys
 import ast
-from typing import Type, TypeAlias
+import inspect
+from typing import Type, TypeAlias, Any
 from pprint import pprint
+from dataclasses import dataclass, field
+from collections import defaultdict, deque
 
 from numba_rvsdg.core.datastructures.ast_transforms import (
     unparse_code,
@@ -12,6 +15,7 @@ from numba_rvsdg.core.datastructures.ast_transforms import (
 
 from sealir import ase
 from sealir.lam import LamBuilder
+from sealir.rewriter import TreeRewriter
 
 
 SExpr: TypeAlias = ase.Expr
@@ -36,16 +40,16 @@ class ConvertToSExpr(ast.NodeTransformer):
         # decorator_list = [self.visit(x) for x in node.decorator_list]
         assert not node.decorator_list
         return ase.expr(
-            "Py_FunctionDef",
+            "PyAst_FunctionDef",
             fname,
             args,
-            ase.expr("Py_block", *body),
+            ase.expr("PyAst_block", *body),
             self.get_loc(node),
         )
 
     def visit_Return(self, node: ast.Return) -> SExpr:
         return ase.expr(
-            "Py_Return",
+            "PyAst_Return",
             self.visit(node.value),
             self.get_loc(node),
         )
@@ -57,13 +61,13 @@ class ConvertToSExpr(ast.NodeTransformer):
         assert not node.kw_defaults
         assert not node.defaults
         return ase.expr(
-            "Py_arguments",
+            "PyAst_arguments",
             *map(self.visit, node.args),
         )
 
     def visit_arg(self, node: ast.arg) -> SExpr:
         return ase.expr(
-            "Py_arg",
+            "PyAst_arg",
             node.arg,
             self.visit(node.annotation),
             self.get_loc(node),
@@ -73,15 +77,16 @@ class ConvertToSExpr(ast.NodeTransformer):
         print(ast.dump(node))
         match node.ctx:
             case ast.Load():
-                return ase.expr("Py_Name_ld", node.id)
+                ctx = 'load'
             case ast.Store():
-                return ase.expr("Py_Name_st", node.id)
+                ctx = 'store'
             case _:
                 raise NotImplementedError(node.ctx)
+        return ase.expr("PyAst_Name", node.id, ctx)
 
     def visit_Assign(self, node: ast.Assign) -> SExpr:
         return ase.expr(
-            "Py_Assign",
+            "PyAst_Assign",
             self.visit(node.value),
             *map(self.visit, node.targets),
             self.get_loc(node),
@@ -89,7 +94,7 @@ class ConvertToSExpr(ast.NodeTransformer):
 
     def visit_AugAssign(self, node: ast.AugAssign) -> SExpr:
         return ase.expr(
-            "Py_AugAssign",
+            "PyAst_AugAssign",
             self.map_op(node.op),
             self.visit(node.value),
             self.visit(node.target),
@@ -98,7 +103,7 @@ class ConvertToSExpr(ast.NodeTransformer):
 
     def visit_UnaryOp(self, node: ast.UnaryOp) -> SExpr:
         return ase.expr(
-            "Py_UnaryOp",
+            "PyAst_UnaryOp",
             self.map_op(node.op),
             self.visit(node.operand),
             self.get_loc(node),
@@ -106,7 +111,7 @@ class ConvertToSExpr(ast.NodeTransformer):
 
     def visit_BinOp(self, node: ast.BinOp) -> SExpr:
         return ase.expr(
-            "Py_BinOp",
+            "PyAst_BinOp",
             self.map_op(node.op),
             self.visit(node.left),
             self.visit(node.right),
@@ -121,7 +126,7 @@ class ConvertToSExpr(ast.NodeTransformer):
             case _:
                 raise NotImplementedError(op)
         return ase.expr(
-            "Py_Compare",
+            "PyAst_Compare",
             opname,
             self.visit(node.left),
             self.visit(comp),
@@ -131,9 +136,9 @@ class ConvertToSExpr(ast.NodeTransformer):
     def visit_Call(self, node: ast.Call) -> SExpr:
         # TODO
         assert not node.keywords
-        posargs = ase.expr("Py_callargs_pos", *map(self.visit, node.args))
+        posargs = ase.expr("PyAst_callargs_pos", *map(self.visit, node.args))
         return ase.expr(
-            "Py_Call",
+            "PyAst_Call",
             self.visit(node.func),
             posargs,
             self.get_loc(node),
@@ -143,13 +148,13 @@ class ConvertToSExpr(ast.NodeTransformer):
         # ("test", "body", "orelse")
         test = self.visit(node.test)
         body = ase.expr(
-            "Py_block",
+            "PyAst_block",
             *map(self.visit, node.body),
             self.get_loc(node),
         )
         assert not node.orelse
         return ase.expr(
-            "Py_While",
+            "PyAst_While",
             test,
             body,
             self.get_loc(node),
@@ -158,17 +163,17 @@ class ConvertToSExpr(ast.NodeTransformer):
     def visit_If(self, node: ast.If) -> SExpr:
         test = self.visit(node.test)
         body = ase.expr(
-            "Py_block",
+            "PyAst_block",
             *map(self.visit, node.body),
             self.get_loc(node),
         )
         orelse = ase.expr(
-            "Py_block",
+            "PyAst_block",
             *map(self.visit, node.orelse),
             self.get_loc(node),
         )
         return ase.expr(
-            "Py_If",
+            "PyAst_If",
             test,
             body,
             orelse,
@@ -180,18 +185,18 @@ class ConvertToSExpr(ast.NodeTransformer):
             match node.value:
                 case int():
                     return ase.expr(
-                        "Py_Constant_int",
+                        "PyAst_Constant_int",
                         node.value,
                         self.get_loc(node),
                     )
                 case None:
                     return ase.expr(
-                        "Py_None",
+                        "PyAst_None",
                         self.get_loc(node),
                     )
                 case str():
                     return ase.expr(
-                        "Py_Constant_str",
+                        "PyAst_Constant_str",
                         node.value,
                         self.get_loc(node),
                     )
@@ -208,7 +213,7 @@ class ConvertToSExpr(ast.NodeTransformer):
 
     def get_loc(self, node: ast.AST) -> SExpr:
         return ase.expr(
-            "Py_loc",
+            "PyAst_loc",
             node.lineno,
             node.col_offset,
             node.end_lineno,
@@ -223,30 +228,189 @@ def convert_to_sexpr(node: ast.AST):
     pprint(out.as_tuple(depth=2**30))
     return out
 
+@dataclass(frozen=True)
+class VariableInfo:
+    nonlocals: set[str]
+    loaded: set[str]
+    stored: set[str]
+    expr_effect: dict
+    block_effect: dict
 
 def find_variable_info(expr: SExpr):
-    loaded = {}
-    stored = {}
+    loaded: dict[str, SExpr] = {}
+    stored: dict[str, SExpr] = {}
 
     class FindVariableUse(ase.TreeVisitor):
         def visit(self, expr: SExpr):
-            match expr.as_tuple():
-                case ("Py_Name_ld", name):
+            match expr:
+                case ase.Expr("PyAst_Name", (name, "load")):
                     loaded[name] = expr
-                case ("Py_Name_st", name):
+                case ase.Expr("PyAst_Name", (name, "store")):
                     stored[name] = expr
-                case ("Py_arg", name, annotation):
+                case ase.Expr("PyAst_arg", (name,)):
                     stored[name] = expr
 
     expr.apply_bottomup(FindVariableUse())
 
-    pprint(loaded)
-    pprint(stored)
+
     nonlocals = set()
     for k in loaded:
         if k not in stored:
             nonlocals.add(k)
-    pprint(nonlocals)
+
+
+    @dataclass(frozen=True)
+    class VarEffect:
+        defs: set[str] = field(default_factory=set)
+        uses: set[str] = field(default_factory=set)
+
+        def define(self, name) -> None:
+            self.defs.add(name)
+
+        def use(self, name) -> None:
+            self.uses.add(name)
+
+        def merge(self, other: VarEffect) -> VarEffect:
+            self.defs.update(other.defs)
+            self.uses.update(other.uses)
+            return self
+
+    expr_effect: dict[SExpr, VarEffect] = defaultdict(VarEffect)
+
+    # block_effect tracks the variables used by each statement in a block.
+    # It shows which variable-uses are required for the remaining statements
+    # in the block to execute. Variable-defs are local to that statement.
+    block_effect: dict[SExpr, deque[VarEffect]] = defaultdict(deque)
+
+    class FindDataDependence(ase.TreeVisitor):
+        def visit(self, expr: SExpr):
+            match expr:
+                case ase.Expr("PyAst_block", body):
+                    blkeff = block_effect[expr]
+                    iter_stmt = iter(reversed(body))
+                    last = next(iter_stmt)
+
+                    blkeff.appendleft(VarEffect().merge(expr_effect[last]))
+                    for stmt in iter_stmt:
+                        lasteff = blkeff[0]
+                        # Start with the expression level effect.
+                        eff = VarEffect().merge(expr_effect[stmt])
+                        blkeff.appendleft(eff)
+                        # Keep track of future uses discounting newly defined
+                        eff.uses.update(lasteff.uses - expr_effect[stmt].defs)
+                        last = stmt
+                    expr_effect[expr] = blkeff[0]
+
+                case ase.Expr("PyAst_Name", (name, "load")):
+                    if name not in nonlocals:
+                        expr_effect[expr].use(name)
+                case ase.Expr("PyAst_Name", (name, "store")):
+                    expr_effect[expr].define(name)
+                case ase.Expr("PyAst_arg", (name,)):
+                    expr_effect[expr].define(name)
+                case _:
+                    for child in expr.args:
+                        if isinstance(child, ase.Expr):
+                            expr_effect[expr].merge(expr_effect[child])
+
+    expr.apply_bottomup(FindDataDependence())
+
+    return VariableInfo(
+        nonlocals=set(nonlocals),
+        loaded=set(loaded),
+        stored=set(stored),
+        expr_effect=expr_effect,
+        block_effect=block_effect,
+    )
+
+def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
+
+    lb = LamBuilder(prgm.tape)
+
+    def get_block(expr: SExpr) -> SExpr:
+        return next(expr.search_parents(lambda x: x.head == "PyAst_block"))
+
+    # XXX: THIS IS NOT THE ACTUAL ALGORITHM. JUST A MOCK
+    class Convert2RVSDG(TreeRewriter[SExpr]):
+        def rewrite_generic(self, orig: SExpr, args: tuple[Any, ...], updated: bool) -> SExpr:
+            raise NotImplementedError(orig.head)
+
+        def rewrite_PyAst_Name(self, orig: ase.Expr, name: str, ctx: str) -> SExpr:
+            if name in varinfo.nonlocals:
+                return lb.expr("py_load_global", name)
+            else:
+                match ctx:
+                    case "store":
+                        return name
+                    case "load":
+                        return lb.expr("py_load_var", name)
+                    case _:
+                        raise AssertionError(ctx)
+
+        def rewrite_PyAst_loc(self, orig: ase.Expr, *args) -> SExpr:
+            return orig
+
+        def rewrite_PyAst_arg(self, orig: ase.Expr, name: str, annotation: SExpr, loc: SExpr) -> SExpr:
+            return name
+
+        def rewrite_PyAst_arguments(self, orig: ase.Expr, *args: SExpr) -> SExpr:
+            return lb.expr("py_args", *args)
+
+        def rewrite_PyAst_Constant_int(self, orig: ase.Expr, val: int, loc: SExpr) -> SExpr:
+            return lb.expr("py_int", val)
+
+        def rewrite_PyAst_Constant_str(self, orig: ase.Expr, val: int, loc: SExpr) -> SExpr:
+            return lb.expr("py_str", val)
+
+        def rewrite_PyAst_None(self, orig: ase.Expr, loc: SExpr) -> SExpr:
+            return lb.expr("py_none")
+
+        def rewrite_PyAst_Assign(self, orig: ase.Expr, val: SExpr, *rest: SExpr) -> SExpr:
+            [*targets, loc] = rest
+            return lb.expr("py_assign", val, *targets)
+
+        def rewrite_PyAst_AugAssign(self, orig: ase.Expr, opname: str, left: SExpr, right: SExpr, loc: SExpr) -> SExpr:
+            return lb.expr("py_assign", lb.expr("py_binop", opname, left, right), left)
+
+        def rewrite_PyAst_callargs_pos(self, orig: ase.Expr, *args: SExpr) -> SExpr:
+            return args
+
+        def rewrite_PyAst_Call(self, orig: ase.Expr, func: SExpr, posargs: SExpr, loc: SExpr) -> SExpr:
+            return lb.expr("py_call", func, *posargs)
+
+        def rewrite_PyAst_Compare(self, orig: ase.Expr, opname: str, left: SExpr, right: SExpr, loc: SExpr) -> SExpr:
+            return lb.expr("py_compare", opname, left, right)
+
+        def rewrite_PyAst_block(self, orig: ase.Expr, *rest: SExpr) -> SExpr:
+            [*body, loc] = rest
+            return lb.expr("py_block", *body)
+
+        def rewrite_PyAst_If(self, orig: ase.Expr, test: SExpr, body: SExpr, orelse: SExpr, loc: SExpr) -> SExpr:
+            return lb.expr("py_if", test, body, orelse)
+
+        def rewrite_PyAst_While(self, orig: ase.Expr, *rest: SExpr) -> SExpr:
+            [*body, loc] = rest
+            return lb.expr("py_while", *body)
+
+        def rewrite_PyAst_UnaryOp(self, orig: ase.Expr, opname: str, val: SExpr, loc: SExpr) -> SExpr:
+            return lb.expr("py_unaryop", opname, val)
+
+        def rewrite_PyAst_Return(self, orig: ase.Expr, val: SExpr, loc: SExpr) -> SExpr:
+            return lb.expr("py_return", val)
+
+        def rewrite_PyAst_FunctionDef(self, orig: ase.Expr, fname: str, args: SExpr, body: SExpr, loc: SExpr) -> SExpr:
+            return lb.expr("py_func", fname, args, body)
+
+
+
+    rewriter = Convert2RVSDG()
+    with prgm.tape:
+        prgm.apply_bottomup(rewriter)
+
+    rewritten = rewriter.memo[prgm]
+    return rewritten
+
+
 
 
 def restructure_source(function):
@@ -260,21 +424,47 @@ def restructure_source(function):
 
     transformed_ast = ast.fix_missing_locations(transformed_ast)
 
+    breakpoint()
     print(ast.unparse(transformed_ast))
 
     prgm = convert_to_sexpr(transformed_ast)
 
-    find_variable_info(prgm)
+    varinfo = find_variable_info(prgm)
 
+    rvsdg = convert_to_rvsdg(prgm, varinfo)
+
+    print(rvsdg.str())
+    # DEMO FIND ORIGINAL AST
+    print('---py_range----')
+    def find_py_range(rvsdg):
+        for path, node in rvsdg.walk_descendants():
+            if node.args and node.args[0] == "py_call":
+                match node.args[1]:
+                    case ase.Expr("expr", ("py_load_global", "range")):
+                        return node
+
+    py_range = find_py_range(rvsdg)
+    print(py_range.str())
+
+    print('---find md----')
+    md = next(py_range.search_parents(lambda x: x.head == ".md.rewrite"))
+    (_, _, orig) = md.args
+    loc = orig.args[-1]
+
+    lines, offset = inspect.getsourcelines(function)
+    line_offset = loc.args[0]
+
+    print(offset + line_offset, '|', lines[line_offset])
+    rvsdg.tape.render_dot(show_metadata=True).view()
 
 ######################
 
 
-# def sum1d(n: int) -> int:
-#     c = 0
-#     for i in range(n):
-#         c += i
-#     return c
+def sum1d(n: int) -> int:
+    c = 0
+    for i in range(n):
+        c += i
+    return c
 
 # def sum1d(n: int) -> int:
 #     c = 0
@@ -286,12 +476,12 @@ def restructure_source(function):
 #     return c
 
 
-def sum1d(n: int) -> int:
-    c = 0
-    for i in range(n):
-        for j in range(i):
-            c += i + j
-    return c
+# def sum1d(n: int) -> int:
+#     c = 0
+#     for i in range(n):
+#         for j in range(i):
+#             c += i + j
+#     return c
 
 
 def main():
