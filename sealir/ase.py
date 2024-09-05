@@ -489,7 +489,7 @@ class Expr:
 
     def walk_descendants(self) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
         """Walk descendants of this Expr node.
-        Breath-first order.
+        Breath-first order. Left to right.
         """
         oldtree = self._tape
         crawler = TapeCrawler(oldtree)
@@ -497,6 +497,11 @@ class Expr:
         for parents, desc in crawler.walk_descendants():
             parent_exprs = tuple(map(lambda x: x.to_expr(), parents))
             yield parent_exprs, desc.to_expr()
+
+    def search_descendants(self, pred: Callable[[Expr], bool]) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
+        for parents, cur in self.walk_descendants():
+            if pred(cur):
+                yield parents, cur
 
     def contains(self, expr: Expr) -> bool:
         """Is `expr` part of this expression tree."""
