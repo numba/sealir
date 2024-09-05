@@ -20,18 +20,21 @@ to differentiate them from S-expression node indices.
 - **Fast Search**: The flat storage and integer-based representation enable fast
   searching and traversal of the S-expression tree.
 - **Non-recursive Processing**: The design eliminates the need for recursive 
-  functions to process the S-expression tree, simplifying the code and improving performance.
+  functions to process the S-expression tree, simplifying the code and improving 
+  performance.
 
 ### Design
 
-The core data structure is the `Tree` class, which manages the heap and token dictionary. The tree has the following key features:
+The core data structure is the `Tape` class, which manages the heap and token 
+dictionary. The tree has the following key features:
 
 - S-expressions are stored in a flat list (heap) of integers, where each 
   integer represents a node or a token.
 - Tokens (e.g., integers, strings, etc.) are stored in a separate dictionary, 
   with negative integer keys mapping to the tokens.
 - Immutability is enforced by the append-only heap. New nodes is added to the 
-  end of the heap. This ensures that for any expression node, its parent node appears later in the heap, while its child nodes appear earlier.
+  end of the heap. This ensures that for any expression node, its parent node 
+  appears later in the heap, while its child nodes appear earlier.
 - Traversing the expression tree bottom-up can be achieved by scanning the 
   heap from the start to the position of the root node. By the time a node is 
   visited, all its child nodes must have been visited.
