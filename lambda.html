@@ -1,0 +1,628 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+
+    <title>Lambda &#8212; SealIR</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/bootstrap.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+
+  
+  <link href="_static/vendor/fontawesome/6.5.2/css/all.min.css?digest=dfe6caa3a7d634c4db9b" rel="stylesheet" />
+  <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-solid-900.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
+<link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b76e3c8a" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=a3416100" />
+    <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=13237357" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-thebe.css?v=4fa983c6" />
+    <link rel="stylesheet" type="text/css" href="_static/design-style.1e8bd061cd6da7fc9cf755528e8ffc24.min.css?v=0a3b3ea7" />
+  
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b" />
+  <script src="_static/vendor/fontawesome/6.5.2/js/all.min.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+    <script src="_static/documentation_options.js?v=9eb32ce0"></script>
+    <script src="_static/doctools.js?v=9a2dae69"></script>
+    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=887ef09a"></script>
+    <script>let toggleHintShow = 'Click to show';</script>
+    <script>let toggleHintHide = 'Click to hide';</script>
+    <script>let toggleOpenOnPrint = 'true';</script>
+    <script src="_static/togglebutton.js?v=4a39c7ea"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script src="_static/design-tabs.js?v=36754332"></script>
+    <script>const THEBE_JS_URL = "https://unpkg.com/thebe@0.8.2/lib/index.js"; const thebe_selector = ".thebe,.cell"; const thebe_selector_input = "pre"; const thebe_selector_output = ".output, .cell_output"</script>
+    <script async="async" src="_static/sphinx-thebe.js?v=c100c467"></script>
+    <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
+    <script>const THEBE_JS_URL = "https://unpkg.com/thebe@0.8.2/lib/index.js"; const thebe_selector = ".thebe,.cell"; const thebe_selector_input = "pre"; const thebe_selector_output = ".output, .cell_output"</script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'lambda';</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="Introduction" href="intro.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  </head>
+  
+  
+  <body data-bs-spy="scroll" data-bs-target=".bd-toc-nav" data-offset="180" data-bs-root-margin="0px 0px -60%" data-default-mode="">
+
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-primary-sidebar-checkbox"/>
+  <label class="overlay overlay-primary" for="pst-primary-sidebar-checkbox"></label>
+  
+  <input type="checkbox"
+          class="sidebar-toggle"
+          id="pst-secondary-sidebar-checkbox"/>
+  <label class="overlay overlay-secondary" for="pst-secondary-sidebar-checkbox"></label>
+  
+  <div class="search-button__wrapper">
+    <div class="search-button__overlay"></div>
+    <div class="search-button__search-container">
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         id="search-input"
+         placeholder="Search this book..."
+         aria-label="Search this book..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form></div>
+  </div>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <div class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="intro.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">SealIR</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+ <script>
+ document.write(`
+   <button class="btn search-button-field search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass"></i>
+    <span class="search-button__default-text">Search</span>
+    <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+   </button>
+ `);
+ </script></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        
+        <ul class="nav bd-sidenav bd-sidenav__home-link">
+            <li class="toctree-l1">
+                <a class="reference internal" href="intro.html">
+                    Introduction
+                </a>
+            </li>
+        </ul>
+        <ul class="current nav bd-sidenav">
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Lambda</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+  </div>
+  
+  <div id="rtd-footer-container"></div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/lambda.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button" title="light/dark" aria-label="light/dark" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="theme-switch fa-solid fa-sun fa-lg" data-mode="light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg" data-mode="dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg" data-mode="auto"></i>
+  </button>
+`);
+</script>
+
+
+<script>
+document.write(`
+  <button class="btn btn-sm pst-navbar-icon search-button search-button__button" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+  </button>
+`);
+</script>
+
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Lambda</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="lambda">
+<h1>Lambda<a class="headerlink" href="#lambda" title="Link to this heading">#</a></h1>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">sealir.lam</span> <span class="kn">import</span> <span class="n">LamBuilder</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lambar</span> <span class="o">=</span> <span class="n">LamBuilder</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@lambar</span><span class="o">.</span><span class="n">lam_func</span>
+<span class="k">def</span> <span class="nf">func_body</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;mul&quot;</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;add&quot;</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;mul&quot;</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">d</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lambar</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">func_body</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>let $15 = λ {
+  let $3 = expr &#39;mul&#39; (arg 0) (expr &#39;num&#39; 2)
+  let $8 = expr &#39;add&#39; $3 (arg 0)
+  let $12 = expr &#39;sub&#39; $3 $8
+  let $14 = expr &#39;mul&#39; $8 $12
+}
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lambar</span><span class="o">.</span><span class="n">tape</span><span class="o">.</span><span class="n">dump</span><span class="p">())</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10fa333b0
+|      0 | &lt;0: none&gt;
+|      1 | arg 0
+|      5 | expr &#39;num&#39;, 2
+|     10 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
+|     16 | expr &#39;add&#39;, &lt;10&gt;, &lt;1&gt;
+|     22 | expr &#39;sub&#39;, &lt;10&gt;, &lt;16&gt;
+|     28 | expr &#39;mul&#39;, &lt;16&gt;, &lt;22&gt;
+|     34 | lam &lt;28&gt;
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lambar</span><span class="o">.</span><span class="n">render_dot</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<img alt="_images/ba33986f29e5ae06c27478ecacfdf8522cc2af59ca5476eaf0409c2cfdcc37a0.svg" src="_images/ba33986f29e5ae06c27478ecacfdf8522cc2af59ca5476eaf0409c2cfdcc37a0.svg" /></div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">func_body</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">run_abstraction_pass</span><span class="p">(</span><span class="n">func_body</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lambar</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">func_body</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>let $15 = λ {
+  let $12 = expr &#39;mul&#39; (arg 0) (expr &#39;num&#39; 2)
+  let $13 = λ {
+    let $7 = expr &#39;add&#39; (arg 0) (arg 1)
+    let $8 = λ {
+      let $2 = expr &#39;sub&#39; (arg 1) (arg 0)
+      let $6 = expr &#39;mul&#39; (arg 0) $2
+    }
+    let $11 = app $8 $7
+  }
+  let $14 = app $13 $12
+}
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lambar</span><span class="o">.</span><span class="n">tape</span><span class="o">.</span><span class="n">dump</span><span class="p">())</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10fa333b0
+|      0 | &lt;0: none&gt;
+|      1 | arg 0
+|      5 | expr &#39;num&#39;, 2
+|     10 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
+|     16 | expr &#39;add&#39;, &lt;10&gt;, &lt;1&gt;
+|     22 | expr &#39;sub&#39;, &lt;10&gt;, &lt;16&gt;
+|     28 | expr &#39;mul&#39;, &lt;16&gt;, &lt;22&gt;
+|     34 | lam &lt;28&gt;
+|     38 | arg 1
+|     42 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;38&gt;, &lt;1&gt;
+|     48 | arg 0
+|     52 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;48&gt;, &lt;10&gt;
+|     58 | expr &#39;add&#39;, &lt;48&gt;, &lt;38&gt;
+|     64 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;58&gt;, &lt;16&gt;
+|     70 | expr &#39;sub&#39;, &lt;48&gt;, &lt;58&gt;
+|     76 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;70&gt;, &lt;22&gt;
+|     82 | expr &#39;mul&#39;, &lt;58&gt;, &lt;70&gt;
+|     88 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;82&gt;, &lt;28&gt;
+|     94 | lam &lt;82&gt;
+|     98 | app &lt;94&gt;, &lt;10&gt;
+|    103 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
+|    109 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;103&gt;, &lt;10&gt;
+|    115 | expr &#39;add&#39;, &lt;103&gt;, &lt;1&gt;
+|    121 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;115&gt;, &lt;16&gt;
+|    127 | expr &#39;sub&#39;, &lt;103&gt;, &lt;115&gt;
+|    133 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;127&gt;, &lt;22&gt;
+|    139 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;98&gt;, &lt;28&gt;
+|    145 | lam &lt;98&gt;
+|    149 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;145&gt;, &lt;34&gt;
+|    155 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
+|    161 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;155&gt;, &lt;10&gt;
+|    167 | expr &#39;add&#39;, &lt;155&gt;, &lt;1&gt;
+|    173 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;167&gt;, &lt;16&gt;
+|    179 | expr &#39;sub&#39;, &lt;155&gt;, &lt;167&gt;
+|    185 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;179&gt;, &lt;22&gt;
+|    191 | expr &#39;mul&#39;, &lt;167&gt;, &lt;179&gt;
+|    197 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;191&gt;, &lt;28&gt;
+|    203 | lam &lt;191&gt;
+|    207 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;203&gt;, &lt;34&gt;
+|    213 | arg 2
+|    217 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;213&gt;, &lt;38&gt;
+|    223 | arg 1
+|    227 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;223&gt;, &lt;48&gt;
+|    233 | arg 0
+|    237 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;233&gt;, &lt;58&gt;
+|    243 | expr &#39;sub&#39;, &lt;223&gt;, &lt;233&gt;
+|    249 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;243&gt;, &lt;70&gt;
+|    255 | expr &#39;mul&#39;, &lt;233&gt;, &lt;243&gt;
+|    261 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;255&gt;, &lt;82&gt;
+|    267 | lam &lt;255&gt;
+|    271 | app &lt;267&gt;, &lt;58&gt;
+|    276 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
+|    282 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;276&gt;, &lt;10&gt;
+|    288 | expr &#39;add&#39;, &lt;276&gt;, &lt;1&gt;
+|    294 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;288&gt;, &lt;16&gt;
+|    300 | expr &#39;sub&#39;, &lt;276&gt;, &lt;288&gt;
+|    306 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;300&gt;, &lt;22&gt;
+|    312 | expr &#39;mul&#39;, &lt;288&gt;, &lt;300&gt;
+|    318 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;312&gt;, &lt;28&gt;
+|    324 | lam &lt;312&gt;
+|    328 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;324&gt;, &lt;34&gt;
+|    334 | expr &#39;add&#39;, &lt;48&gt;, &lt;38&gt;
+|    340 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;334&gt;, &lt;58&gt;
+|    346 | expr &#39;sub&#39;, &lt;48&gt;, &lt;334&gt;
+|    352 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;346&gt;, &lt;70&gt;
+|    358 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;271&gt;, &lt;82&gt;
+|    364 | lam &lt;271&gt;
+|    368 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;364&gt;, &lt;94&gt;
+|    374 | app &lt;364&gt;, &lt;276&gt;
+|    379 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;374&gt;, &lt;98&gt;
+|    385 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
+|    391 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;385&gt;, &lt;103&gt;
+|    397 | expr &#39;add&#39;, &lt;385&gt;, &lt;1&gt;
+|    403 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;397&gt;, &lt;115&gt;
+|    409 | expr &#39;sub&#39;, &lt;385&gt;, &lt;397&gt;
+|    415 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;409&gt;, &lt;127&gt;
+|    421 | lam &lt;374&gt;
+|    425 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;421&gt;, &lt;145&gt;
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lambar</span><span class="o">.</span><span class="n">render_dot</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<img alt="_images/18d341efd49a078f5760c367ec03630e6a1615dfcc84ebf434efbeed46839e66.svg" src="_images/18d341efd49a078f5760c367ec03630e6a1615dfcc84ebf434efbeed46839e66.svg" /></div>
+</div>
+</section>
+
+    <script type="text/x-thebe-config">
+    {
+        requestKernel: true,
+        binderOptions: {
+            repo: "binder-examples/jupyter-stacks-datascience",
+            ref: "master",
+        },
+        codeMirrorConfig: {
+            theme: "abcdef",
+            mode: "python"
+        },
+        kernelOptions: {
+            name: "python3",
+            path: "./."
+        },
+        predefinedOutput: true
+    }
+    </script>
+    <script>kernelName = 'python3'</script>
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="intro.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">Introduction</p>
+      </div>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Numba team
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2023.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script src="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b"></script>
+<script src="_static/scripts/pydata-sphinx-theme.js?digest=dfe6caa3a7d634c4db9b"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>
