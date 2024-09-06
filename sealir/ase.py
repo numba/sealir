@@ -458,11 +458,6 @@ class Expr:
             except StopIteration:
                 return False
             else:
-                print(
-                    expr.str(),
-                    "-->",
-                    list(expr.search_parents(lambda x: x in pending)),
-                )
                 return True
 
         memo: dict[Expr, tuple] = {}
