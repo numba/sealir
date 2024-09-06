@@ -15,8 +15,10 @@ to process such a S-expression tree.
 """
 
 from __future__ import annotations
+import sys
 import threading
 from typing import TypeAlias, Union, Iterator, Callable, Any
+from collections import Counter
 
 from dataclasses import dataclass
 from enum import IntEnum
@@ -415,23 +417,111 @@ class Expr:
     def is_metadata(self) -> bool:
         return self.head.startswith(metadata_prefix)
 
-    def as_tuple(self, depth: int = 1) -> tuple[Any, ...]:
+    @cached_property
+    def is_simple(self) -> bool:
         """
-        Recursively converts an Expr object to a tuple, with a specified depth
-        limit.
+        Checks if the expression is a simple expression,
+        where all arguments are not `Expr` objects.
+        """
+        return all(not isinstance(a, Expr) for a in self.args)
+
+    def as_tuple(self, depth: int = 1, dedup=False) -> tuple[Any, ...]:
+        """
+        Converts an Expr object to a tuple, with a specified depth limit.
 
         Args:
             depth (int): The maximum depth to traverse the Expr object.
-
+                         Set to -1 for unbounded.
         """
+        # nothing is actually going to be sys.maxsize big,
+        # so that's what we meant by unbounded.
+        depth = sys.maxsize if depth == -1 else depth
 
-        def recur(obj, depth):
-            if depth > 0 and isinstance(obj, Expr):
-                return obj.as_tuple(depth)
+        pending = []
+
+        occurrences: Counter[Expr] = Counter()
+        for parents, cur in self.walk_descendants():
+            occurrences.update([cur])
+            if len(parents) >= depth:
+                break
             else:
-                return obj
+                pending.append(cur)
 
-        return (self.head, *map(lambda x: recur(x, depth - 1), self.args))
+        dupset = {x for x, ct in occurrences.items() if ct > 1}
+        working_set = set(pending)
+
+        def multi_parents(expr: Expr) -> bool:
+            it = expr.search_parents(lambda x: x in working_set)
+            try:
+                next(it)
+                next(it)
+            except StopIteration:
+                return False
+            else:
+                print(
+                    expr.str(),
+                    "-->",
+                    list(expr.search_parents(lambda x: x in pending)),
+                )
+                return True
+
+        memo: dict[Expr, tuple] = {}
+
+        for cur in reversed(pending):
+            args = []
+            for arg in cur.args:
+                if dedup and arg in dupset and occurrences[arg] > 1:
+                    val = f"${arg._handle}"
+                else:
+                    val = memo.get(arg, arg)
+                occurrences[arg] -= 1
+                args.append(val)
+            if dedup and cur in dupset and multi_parents(cur):
+                out = (f"[${cur._handle}]", cur.head, *args)
+            else:
+                out = (cur.head, *args)
+            memo[cur] = out
+
+        return memo[self]
+
+    def as_dict(self) -> dict[str, dict]:
+        """
+        Converts the expression tree into a dictionary representation.
+
+        The `as_dict` method takes an Expr object and returns a dictionary
+        representation of the object. It uses a memoization technique to avoid
+        duplicate references.
+
+        The method also handles simple expressions (where all arguments are not
+        Expr objects) differently, by directly including the argument values in
+        the dictionary.
+        """
+        memo: dict[Expr, dict[str, dict]] = {}
+        seen_once = set()
+
+        class AsDict(TreeVisitor):
+            def visit(self, expr: Expr) -> None:
+                parts: list[dict | token_type] = []
+                for arg in expr.args:
+                    match arg:
+                        case Expr():
+                            if arg in seen_once:
+                                # This handles duplicated references
+                                parts.append(
+                                    dict(ref=f"{arg.head}-{arg._handle}")
+                                )
+                            else:
+                                ref = memo[arg]
+                                if not arg.is_simple:
+                                    seen_once.add(arg)
+                                parts.append(ref)
+                        case _:
+                            parts.append(arg)
+                k = f"{expr.head}-{expr._handle}"
+                memo[expr] = {k: dict(head=expr.head, args=tuple(parts))}
+
+        self.apply_bottomup(AsDict())
+        return memo[self]
 
     def __str__(self):
         return f"Expr({self.head}, {', '.join(map(repr, self.args))})"
@@ -473,8 +563,20 @@ class Expr:
             crawler.skip_to_record_end()
 
     def search_parents(self, pred: Callable[[Expr], bool]) -> Iterator[Expr]:
-        """Yields all Expr node `e` in parent nodes of `self` and
-        that `pred(e)` is True
+        for p in self.walk_parents():
+            if pred(p):
+                yield p
+
+    def search_ancestors(self, pred: Callable[[Expr], bool]) -> Iterator[Expr]:
+        """
+        Recursive breath-first search for parent expressions that match the
+        given predicate.
+
+        NOTE: Implementation is recursion-free.
+
+        This method performs a breath-first search starting from the current
+        expression, following the parent links up the expression tree. It yields
+        all parent expressions that satisfy the given predicate function.
         """
         candidates = deque(self.walk_parents())
         seen = set(candidates)
@@ -498,7 +600,9 @@ class Expr:
             parent_exprs = tuple(map(lambda x: x.to_expr(), parents))
             yield parent_exprs, desc.to_expr()
 
-    def search_descendants(self, pred: Callable[[Expr], bool]) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
+    def search_descendants(
+        self, pred: Callable[[Expr], bool]
+    ) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
         for parents, cur in self.walk_descendants():
             if pred(cur):
                 yield parents, cur

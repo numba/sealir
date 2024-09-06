@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
-from collections import defaultdict, Counter
+from collections import Counter
 
 from sealir.ase import Expr
 from .rewriter import TreeRewriter
@@ -17,13 +17,10 @@ def pretty_print(expr: Expr) -> str:
     ident: dict[Expr, int] = {}
     seen = set()
 
-    def is_simple_expr(expr: Expr):
-        return all(not isinstance(a, Expr) for a in expr.args)
-
     def fmt(arg):
         if not isinstance(arg, Expr):
             return repr(arg)
-        elif is_simple_expr(arg):
+        elif arg.is_simple:
             return formatted.get(arg)
 
         if arg in seen:

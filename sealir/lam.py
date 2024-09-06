@@ -196,9 +196,9 @@ class LamBuilder:
 
             # find parent lambda
             def parent_containing_this(x: ase.Expr):
-                return x.head == "lam" and x.contains(expr)
+                return x.head == "lam"
 
-            host_lam = first(expr.search_parents(parent_containing_this))
+            host_lam = first(expr.search_ancestors(parent_containing_this))
             # find remaining expressions in the lambda
             old_node, repl_node = replace_by_abstraction(self, host_lam, expr)
             repl[old_node] = repl_node
