@@ -403,6 +403,10 @@ class Expr:
     def tape(self) -> Tape:
         return self._tape
 
+    @property
+    def handle(self) -> int:
+        return self._handle
+
     @cached_property
     def head(self) -> str:
         tape = self._tape

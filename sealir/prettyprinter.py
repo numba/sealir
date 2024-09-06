@@ -8,6 +8,9 @@ from .rewriter import TreeRewriter
 
 
 def pretty_print(expr: Expr) -> str:
+    if expr.is_metadata:
+        return str(expr)
+
     oc = Occurrences()
     expr.apply_bottomup(oc)
     ctr = oc.memo[expr]
