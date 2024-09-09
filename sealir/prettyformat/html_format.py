@@ -9,16 +9,32 @@ from sealir.rewriter import TreeRewriter
 
 
 def to_html(root: Expr) -> str:
+
+    reachable = {node
+                 for _, node in root.walk_descendants_depth_first_no_repeat()}
+
     class ToHtml(TreeRewriter[str]):
+
+        reference_already = set()
+
         def rewrite_generic(self, orig: Expr, args: tuple[Any, ...], updated: bool) -> str | Expr:
-            memo = self.memo
-            if orig.is_metadata:
-                return orig
-            else:
+            if orig in reachable:
+                args = list(args)
+                for i, child in enumerate(orig.args):
+                    if isinstance(child, Expr):
+                        if child in self.reference_already:
+                            args[i] = f"<div class='handle_ref handle' data-ref='{child.handle}'>${child.handle}</div>"
+                        else:
+                            self.reference_already.add(child)
+
                 parts = [html.escape(orig.head)]
                 parts.extend(map(str, args))
-                out = f"<div class='sexpr'>{' '.join(parts)}</div>"
+                handle = f"<div class='handle_origin handle' data-ref='{orig.handle}'>${orig.handle}</div>"
+                out = f"<div class='sexpr'>{handle} {' '.join(parts)}</div>"
                 return out
+            else:
+                return None
+
 
     cvt = ToHtml()
     root.apply_bottomup(cvt)
@@ -34,21 +50,32 @@ def style_text():
     flex-wrap: wrap;
 }
 
+div {
+    background: none;
+}
+
 div.sexpr {
     display: flex;
-    flex-direction: column;
-    background-color: rgba(128, 128, 250, 0.05);
-    padding: 5px;
-    border: 1px solid #ccc;
-    margin: 4px;
+    flex-wrap: wrap;
+    justify-content: left;
+    align-items: center;
+
+    background: none;
+
+    margin: 2px;
+    margin-right: 0;
+    padding-left: 5px;
+    margin-left: 4px;
+    border-left: 1px solid #ccc;
+    border-right: none;
     cursor: pointer;
-    transition: transform 0.3s ease-in-out;
-    min-width: 800px; /* Set a minimum width to ensure proper spacing */
+
+    min-width: 100px; /* Set a minimum width to ensure proper spacing */
 }
 
 div.sexpr .collapsed {
-    font-size: .8em;
     color: #333333;
+    background-color: rgb(200, 200, 200);
 }
 
 div.sexpr .collapsed div.sexpr {
@@ -56,10 +83,36 @@ div.sexpr .collapsed div.sexpr {
 }
 
 div.sexpr:hover {
-    background-color: #f0f0f0;
-    box-shadow: 0 0 5px rgba(0, 0, 255, 0.5);
+    /* box-shadow: 0 0 5px rgba(0, 0, 255, 0.5); */
+
+  border-left-color: blue;
 }
 
+div.handle_origin {
+    font-size: 0.5em;
+    margin: 1px;
+    color: #999999
+}
+
+div.handle_ref {
+    padding: 1px;
+    margin: 1px;
+    text-decoration: underline;
+    color: #666666
+}
+
+.selected {
+    color: #ff0000;
+}
+
+#canvas {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+}
 </style>
 """
 
@@ -73,6 +126,7 @@ def write_html(content, file):
     print("</head>", file=file)
     print("<body>", file=file)
     print(f"<div class='sexpr-container'>{content}</div>", file=file)
+    print('<canvas id="canvas"></canvas>', file=file)
     print("</body>", file=file)
     print("</html>", file=file)
 
@@ -80,6 +134,7 @@ def script_text():
     out = """
 
 <script>
+
 document.addEventListener('DOMContentLoaded', function() {
     const sexprContainers = document.querySelectorAll('.sexpr-container');
 
@@ -106,12 +161,96 @@ document.addEventListener('DOMContentLoaded', function() {
         element.classList.add('collapsed');
 
         // Find all child elements
-        const children = element.querySelectorAll('*');
+
+        const children = element.querySelectorAll('div.sexpr');
         children.forEach(child => {
-            applyCollapseRecursive(child);
+            child.classList.add('collapsed');
+            // applyCollapseRecursive(child);
         });
+
     }
+
 });
+
+
+document.addEventListener('DOMContentLoaded', () => {
+    const handles = document.querySelectorAll('.handle');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    handles.forEach(handle => {
+        handle.addEventListener('mouseover', () => {
+            document.querySelectorAll(".selected").forEach(el => {
+                el.classList.remove('selected');
+            });
+
+
+            const refNNN = handle.dataset.ref;
+            const elementsWithSameRef = document.querySelectorAll(`[data-ref="${refNNN}"]`);
+
+            elementsWithSameRef.forEach(el => {
+                el.classList.add('selected');
+            });
+
+            drawEdges(ctx, Array.from(elementsWithSameRef).filter(node => {
+                const parent = node.closest('.sexpr');
+                return !parent || !parent.classList.contains("collapsed");
+            }));
+        });
+
+    });
+});
+
+function drawEdges(ctx, elements) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const centers = elements.map(el => {
+        const rect = el.getBoundingClientRect();
+        const scrollRect = document.scrollingElement.getBoundingClientRect();
+        const canvasX = rect.left + rect.width / 2;
+        const canvasY = rect.top + rect.height / 2;
+        return { x: canvasX, y: canvasY };
+    });
+
+    ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
+    ctx.lineWidth = 2;
+
+    for (let i = 0; i < centers.length - 1; i++) {
+        console.log(centers[i]);
+        ctx.beginPath();
+        ctx.moveTo(centers[i].x, centers[i].y);
+        ctx.lineTo(centers[i+1].x, centers[i+1].y);
+        ctx.stroke();
+    }
+}
+
+
+// Function to adjust SVG size
+function adjustSVGSize() {
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  const svgWidth = viewportWidth;
+  const svgHeight = viewportHeight;
+
+  // Set SVG dimensions
+  canvas.setAttribute('width', `${svgWidth}px`);
+  canvas.setAttribute('height', `${svgHeight}px`);
+
+  // Center the SVG
+  canvas.style.position = 'fixed';
+  canvas.style.top = '0';
+  canvas.style.left = '0';
+  canvas.style.width = `${viewportWidth}px`;
+  canvas.style.height = `${viewportHeight}px`;
+
+}
+
+
+window.addEventListener('scroll', adjustSVGSize);
+window.addEventListener('resize', adjustSVGSize);
 </script>
     """
     return out
