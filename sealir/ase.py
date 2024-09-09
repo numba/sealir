@@ -444,7 +444,7 @@ class Expr:
         pending = []
 
         occurrences: Counter[Expr] = Counter()
-        for parents, cur in self.walk_descendants():
+        for parents, cur in self.walk_descendants_depth_first_no_repeat():
             occurrences.update([cur])
             if len(parents) >= depth:
                 break
@@ -599,6 +599,23 @@ class Expr:
             parent_exprs = tuple(map(lambda x: x.to_expr(), parents))
             yield parent_exprs, desc.to_expr()
 
+    def walk_descendants_depth_first_no_repeat(
+        self,
+    ) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
+        """Walk descendants of this Expr node.
+        Depth-first order. Left to right. Avoid duplication.
+        """
+        stack = [(self, ())]
+        visited = set()
+        while stack:
+            node, parents = stack.pop()
+            if node not in visited:
+                visited.add(node)
+                yield parents, node
+                for arg in reversed(node.args):
+                    if isinstance(arg, Expr):
+                        stack.append((arg, (*parents, node)))
+
     def search_descendants(
         self, pred: Callable[[Expr], bool]
     ) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
@@ -666,7 +683,7 @@ class Expr:
         """
         Apply the TreeVisitor to every sexpr under `self` subtree.
         """
-        for _, node in self.walk_descendants():
+        for _, node in self.walk_descendants_depth_first_no_repeat():
             if not node.is_metadata:
                 visitor.visit(node)
 

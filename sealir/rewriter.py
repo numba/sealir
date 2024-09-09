@@ -31,7 +31,7 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         self.memo[expr] = res
         # Logic for save history
         if self.flag_save_history:
-            if res is not expr and isinstance(res, ase.Expr):
+            if res != expr and isinstance(res, ase.Expr):
                 # Insert code that maps replacement back to old
                 cls = type(self)
                 ase.expr(
