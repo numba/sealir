@@ -1,5 +1,5 @@
 from sealir import ase
-
+from collections.abc import Generator
 
 def test_bottom():
     tape = ase.Tape()
@@ -117,3 +117,28 @@ def test_calculator():
         return e
 
     assert expected() == result
+
+
+def test_calculator_traverse():
+    with ase.Tape():
+        a = ase.expr("num", 123)
+        b = ase.expr("num", 321)
+        c = ase.expr("add", a, a)
+        d = ase.expr("sub", c, b)
+        e = ase.expr("mul", b, d)
+
+    def calc(sexpr: ase.Expr, state: ase.TraverseState) -> Generator[ase.Expr, int, int]:
+        match sexpr:
+            case ase.Expr("num", (int(value),)):
+                return value
+            case ase.Expr("add", (ase.Expr() as lhs, ase.Expr() as rhs)):
+                return (yield lhs) + (yield rhs)
+            case ase.Expr("sub", (ase.Expr() as lhs, ase.Expr() as rhs)):
+                return (yield lhs) - (yield rhs)
+            case ase.Expr("mul", (ase.Expr() as lhs, ase.Expr() as rhs)):
+                return (yield lhs) * (yield rhs)
+            case _:
+                raise AssertionError(sexpr)
+
+    memo = e.traverse(calc)
+    print(memo)
