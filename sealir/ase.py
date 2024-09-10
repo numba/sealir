@@ -17,7 +17,8 @@ to process such a S-expression tree.
 from __future__ import annotations
 import sys
 import threading
-from typing import TypeAlias, Union, Iterator, Callable, Any
+from typing import TypeAlias, Union, Iterator, Callable, Any, TypeVar
+from collections.abc import Coroutine
 from collections import Counter
 
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ import html
 
 from .graphviz_support import graphviz_function
 
+
+T = TypeVar("T")
 
 class Context:
     _tls_context = threading.local()
@@ -445,11 +448,23 @@ class Expr:
 
         occurrences: Counter[Expr] = Counter()
         for parents, cur in self.walk_descendants_depth_first_no_repeat():
-            occurrences.update([cur])
             if len(parents) >= depth:
                 break
             else:
                 pending.append(cur)
+
+
+        # occurrences.update([cur])
+
+
+        class CountOccurrences(TreeVisitor):
+            def visit(self, node: Expr):
+                if not node.is_metadata:
+                    occurrences.update([cur])
+                    occurrences.update((x for x in node.args
+                                        if isinstance(x, Expr)))
+
+        self.apply_bottomup(CountOccurrences())
 
         dupset = {x for x, ct in occurrences.items() if ct > 1}
         working_set = set(pending)
@@ -616,12 +631,70 @@ class Expr:
                     if isinstance(arg, Expr):
                         stack.append((arg, (*parents, node)))
 
+    def walk_descendants_depth_first(
+        self,
+    ) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
+        """Walk descendants of this Expr node.
+        Depth-first order. Left to right.
+        """
+        stack = [(self, ())]
+        while stack:
+            node, parents = stack.pop()
+            yield parents, node
+            for arg in reversed(node.args):
+                if isinstance(arg, Expr):
+                    stack.append((arg, (*parents, node)))
+
     def search_descendants(
         self, pred: Callable[[Expr], bool]
     ) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
         for parents, cur in self.walk_descendants():
             if pred(cur):
                 yield parents, cur
+
+    def traverse(self, corofunc: Callable[[Expr, TraverseState], Coroutine[Expr, T, T]]) -> dict[Expr, T]:
+        """Traverses the expression tree rooted at the current node, applying
+        the provided coroutine function to each node in a depth-first order.
+        The traversal is memoized, so that if a node is encountered more than
+        once, the result from the first visit is reused. The function returns
+        a dictionary mapping each visited node to the value returned by the
+        coroutine function for that node.
+        """
+        stack: list[tuple[Coroutine[Expr, T, T], Expr, Expr]]
+        stack = []
+        memo = {}
+        cur_node = self
+        state = TraverseState(parents=[])
+        coro = corofunc(cur_node, state)
+
+
+        def handle_coro(to_send):
+            try:
+                item = coro.send(to_send)
+            except StopIteration as stopped:
+                memo[cur_node] = stopped.value
+                if stack:
+                    state.parents.pop()
+                    return True, stack.pop()
+                else:
+                    return False, (None, None, None)
+            else:
+                return True, (coro, cur_node, item)
+
+        status, (coro, cur_node, item) = handle_coro(None)
+        while status:
+            # Loop starts with a fresh item
+            if item in memo:
+                # Already processed?
+                status, (coro, cur_node, item) = handle_coro(memo[item])
+            else:
+                # Not yet seen?
+                stack.append((coro, cur_node, item))
+                state.parents.append(cur_node)
+                coro, cur_node = corofunc(item, state), item
+                status, (coro, cur_node, item) = handle_coro(None)
+
+        return memo
 
     def contains(self, expr: Expr) -> bool:
         """Is `expr` part of this expression tree."""
@@ -665,19 +738,25 @@ class Expr:
 
     # Apply API
 
-    def apply_bottomup(self, visitor: TreeVisitor) -> None:
+    def apply_bottomup(self, visitor: TreeVisitor, *, reachable: set[Expr] | None = None) -> None:
         """
         Apply the TreeVisitor to every sexpr bottom up.
         When a sexpr is visited, it's children must have been visited prior.
         It will visit more that the subtree under `self`.
         """
+
         crawler = TapeCrawler(self._tape)
-        crawler.move_to_first_record()
+        if reachable:
+            first_reachable = min(reachable)
+            crawler.seek(first_reachable._handle)
+        else:
+            crawler.move_to_first_record()
         for rec in crawler.walk():
             if rec.handle <= self._handle:  # visit all younger
                 ex = rec.to_expr()
-                if not ex.is_metadata:
-                    visitor.visit(ex)
+                if not reachable or ex in reachable:
+                    if not ex.is_metadata:
+                        visitor.visit(ex)
 
     def apply_topdown(self, visitor: TreeVisitor) -> None:
         """
@@ -808,3 +887,8 @@ def expr(head: str, *args: value_type) -> Expr:
 def _select(iterable, idx: int):
     for args in iterable:
         yield args[idx]
+
+
+@dataclass(frozen=True)
+class TraverseState:
+    parents: list[Expr]
