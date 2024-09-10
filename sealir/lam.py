@@ -228,10 +228,8 @@ def replace_by_abstraction(
     """
     # Find lambda depth of children in the lambda node
     lam_depth_map = {}
-    for parents, child in lamexpr.walk_descendants():
+    for parents, child in lamexpr.walk_descendants_depth_first_no_repeat():
         lam_depth_map[child] = len([p for p in parents if p.head == "lam"])
-
-    lam_depth = lam_depth_map[child]
 
     # rewrite these children nodes into a new lambda abstraction
     # replacing the `anchor` node with an arg node.
@@ -274,6 +272,7 @@ def rewrite_into_abstraction(
 
     rewrite = RewriteAddArg()
     with lambar.tape:
+        print("running RewriteAddArg", len(lambar.tape))
         root.apply_bottomup(rewrite)
     out_expr = rewrite.memo[root]
     return out_expr

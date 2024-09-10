@@ -22,7 +22,7 @@ def to_html(root: Expr) -> str:
                 args = list(args)
                 for i, child in enumerate(orig.args):
                     if isinstance(child, Expr):
-                        if child in self.reference_already:
+                        if not child.is_simple and child in self.reference_already:
                             args[i] = f"<div class='handle_ref handle' data-ref='{child.handle}'>${child.handle}</div>"
                         else:
                             self.reference_already.add(child)
@@ -58,15 +58,18 @@ div.sexpr {
     display: flex;
     flex-wrap: wrap;
     justify-content: left;
-    align-items: center;
+    align-items: top;
 
     background: none;
 
     margin: 2px;
     margin-right: 0;
+    padding-top: 2px;
     padding-left: 5px;
     margin-left: 4px;
-    border-left: 1px solid #ccc;
+    border: 1px solid #ccc;
+    border-left: 2px solid #ccc;
+    border-bottom: none;
     border-right: none;
     cursor: pointer;
 
