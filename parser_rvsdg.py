@@ -779,18 +779,7 @@ def restructure_source(function):
 
     # return
 
-    lb = LamBuilder(lam.tape)
-
-    ctx = EvalCtx.from_arguments(10, 300)
-    with lam.tape:
-        app_root = lb.app(lam, *ctx.make_arg_node())
-
-    out = lb.format(app_root)
-    print(out)
-
-    memo = app_root.traverse(lambda_evaluation, EvalLamState(context=ctx))
-    res = memo[app_root]
-    print('result', res)
+    return lam
 
     # # DEMO FIND ORIGINAL AST
     # print('---py_range----')
@@ -965,10 +954,59 @@ def sum1d(n: int, m: int) -> int:
 #             c += i + j
 #     return c
 
+def test_return_arg0():
+    def udt(n: int, m: int) -> int:
+        return n
+    args = (12, 32)
+    run(udt, args)
 
-def main():
-    source = restructure_source(sum1d)
-    print(source)
+def test_return_arg1():
+    def udt(n: int, m: int) -> int:
+        return m
+
+    args = (12, 32)
+    run(udt, args)
+
+def test_simple_add():
+    def udt(n: int, m: int) -> int:
+        a = n + m
+        return a
+
+    args = (12, 32)
+    run(udt, args)
+
+def test_inplace_add():
+    def udt(n: int, m: int) -> int:
+        a = n + m
+        a += n
+        return a
+    args = (12, 32)
+    run(udt, args)
 
 
-main()
+
+
+
+def run(func, args):
+    lam = restructure_source(func)
+
+    # Prepare run
+    lb = LamBuilder(lam.tape)
+
+    ctx = EvalCtx.from_arguments(*args)
+    with lam.tape:
+        app_root = lb.app(lam, *ctx.make_arg_node())
+
+    out = lb.format(app_root)
+    print(out)
+
+    memo = app_root.traverse(lambda_evaluation, EvalLamState(context=ctx))
+    res = memo[app_root]
+    print('result', res)
+    got = res[1]
+
+    assert got == func(*args)
+    return got
+
+
+
