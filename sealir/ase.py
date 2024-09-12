@@ -21,7 +21,7 @@ from typing import TypeAlias, Union, Iterator, Callable, Any, TypeVar
 from collections.abc import Coroutine
 from collections import Counter
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 from pprint import pformat
 from functools import cached_property
@@ -369,6 +369,11 @@ class Tape:
             raise HeapOverflow
 
 
+@dataclass(frozen=True, kw_only=True)
+class TraverseState:
+    parents: list[Expr] = field(default_factory=list)
+
+
 metadata_prefix = "."
 
 
@@ -652,7 +657,8 @@ class Expr:
             if pred(cur):
                 yield parents, cur
 
-    def traverse(self, corofunc: Callable[[Expr, TraverseState], Coroutine[Expr, T, T]]) -> dict[Expr, T]:
+    def traverse(self, corofunc: Callable[[Expr, TraverseState], Coroutine[Expr, T, T]],
+                 state: TraverseState | None = None) -> dict[Expr, T]:
         """Traverses the expression tree rooted at the current node, applying
         the provided coroutine function to each node in a depth-first order.
         The traversal is memoized, so that if a node is encountered more than
@@ -664,7 +670,7 @@ class Expr:
         stack = []
         memo = {}
         cur_node = self
-        state = TraverseState(parents=[])
+        state = state or TraverseState()
         coro = corofunc(cur_node, state)
 
 
@@ -888,7 +894,3 @@ def _select(iterable, idx: int):
     for args in iterable:
         yield args[idx]
 
-
-@dataclass(frozen=True)
-class TraverseState:
-    parents: list[Expr]
