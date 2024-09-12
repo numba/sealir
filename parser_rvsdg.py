@@ -866,13 +866,14 @@ def ensure_io(obj: Any) -> EvalIO:
 def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
     indent = len(state.parents)
     ctx = state.context
+    from sealir.lam import _app
     try:
         print(" " * indent, "EVAL", expr.handle, expr.as_tuple(2))
         match expr:
             case ase.Expr("lam", (body,)):
                 retval = (yield body)
                 return retval
-            case ase.Expr("app", (ase.Expr() as lam_func, argval)):
+            case ase.Expr("app", (argval, ase.Expr() as lam_func)):
                 with ctx.bind_app(lam_func, (yield argval)):
                     retval = (yield lam_func)
                     return retval

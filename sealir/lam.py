@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 import types
 import inspect
 from collections import defaultdict, Counter
@@ -8,6 +8,11 @@ from collections import defaultdict, Counter
 from sealir import ase
 from sealir.rewriter import TreeRewriter
 from sealir.itertools import first
+
+
+class _app(NamedTuple):
+    arg: ase.Expr
+    body: ase.Expr
 
 
 class LamBuilder:
@@ -112,7 +117,7 @@ class LamBuilder:
             out = lam
             while stack:
                 arg = stack.pop()
-                out = ase.expr("app", out, arg)
+                out = ase.expr("app", *_app(body=out, arg=arg))
         return out
 
     def beta_reduction(self, app_expr: ase.Expr) -> ase.Expr:
@@ -124,9 +129,7 @@ class LamBuilder:
         app_exprs = []
         while app_expr.head == "app":
             app_exprs.append(app_expr)
-            assert len(app_expr.args) == 2
-            assert isinstance(app_expr.args[0], ase.Expr)
-            app_expr = app_expr.args[0]
+            app_expr = _app(*app_expr.args).body
         napps = len(app_exprs)
 
         arg2repl = {}
@@ -135,10 +138,12 @@ class LamBuilder:
             if child.head == "arg":
                 lams = [x for x in parents if x.head == "lam"]
                 if len(lams) <= napps:  # don't go deeper
-                    debruijn = child.args[0]
+                    [debruijn] = child.args
                     # in range?
                     if isinstance(debruijn, int) and debruijn < len(lams):
-                        arg2repl[debruijn] = app_exprs[-debruijn - 1].args[1]
+                        arg2repl[debruijn] = _app(
+                            *app_exprs[-debruijn - 1].args
+                        ).arg
                         drops.add(lams[-debruijn - 1])
 
         assert arg2repl
@@ -419,5 +424,10 @@ class BetaReduction(TreeRewriter[ase.Expr]):
         elif old in self._drops:
             # Drop the lambda
             assert old.head in {"app", "lam"}
-            return args[0]
+            match old.head:
+                case "app":
+                    return _app(*args).body
+                case "lam":
+                    return args[0]
+
         return super().rewrite_generic(old, args, updated)
