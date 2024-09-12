@@ -2,7 +2,8 @@ from __future__ import annotations
 import sys
 import ast
 import inspect
-from typing import Type, TypeAlias, Any, Iterator, Sequence
+from contextlib import contextmanager
+from typing import Type, TypeAlias, Any, Iterator, Sequence, Iterable, NamedTuple
 from pprint import pprint, pformat
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
@@ -16,13 +17,14 @@ from numba_rvsdg.core.datastructures.ast_transforms import (
 from sealir import ase
 from sealir.lam import LamBuilder
 from sealir.rewriter import TreeRewriter
-
+from sealir.itertools import first, maybe_first
 
 SExpr: TypeAlias = ase.Expr
 
 
 def pp(expr: SExpr):
     print(pformat(expr.as_tuple(-1, dedup=True)).replace(',', '').replace('\'', ''))
+    # print(pformat(expr.as_dict()))
 
 
 class ConvertToSExpr(ast.NodeTransformer):
@@ -129,6 +131,8 @@ class ConvertToSExpr(ast.NodeTransformer):
                 opname = "!="
             case ast.Gt():
                 opname = ">"
+            case ast.In():
+                opname = "in"
             case _:
                 raise NotImplementedError(op)
         return ase.expr(
@@ -205,6 +209,18 @@ class ConvertToSExpr(ast.NodeTransformer):
                     )
         raise NotImplementedError(ast.dump(node))
 
+    def visit_Tuple(self, node: ast.Tuple) -> SExpr:
+        match node:
+            case ast.Tuple(elts=[*constants], ctx=ast.Load()):
+                # e.g. Tuple(elts=[Constant(value=0)], ctx=Load())
+                return ase.expr(
+                    "PyAst_Tuple",
+                    *map(self.visit, constants),
+                    self.get_loc(node),
+                )
+
+        raise NotImplementedError(ast.dump(node))
+
     def map_op(self, node: ast.operator) -> str:
         match node:
             case ast.Add():
@@ -241,9 +257,9 @@ class VariableInfo:
     args: tuple[str]
     loaded: set[str]
     stored: set[str]
-    expr_effect: dict
-    block_effect: dict
-    assign_map: dict
+    # expr_effect: dict
+    # block_effect: dict
+    # assign_map: dict
 
 def find_variable_info(expr: SExpr):
     loaded: dict[str, SExpr] = {}
@@ -299,48 +315,48 @@ def find_variable_info(expr: SExpr):
             self.uses.update(other.uses)
             return self
 
-    expr_effect: dict[SExpr, VarEffect] = defaultdict(VarEffect)
+    # expr_effect: dict[SExpr, VarEffect] = defaultdict(VarEffect)
 
-    # block_effect tracks the variables used by each statement in a block.
-    # It shows which variable-uses are required for the remaining statements
-    # in the block to execute. Variable-defs are local to that statement.
-    block_effect: dict[SExpr, deque[VarEffect]] = defaultdict(deque)
+    # # block_effect tracks the variables used by each statement in a block.
+    # # It shows which variable-uses are required for the remaining statements
+    # # in the block to execute. Variable-defs are local to that statement.
+    # block_effect: dict[SExpr, deque[VarEffect]] = defaultdict(deque)
 
-    class FindDataDependence(ase.TreeVisitor):
-        def visit(self, expr: SExpr):
-            match expr:
-                case ase.Expr("PyAst_block", body):
-                    blkeff = block_effect[expr]
-                    iter_stmt = iter(reversed(body))
-                    last = next(iter_stmt)
-                    blkeff.appendleft(VarEffect().merge(expr_effect[last]))
-                    for stmt in iter_stmt:
-                        lasteff = blkeff[0]
-                        # Start with the expression level effect.
-                        eff = VarEffect().merge(expr_effect[stmt])
-                        blkeff.appendleft(eff)
-                        # Keep track of future uses discounting newly defined
-                        eff.uses.update(lasteff.uses - expr_effect[stmt].defs)
-                        last = stmt
-                    expr_effect[expr] = blkeff[0]
+    # class FindDataDependence(ase.TreeVisitor):
+    #     def visit(self, expr: SExpr):
+    #         match expr:
+    #             case ase.Expr("PyAst_block", body):
+    #                 blkeff = block_effect[expr]
+    #                 iter_stmt = iter(reversed(body))
+    #                 last = next(iter_stmt)
+    #                 blkeff.appendleft(VarEffect().merge(expr_effect[last]))
+    #                 for stmt in iter_stmt:
+    #                     lasteff = blkeff[0]
+    #                     # Start with the expression level effect.
+    #                     eff = VarEffect().merge(expr_effect[stmt])
+    #                     blkeff.appendleft(eff)
+    #                     # Keep track of future uses discounting newly defined
+    #                     eff.uses.update(lasteff.uses - expr_effect[stmt].defs)
+    #                     last = stmt
+    #                 expr_effect[expr] = blkeff[0]
 
-                case ase.Expr("PyAst_Name", (name, "load", loc)):
-                    if name not in nonlocals:
-                        expr_effect[expr].use(name)
-                case ase.Expr("PyAst_Name", (name, "store", loc)):
-                    expr_effect[expr].define(name)
-                case ase.Expr("PyAst_arg", (name, anno, loc)):
-                    expr_effect[expr].define(name)
-                case _ if expr.head in {"PyAst_Name", "PyAst_arg", "PyAst_block"}:
-                    raise AssertionError(expr)
-                case _:
-                    for child in expr.args:
-                        if isinstance(child, ase.Expr):
-                            expr_effect[expr].merge(expr_effect[child])
+    #             case ase.Expr("PyAst_Name", (name, "load", loc)):
+    #                 if name not in nonlocals:
+    #                     expr_effect[expr].use(name)
+    #             case ase.Expr("PyAst_Name", (name, "store", loc)):
+    #                 expr_effect[expr].define(name)
+    #             case ase.Expr("PyAst_arg", (name, anno, loc)):
+    #                 expr_effect[expr].define(name)
+    #             case _ if expr.head in {"PyAst_Name", "PyAst_arg", "PyAst_block"}:
+    #                 raise AssertionError(expr)
+    #             case _:
+    #                 for child in expr.args:
+    #                     if isinstance(child, ase.Expr):
+    #                         expr_effect[expr].merge(expr_effect[child])
 
-    expr.apply_bottomup(FindDataDependence())
+    # expr.apply_bottomup(FindDataDependence())
 
-    assign_map = defaultdict(dict)
+    # assign_map = defaultdict(dict)
 
     # def track_assignments(root: SExpr):
     #     """
@@ -398,9 +414,9 @@ def find_variable_info(expr: SExpr):
         args=arguments,
         loaded=set(loaded),
         stored=set(stored),
-        expr_effect=expr_effect,
-        block_effect=block_effect,
-        assign_map=assign_map,
+        # expr_effect=expr_effect,
+        # block_effect=block_effect,
+        # assign_map=assign_map,
     )
 
 def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
@@ -413,18 +429,21 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                 case ase.Expr("var_load", (".io",)):
                     return True
         return False
-    def unpack(val: SExpr, targets: Sequence[str], *, force_io=False) -> Iterator[tuple[SExpr, str]]:
+    def unpack(val: SExpr, targets: Sequence[str], *, force_io=False) -> Iterable[tuple[SExpr, str]]:
         if force_io or uses_io(val):
             targets  = (".io", *targets)
         if len(targets) == 1:
-            yield val, targets[0]
+            yield (val, targets[0])
         else:
+            packed_name = f".packed.{val.handle}"
+            yield val, packed_name
             for i, target in enumerate(targets):
-                yield ase.expr("unpack", val, i), target
+                packed = ase.expr("var_load", packed_name)
+                yield ase.expr("unpack", i, packed), target
 
     def lookup(blk: ase.Expr):
         defs = set()
-        class FindLet:
+        class FindLet(ase.TreeVisitor):
             def visit(self, expr: SExpr):
                 match expr:
                     case ase.Expr("let", (varname, *_)):
@@ -433,8 +452,9 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         blk.apply_topdown(FindLet())
         return defs
 
-    # XXX: THIS IS NOT THE ACTUAL ALGORITHM. JUST A MOCK
     class Convert2RVSDG(TreeRewriter[SExpr]):
+        """Convert to RVSDG with Let-binding
+        """
         def rewrite_generic(self, orig: SExpr, args: tuple[Any, ...], updated: bool) -> SExpr:
             raise NotImplementedError(orig.head)
 
@@ -444,7 +464,7 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             else:
                 match ctx:
                     case "store":
-                        return name
+                        return ase.expr("var_store", name)
                     case "load":
                         return ase.expr("var_load", name)
                     case _:
@@ -468,12 +488,17 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_None(self, orig: ase.Expr, loc: SExpr) -> SExpr:
             return ase.expr("py_none")
 
+        def rewrite_PyAst_Tuple(self, orig: ase.Expr, *rest: SExpr) -> SExpr:
+            [*elts, loc] = rest
+            return ase.expr("py_tuple", *elts)
+
         def rewrite_PyAst_Assign(self, orig: ase.Expr, val: SExpr, *rest: SExpr) -> SExpr:
             [*targets, loc] = rest
-            return ase.expr("assign", val, *targets)
+            return ase.expr("assign", val, *(t.args[0] for t in targets))
 
         def rewrite_PyAst_AugAssign(self, orig: ase.Expr, opname: str, left: SExpr, right: SExpr, loc: SExpr) -> SExpr:
-            return ase.expr("assign", ase.expr("py_inplace_binop", opname, left, right), left)
+            [name] = left.args
+            return ase.expr("assign", ase.expr("py_inplace_binop", opname, self.get_io(), ase.expr("var_load", name), right), name)
 
         def rewrite_PyAst_callargs_pos(self, orig: ase.Expr, *args: SExpr) -> SExpr:
             return args
@@ -489,8 +514,10 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             for stmt in reversed(body):
                 match stmt:
                     case ase.Expr("assign", (val, *targets)):
-                        for unpacked, target in reversed(list(unpack(val, targets))):
+                        iterable = unpack(val, targets)
+                        for unpacked, target in reversed(list(iterable)):
                             last = ase.expr("let", target, unpacked, last)
+
                     case ase.Expr("py_if", (test, blk_true, blk_false)):
                         # look up variable in each block to find variable
                         # definitions
@@ -499,20 +526,37 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                         defs = sorted(defs_true | defs_false)
 
                         if uses_io(test):
-                            [(io, iovar), (cond, _)] = unpack(test, ["cond"], force_io=True)
+                            [(unpack_cond, unpack_name), (io, iovar), (cond, _)] = unpack(test, [".cond"], force_io=True)
                             stmt = ase.expr("scfg_if", cond, blk_true, blk_false)
                             stmt = ase.expr("let", iovar, io, stmt)
+                            stmt = ase.expr("let", unpack_name, unpack_cond, stmt)
 
-                        for i, var in reversed(list(enumerate(defs))):
-                            extract = ase.expr("unpack", stmt, i)
-                            last = ase.expr("let", var, extract, last)
+                        iterable = unpack(stmt, defs)
+                        for unpacked, target in reversed(list(iterable)):
+                            last = ase.expr("let", target, unpacked, last)
                     case ase.Expr("scfg_while", (ase.Expr() as test, loopblk)):
                         defs = sorted(lookup(loopblk))
-                        for i, var in reversed(list(enumerate(defs))):
-                            extract = ase.expr("unpack", stmt, i)
-                            last = ase.expr("let", var, extract, last)
 
-                    case ase.Expr("py_pass" | "py_return"):
+                        iterable = unpack(stmt, defs)
+                        for unpacked, target in reversed(list(iterable)):
+                            last = ase.expr("let", target, unpacked, last)
+
+                    case ase.Expr("py_return", (retval,)):
+                        output = list(unpack(retval, [".retval"]))
+                        match output:
+                            case [(unpack_cond, unpack_name), (io, iovar), (value, valuevar)]:
+                                stmt = ase.expr("py_return", ase.expr("var_load", iovar), ase.expr("var_load", valuevar))
+                                stmt = ase.expr("let", valuevar, value, stmt)
+                                stmt = ase.expr("let", iovar, io, stmt)
+                                stmt = ase.expr("let", unpack_name, unpack_cond, stmt)
+                                last = stmt
+                            case [(value, valuevar)]:
+                                stmt = ase.expr("py_return", self.get_io(), value)
+                                # stmt = ase.expr("let", valuevar, value, stmt)
+                                last = stmt
+                            case _:
+                                assert False
+                    case ase.Expr("py_pass"):
                         last = stmt
                     case _:
                         raise AssertionError(stmt)
@@ -536,8 +580,8 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_BinOp(self, orig: ase.Expr, opname: str, lhs: SExpr, rhs: SExpr, loc: SExpr) -> SExpr:
             return ase.expr("py_binop", opname, self.get_io(), lhs, rhs)
 
-        def rewrite_PyAst_Return(self, orig: ase.Expr, val: SExpr, loc: SExpr) -> SExpr:
-            return ase.expr("py_return", self.get_io(), val)
+        def rewrite_PyAst_Return(self, orig: ase.Expr, retval: SExpr, loc: SExpr) -> SExpr:
+            return ase.expr("py_return", retval)
 
         def rewrite_PyAst_FunctionDef(self, orig: ase.Expr, fname: str, args: SExpr, body: SExpr, loc: SExpr) -> SExpr:
             return ase.expr("py_func", fname, args, body)
@@ -583,6 +627,116 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
     return rewritten
 
 
+
+def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
+    lb = LamBuilder(prgm.tape)
+
+    match prgm:
+        case ase.Expr("py_func", (str(fname), ase.Expr("py_args", args), *_)):
+            parameters = (".io", *args)
+        case _:
+            raise AssertionError(prgm.as_tuple(1))
+
+    arity = len(parameters)
+
+
+    let_uses: dict[SExpr, int] = defaultdict(int)
+    parent_let_map: dict[SExpr, SExpr] = {}
+    var_depth_map: dict[SExpr, int] = {}
+    def find_parent_let(parents, var_load: ase.Expr, *, excludes=()):
+        [varname] = var_load.args
+
+        depth = 0
+        for p in reversed(parents):
+            match p:
+                case ase.Expr("let", (str(name), _, body)):
+                    if body.contains(var_load):
+                        if name == varname:
+                            return p, depth
+                        if p not in excludes:
+                            depth += 1
+        return None, depth
+
+    reachable = set()
+    for parents, child in prgm.walk_descendants_depth_first_no_repeat():
+        reachable.add(child)
+        match child:
+            case ase.Expr("var_load"):
+                parent_let, depth = find_parent_let(parents, child)
+                var_depth_map[child] = depth
+                if parent_let is not None:
+                    let_uses[parent_let] += 1
+                    parent_let_map[child] = parent_let
+                else:
+                    # function arguments do not have parent let.
+                    pass
+
+    # single_use_repl = {}
+    # single_use_lets = set()
+    # def simplify_single_use_let(expr: SExpr, state: ase.TraverseState):
+    #     match expr:
+    #         case ase.Expr("var_load", (str(varname),)):
+    #             first_let, _ = find_parent_let(state.parents, varname)
+    #             if replaced := single_use_repl.get(first_let):
+    #                 return (yield replaced)
+    #             else:
+    #                 return expr
+    #         case ase.Expr("let", (str(varname),
+    #                               ase.Expr() as value,
+    #                               ase.Expr() as inner)):
+    #             uses = let_uses.get(expr)
+    #             if uses is not None and uses <= 1:
+    #                 single_use_repl[expr] = value
+    #                 updated = ase.expr("let", varname, (yield value), (yield inner))
+    #                 single_use_lets.add(updated)
+    #                 return updated
+    #     # Update node
+    #     updated_args = []
+    #     for x in expr.args:
+    #         updated_args.append((yield x) if isinstance(x, ase.Expr) else x)
+    #     return ase.expr(expr.head, *updated_args)
+
+
+    def rewrite_let_into_lambda(expr: SExpr, state: ase.TraverseState):
+        match expr:
+            case ase.Expr("var_load", (str(varname),)):
+                blet, depth = find_parent_let(state.parents, expr)
+                if blet is None:
+                    return lb.arg(parameters.index(varname) + depth)
+                what = lb.arg(depth)
+                if what.handle == 636:
+                    breakpoint()
+                return what
+
+            case ase.Expr("let", (str(varname),
+                                  ase.Expr() as value,
+                                  ase.Expr() as inner)):
+                return lb.app(lb.lam((yield inner)), (yield value))
+
+            case ase.Expr("py_func", (str(), ase.Expr() as py_args, ase.Expr() as body)):
+                last = (yield body)
+                # one extra for .io
+                for _ in range(len(py_args.args) + 1):
+                    last = lb.lam(last)
+                return last
+
+        # Update node
+        updated_args = []
+        for x in expr.args:
+            updated_args.append((yield x) if isinstance(x, ase.Expr) else x)
+        return ase.expr(expr.head, *updated_args)
+
+
+    with prgm.tape:
+        # memo = prgm.traverse(simplify_single_use_let)
+        # prgm = memo[prgm]
+        memo = prgm.traverse(rewrite_let_into_lambda)
+        prgm = memo[prgm]
+
+    return prgm #lb.run_abstraction_pass(prgm)
+
+
+
 def restructure_source(function):
     ast2scfg_transformer = AST2SCFGTransformer(function)
     astcfg = ast2scfg_transformer.transform_to_ASTCFG()
@@ -603,10 +757,40 @@ def restructure_source(function):
 
     rvsdg = convert_to_rvsdg(prgm, varinfo)
 
-
-    # pprint(rvsdg.as_dict(), compact=True, sort_dicts=False)
-
+    from sealir.prettyformat import html_format
     pp(rvsdg)
+
+
+    # out = html_format.to_html(rvsdg)
+    # with open("debug.html", "w") as fout:
+    #     print(html_format.write_html(out,fout))
+    # return
+
+
+    lam = convert_to_lambda(rvsdg, varinfo)
+    pp(lam)
+
+
+    # out = html_format.to_html(lam)
+    with open("debug.html", "w") as fout:
+        print(html_format.write_html(fout,
+                                     html_format.to_html(rvsdg),
+                                     html_format.to_html(lam)))
+
+    # return
+
+    lb = LamBuilder(lam.tape)
+
+    ctx = EvalCtx.from_arguments(10, 300)
+    with lam.tape:
+        app_root = lb.app(lam, *ctx.make_arg_node())
+
+    out = lb.format(app_root)
+    print(out)
+
+    memo = app_root.traverse(lambda_evaluation, EvalLamState(context=ctx))
+    res = memo[app_root]
+    print('result', res)
 
     # # DEMO FIND ORIGINAL AST
     # print('---py_range----')
@@ -633,22 +817,135 @@ def restructure_source(function):
 
 ######################
 
+@dataclass(frozen=True)
+class EvalLamState(ase.TraverseState):
+    context: EvalCtx
 
-# def sum1d(n: int, m: int) -> int:
-#     c = 0
-#     a = n + m
-#     if m > n:
-#         a = b = n + m
-#     else:
-#         a = b = n * m
-#     c += a
-#     return c
 
-def sum1d(n: int) -> int:
-    c = 0
-    for i in range(n):
-        c += i
+class EvalIO:
+    def __repr__(self) -> str:
+        return "IO"
+
+
+class SExprValuePair(NamedTuple):
+    expr: SExpr
+    value: Any
+
+@dataclass(frozen=True)
+class EvalCtx:
+    args: tuple[Any, ...]
+    value_map: dict[SExpr, Any] = field(default_factory=dict)
+    blam_stack: list[SExprValuePair] = field(default_factory=list)
+
+    @classmethod
+    def from_arguments(cls, *args):
+        return EvalCtx(args=tuple(reversed([EvalIO(), *args])))
+
+    def make_arg_node(self):
+        ba = []
+        for i, v in enumerate(self.args):
+            se = ase.expr("bind_arg", i)
+            self.value_map[se] = v
+            ba.append(se)
+        return ba
+
+    @contextmanager
+    def bind_app(self, lam_expr: SExpr, argval: Any):
+        self.blam_stack.append(SExprValuePair(lam_expr, argval))
+        try:
+            yield
+        finally:
+            self.blam_stack.pop()
+
+
+def ensure_io(obj: Any) -> EvalIO:
+    assert isinstance(obj, EvalIO)
+    return obj
+
+
+def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
+    indent = len(state.parents)
+    ctx = state.context
+    try:
+        print(" " * indent, "EVAL", expr.handle, expr.as_tuple(2))
+        match expr:
+            case ase.Expr("lam", (body,)):
+                retval = (yield body)
+                return retval
+            case ase.Expr("app", (ase.Expr() as lam_func, argval)):
+                with ctx.bind_app(lam_func, (yield argval)):
+                    retval = (yield lam_func)
+                    return retval
+            case ase.Expr("arg", (int(argidx),)):
+                for i, v in enumerate(reversed(ctx.blam_stack)):
+                    print(' ', i, '--', v.value)
+                print(" target", -argidx - 1)
+                # breakpoint()
+                retval = ctx.blam_stack[-argidx - 1].value
+                return retval
+            case ase.Expr("unpack", (int(idx),
+                                     ase.Expr() as packed_expr)):
+                packed = (yield packed_expr)
+                retval = packed[idx]
+                return retval
+            case ase.Expr("bind_arg"):
+                return ctx.value_map[expr]
+            case ase.Expr("py_return", (ase.Expr() as iostate,
+                                        ase.Expr() as retval)):
+                return (yield iostate), (yield retval)
+            case ase.Expr("py_binop", (str(op),
+                                       ase.Expr() as iostate,
+                                       ase.Expr() as lhs,
+                                       ase.Expr() as rhs)):
+                ioval = ensure_io((yield iostate))
+                lhsval = (yield lhs)
+                rhsval = (yield rhs)
+                match op:
+                    case "+":
+                        retval = ioval, lhsval + rhsval
+                        return retval
+                raise NotImplementedError(op)
+            case ase.Expr("py_inplace_binop", (str(op),
+                                       ase.Expr() as iostate,
+                                       ase.Expr() as lhs,
+                                       ase.Expr() as rhs)):
+                ioval = ensure_io((yield iostate))
+                lhsval = (yield lhs)
+                rhsval = (yield rhs)
+                match op:
+                    case "+":
+                        lhsval += rhsval
+                        retval = ioval, lhsval
+                        return retval
+                raise NotImplementedError(op)
+            case _:
+                raise AssertionError(expr.as_tuple())
+    finally:
+        if "retval" in locals():
+            print(" " * indent, "=>", retval)
+
+
+
+def sum1d(n: int, m: int) -> int:
+    return n
+
+
+def sum1d(n: int, m: int) -> int:
+    a = m + n
+    return a
+    # c = a
+    # if m > n:
+    #     a = b = n + m
+    # else:
+    #     a = b = n * m
+    # c += a
     return c
+
+# def sum1d(n: int) -> int:
+#     c = 0
+#     for i in range(n):
+#         c += i
+#     return c
 
 # def sum1d(n: int) -> int:
 #     c = 0
