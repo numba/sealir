@@ -119,8 +119,7 @@ div.handle_ref {
 </style>
 """
 
-
-def write_html(content, file):
+def write_html(file, *contents):
     print("<!DOCTYPE html>", file=file)
     print("<html>", file=file)
     print("<head>", file=file)
@@ -128,7 +127,8 @@ def write_html(content, file):
     print(script_text(), file=file)
     print("</head>", file=file)
     print("<body>", file=file)
-    print(f"<div class='sexpr-container'>{content}</div>", file=file)
+    for content in contents:
+        print(f"<div class='sexpr-container'>{content}</div>", file=file)
     print('<canvas id="canvas"></canvas>', file=file)
     print("</body>", file=file)
     print("</html>", file=file)
