@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from typing import TypeVar, Generic, Any, Union
+from typing import Any, Generic, TypeVar, Union
 
 from sealir import ase
-
 
 T = TypeVar("T")
 

@@ -1,23 +1,21 @@
 from __future__ import annotations
 
 import string
-from pprint import pprint
-from functools import partial
-from functools import reduce
-from types import SimpleNamespace
-from typing import Any, no_type_check, Iterator
 from collections import defaultdict
-from dataclasses import dataclass, field
 from contextlib import ExitStack
+from dataclasses import dataclass, field
+from functools import partial, reduce
+from types import SimpleNamespace
+from typing import Any, Iterator, no_type_check
+
 import pytest
 
-from sealir import ase
-from sealir.rewriter import TreeRewriter
-from sealir.lam import LamBuilder
+from sealir import ase, egg_utils, scf
 from sealir.itertools import first
+from sealir.lam import LamBuilder
+from sealir.rewriter import TreeRewriter
+
 from .test_scf import make_sum_reduce_loop
-from sealir import scf
-from sealir import egg_utils
 
 
 class MakeTypeInferRules(TreeRewriter[ase.Expr]):
@@ -230,8 +228,8 @@ def find_relevant_rules(root: ase.Expr, equiv_list: list[ase.Expr]):
 
 
 def replace_equivalent(equiv_list: list[ase.Expr]):
-    from pprint import pprint
     from collections import defaultdict
+    from pprint import pprint
 
     equiv_map = defaultdict(set)
 
@@ -293,22 +291,22 @@ def do_egglog(equiv_list):
     from egglog import (
         EGraph,
         Expr,
-        i64Like,
-        i64,
-        String,
-        rewrite,
-        vars_,
-        eq,
-        rule,
-        union,
-        set_,
         Set,
-        function,
+        String,
         Vec,
-        var,
-        method,
-        ruleset,
         birewrite,
+        eq,
+        function,
+        i64,
+        i64Like,
+        method,
+        rewrite,
+        rule,
+        ruleset,
+        set_,
+        union,
+        var,
+        vars_,
     )
 
     egraph = EGraph()
@@ -416,16 +414,16 @@ def do_egglog(equiv_list):
             f_equiv(b, vec1[i]),
         ),
         # Arrow rules
-        rule( # Given
+        rule(  # Given
             # a = lam b c
-            eq( a ).to( f_lam(b, c) ),
+            eq(a).to(f_lam(b, c)),
             # d = typevar(i)
-            eq( d ).to( TypeInfo.typevar(i) ),
+            eq(d).to(TypeInfo.typevar(i)),
             # a = b
-            eq( a ).to( d ),
+            eq(a).to(d),
         ).then(
             # then a = c -> b
-            f_equiv( a, TypeInfo.arrow(c, b) ),
+            f_equiv(a, TypeInfo.arrow(c, b)),
         ),
         # App rules
         rule(
@@ -823,7 +821,7 @@ def test_typeinfer():
                     out = x * 1
                 return out
             """
-            cond = lambar.expr("lt", x, y) # (lt x y)
+            cond = lambar.expr("lt", x, y)  # (lt x y)
 
             @scf.region(lambar)
             def true_branch(x, y):

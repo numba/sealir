@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, NamedTuple
-import types
 import inspect
-from collections import defaultdict, Counter
+import types
+from collections import Counter, defaultdict
+from typing import Any, NamedTuple
 
 from sealir import ase
-from sealir.rewriter import TreeRewriter
 from sealir.itertools import first
+from sealir.rewriter import TreeRewriter
 
 
 class _app(NamedTuple):

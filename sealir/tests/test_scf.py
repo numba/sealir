@@ -1,5 +1,5 @@
-from sealir.lam import LamBuilder
 from sealir import scf
+from sealir.lam import LamBuilder
 
 
 def make_sum_reduce_loop(lambar):

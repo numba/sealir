@@ -15,29 +15,27 @@ to process such a S-expression tree.
 """
 
 from __future__ import annotations
+
+import html
 import sys
 import threading
-from typing import (
-    TypeAlias,
-    Union,
-    Iterator,
-    Callable,
-    Any,
-    TypeVar,
-    LiteralString,
-)
+from collections import Counter, deque
 from collections.abc import Coroutine
-from collections import Counter
-
 from dataclasses import dataclass, field
 from enum import IntEnum
-from pprint import pformat
 from functools import cached_property
-from collections import deque
-import html
+from pprint import pformat
+from typing import (
+    Any,
+    Callable,
+    Iterator,
+    LiteralString,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 
 from .graphviz_support import graphviz_function
-
 
 T = TypeVar("T")
 

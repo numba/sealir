@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
 from collections import Counter
+from typing import Any
 
 from sealir.ase import Expr
+
 from .rewriter import TreeRewriter
 
 

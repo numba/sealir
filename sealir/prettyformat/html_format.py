@@ -1,29 +1,34 @@
 import html
 from typing import Any
 
-
 from sealir.ase import Expr
 from sealir.rewriter import TreeRewriter
 
 
-
-
 def to_html(root: Expr) -> str:
 
-    reachable = {node
-                 for _, node in root.walk_descendants_depth_first_no_repeat()}
+    reachable = {
+        node for _, node in root.walk_descendants_depth_first_no_repeat()
+    }
 
     class ToHtml(TreeRewriter[str]):
 
         reference_already = set()
 
-        def rewrite_generic(self, orig: Expr, args: tuple[Any, ...], updated: bool) -> str | Expr:
+        def rewrite_generic(
+            self, orig: Expr, args: tuple[Any, ...], updated: bool
+        ) -> str | Expr:
             if orig in reachable:
                 args = list(args)
                 for i, child in enumerate(orig.args):
                     if isinstance(child, Expr):
-                        if not child.is_simple and child in self.reference_already:
-                            args[i] = f"<div class='handle_ref handle' data-ref='{child.handle}'>${child.handle}</div>"
+                        if (
+                            not child.is_simple
+                            and child in self.reference_already
+                        ):
+                            args[i] = (
+                                f"<div class='handle_ref handle' data-ref='{child.handle}'>${child.handle}</div>"
+                            )
                         else:
                             self.reference_already.add(child)
 
@@ -35,11 +40,9 @@ def to_html(root: Expr) -> str:
             else:
                 return None
 
-
     cvt = ToHtml()
     root.apply_bottomup(cvt)
     return cvt.memo[root]
-
 
 
 def style_text():
@@ -119,6 +122,7 @@ div.handle_ref {
 </style>
 """
 
+
 def write_html(file, *contents):
     print("<!DOCTYPE html>", file=file)
     print("<html>", file=file)
@@ -132,6 +136,7 @@ def write_html(file, *contents):
     print('<canvas id="canvas"></canvas>', file=file)
     print("</body>", file=file)
     print("</html>", file=file)
+
 
 def script_text():
     out = """

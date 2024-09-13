@@ -1,5 +1,6 @@
-from sealir import ase
 from collections.abc import Generator
+
+from sealir import ase
 
 
 def test_bottom():
