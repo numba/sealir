@@ -336,7 +336,8 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                 case ase.Expr("var_load", (".io",)):
                     return True
         return False
-    def unpack(val: SExpr, targets: Sequence[str], *, force_io=False) -> Iterable[tuple[SExpr, str]]:
+
+    def unpack_tuple(val: SExpr, targets: Sequence[str], *, force_io=False) -> Iterable[tuple[SExpr, str]]:
         if force_io or uses_io(val):
             targets  = (".io", *targets)
         if len(targets) == 1:
@@ -347,6 +348,25 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             for i, target in enumerate(targets):
                 packed = ase.expr("var_load", packed_name)
                 yield ase.expr("unpack", i, packed), target
+
+    def unpack_assign(val: SExpr, targets: Sequence[str], *, force_io=False) -> Iterable[tuple[SExpr, str]]:
+        assert len(targets) > 0
+        unpack_io = force_io or uses_io(val)
+        if not unpack_io:
+            yield (val, targets[0])
+        else:
+            # Get packed name
+            packed_name = f".packed.{val.handle}"
+            yield val, packed_name
+            # Unpack IO
+            unpack_io = ase.expr("unpack", 0,
+                                 ase.expr("var_load", packed_name))
+            yield unpack_io, ".io"
+            # Unpack the value for all targets
+            for target in targets:
+                unpack_val = ase.expr("unpack", 1,
+                                      ase.expr("var_load", packed_name))
+                yield unpack_val, target
 
     def lookup(blk: ase.Expr):
         defs = set()
@@ -440,7 +460,7 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             for stmt in reversed(body):
                 match stmt:
                     case ase.Expr("assign", (val, *targets)):
-                        iterable = unpack(val, targets)
+                        iterable = unpack_assign(val, targets)
                         for unpacked, target in reversed(list(iterable)):
                             last = ase.expr("let", target, unpacked, last)
 
@@ -455,26 +475,26 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                         blk_false = replace_scfg_pass(blk_false, defs_false, defs)
 
                         if uses_io(test):
-                            [(unpack_cond, unpack_name), (io, iovar), (cond, _)] = unpack(test, [".cond"], force_io=True)
+                            [(unpack_cond, unpack_name), (io, iovar), (cond, _)] = unpack_tuple(test, [".cond"], force_io=True)
                             stmt = ase.expr("scfg_if", cond, blk_true, blk_false)
                             stmt = ase.expr("let", iovar, io, stmt)
                             stmt = ase.expr("let", unpack_name, unpack_cond, stmt)
                         else:
                             assert False
 
-                        iterable = unpack(stmt, defs)
+                        iterable = unpack_tuple(stmt, defs)
                         for unpacked, target in reversed(list(iterable)):
                             last = ase.expr("let", target, unpacked, last)
 
                     case ase.Expr("scfg_while", (ase.Expr() as test, loopblk)):
                         defs = sorted(lookup(loopblk))
 
-                        iterable = unpack(stmt, defs)
+                        iterable = unpack_tuple(stmt, defs)
                         for unpacked, target in reversed(list(iterable)):
                             last = ase.expr("let", target, unpacked, last)
 
                     case ase.Expr("py_return", (retval,)):
-                        output = list(unpack(retval, [".retval"]))
+                        output = list(unpack_tuple(retval, [".retval"]))
                         match output:
                             case [(unpack_cond, unpack_name), (io, iovar), (value, valuevar)]:
                                 stmt = ase.expr("py_return", ase.expr("var_load", iovar), ase.expr("var_load", valuevar))
@@ -912,6 +932,14 @@ def test_inplace_add():
         a = n + m
         a += n
         return a
+    args = (12, 32)
+    run(udt, args)
+
+
+def test_multi_assign():
+    def udt(n: int, m: int) -> int:
+        a = b = n + m
+        return a, b
     args = (12, 32)
     run(udt, args)
 
