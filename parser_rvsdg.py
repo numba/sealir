@@ -1,31 +1,33 @@
 from __future__ import annotations
-import sys
+
 import ast
-import inspect
 import operator
-from functools import reduce
+from collections import defaultdict
 from contextlib import contextmanager
-from typing import Type, TypeAlias, Any, Iterator, Sequence, Iterable, NamedTuple
-from pprint import pprint, pformat
 from dataclasses import dataclass, field
-from collections import defaultdict, deque
+from functools import reduce
+from pprint import pformat, pprint
+from typing import Any, Iterable, Iterator, NamedTuple, Sequence, TypeAlias
 
 from numba_rvsdg.core.datastructures.ast_transforms import (
-    unparse_code,
     AST2SCFGTransformer,
     SCFG2ASTTransformer,
+    unparse_code,
 )
 
 from sealir import ase
 from sealir.lam import LamBuilder
 from sealir.rewriter import TreeRewriter
-from sealir.itertools import first, maybe_first
 
 SExpr: TypeAlias = ase.Expr
 
 
 def pp(expr: SExpr):
-    print(pformat(expr.as_tuple(-1, dedup=True)).replace(',', '').replace('\'', ''))
+    print(
+        pformat(expr.as_tuple(-1, dedup=True))
+        .replace(",", "")
+        .replace("'", "")
+    )
     # print(pformat(expr.as_dict()))
 
 
@@ -85,9 +87,9 @@ class ConvertToSExpr(ast.NodeTransformer):
         print(ast.dump(node))
         match node.ctx:
             case ast.Load():
-                ctx = 'load'
+                ctx = "load"
             case ast.Store():
-                ctx = 'store'
+                ctx = "store"
             case _:
                 raise NotImplementedError(node.ctx)
         return ase.expr("PyAst_Name", node.id, ctx, self.get_loc(node))
@@ -245,7 +247,7 @@ class ConvertToSExpr(ast.NodeTransformer):
             node.col_offset,
             node.end_lineno,
             node.end_col_offset,
-            None
+            None,
         )
 
 
@@ -254,6 +256,7 @@ def convert_to_sexpr(node: ast.AST):
         out = ConvertToSExpr(stree).visit(node)
     pprint(out.as_tuple(depth=2**30))
     return out
+
 
 @dataclass(frozen=True)
 class VariableInfo:
@@ -265,12 +268,15 @@ class VariableInfo:
     # block_effect: dict
     # assign_map: dict
 
+
 def find_variable_info(expr: SExpr):
     loaded: dict[str, SExpr] = {}
     stored: dict[str, SExpr] = {}
 
     def get_args(expr: SExpr) -> Iterator[str]:
-        _, first_def = next(expr.search_descendants(lambda x: x.head=="PyAst_FunctionDef"))
+        _, first_def = next(
+            expr.search_descendants(lambda x: x.head == "PyAst_FunctionDef")
+        )
         assert first_def == expr
         (fname, args, block, loc) = expr.args
         for arg in args.args:
@@ -296,12 +302,10 @@ def find_variable_info(expr: SExpr):
 
     expr.apply_bottomup(FindVariableUse())
 
-
     nonlocals = set()
     for k in loaded:
         if k not in stored:
             nonlocals.add(k)
-
 
     @dataclass(frozen=True)
     class VarEffect:
@@ -319,7 +323,6 @@ def find_variable_info(expr: SExpr):
             self.uses.update(other.uses)
             return self
 
-
     return VariableInfo(
         nonlocals=set(nonlocals),
         args=arguments,
@@ -327,9 +330,12 @@ def find_variable_info(expr: SExpr):
         stored=set(stored),
     )
 
+
 def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
 
-    def get_block(expr: SExpr,) -> SExpr:
+    def get_block(
+        expr: SExpr,
+    ) -> SExpr:
         return next(expr.search_parents(lambda x: x.head == "PyAst_block"))
 
     def uses_io(val):
@@ -339,9 +345,11 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                     return True
         return False
 
-    def unpack_tuple(val: SExpr, targets: Sequence[str], *, force_io=False) -> Iterable[tuple[SExpr, str]]:
+    def unpack_tuple(
+        val: SExpr, targets: Sequence[str], *, force_io=False
+    ) -> Iterable[tuple[SExpr, str]]:
         if force_io or uses_io(val):
-            targets  = (".io", *targets)
+            targets = (".io", *targets)
         if len(targets) == 1:
             yield (val, targets[0])
         else:
@@ -351,13 +359,17 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                 packed = ase.expr("var_load", packed_name)
                 yield ase.expr("unpack", i, packed), target
 
-    def unpack_assign(val: SExpr, targets: Sequence[str], *, force_io=False) -> Iterable[tuple[SExpr, str]]:
+    def unpack_assign(
+        val: SExpr, targets: Sequence[str], *, force_io=False
+    ) -> Iterable[tuple[SExpr, str]]:
         assert len(targets) > 0
         unpack_io = force_io or uses_io(val)
         if unpack_io:
             packed_name = f".val.{val.handle}"
-            for val, packed_name in unpack_tuple(val, [packed_name], force_io=True):
-                print('??? let', val.str(), packed_name)
+            for val, packed_name in unpack_tuple(
+                val, [packed_name], force_io=True
+            ):
+                print("??? let", val.str(), packed_name)
                 yield val, packed_name
                 get_val = lambda: ase.expr("var_load", packed_name)
         elif len(targets) > 1:
@@ -370,13 +382,15 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         for target in targets:
             yield get_val(), target
 
-
     def lookup_defined(blk: ase.Expr):
-        def get_varnames_defined_in_block(expr: ase.Expr, state: ase.TraverseState):
+        def get_varnames_defined_in_block(
+            expr: ase.Expr, state: ase.TraverseState
+        ):
             match expr:
-                case ase.Expr("let", (str(varname),
-                                      ase.Expr() as value,
-                                      ase.Expr() as inner)):
+                case ase.Expr(
+                    "let",
+                    (str(varname), ase.Expr() as value, ase.Expr() as inner),
+                ):
                     return (yield inner) | {varname}
                 case _:
                     return set()
@@ -385,12 +399,19 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         return memo[blk]
 
     empty_set = frozenset()
+
     def lookup_used(blk: ase.Expr):
         class FindUsed(TreeRewriter[set[str]]):
             flag_save_history = False
-            def rewrite_var_load(self, orig: ase.Expr, varname: str) -> set[str]:
+
+            def rewrite_var_load(
+                self, orig: ase.Expr, varname: str
+            ) -> set[str]:
                 return {varname}
-            def rewrite_generic(self, orig: ase.Expr, args: tuple[Any, ...], updated: bool) -> set[str] | ase.Expr:
+
+            def rewrite_generic(
+                self, orig: ase.Expr, args: tuple[Any, ...], updated: bool
+            ) -> set[str] | ase.Expr:
                 return empty_set
 
         mypass = FindUsed()
@@ -398,8 +419,9 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         memo = mypass.memo
         return reduce(operator.or_, memo.values())
 
-
-    def replace_scfg_pass(block_root: SExpr, defined_names: set[str], all_names: list[str]):
+    def replace_scfg_pass(
+        block_root: SExpr, defined_names: set[str], all_names: list[str]
+    ):
         class ConvertSCFGPass(TreeRewriter[SExpr]):
             def rewrite_scfg_pass(self, orig: ase.Expr) -> SExpr:
                 def put_load(varname):
@@ -409,6 +431,7 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                         return ase.expr("var_load", varname)
                     else:
                         return ase.expr("py_undef")
+
                 args = [put_load(k) for k in all_names]
                 print("all_names", all_names)
                 print("defined_names", defined_names)
@@ -421,14 +444,17 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         block_root.apply_bottomup(rewriter)
         return rewriter.memo[block_root]
 
-
     class Convert2RVSDG(TreeRewriter[SExpr]):
-        """Convert to RVSDG with Let-binding
-        """
-        def rewrite_generic(self, orig: SExpr, args: tuple[Any, ...], updated: bool) -> SExpr:
+        """Convert to RVSDG with Let-binding"""
+
+        def rewrite_generic(
+            self, orig: SExpr, args: tuple[Any, ...], updated: bool
+        ) -> SExpr:
             raise NotImplementedError(orig.head)
 
-        def rewrite_PyAst_Name(self, orig: ase.Expr, name: str, ctx: str, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_Name(
+            self, orig: ase.Expr, name: str, ctx: str, loc: SExpr
+        ) -> SExpr:
             if name in varinfo.nonlocals:
                 return ase.expr("py_global_load", name)
             else:
@@ -443,16 +469,24 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_loc(self, orig: ase.Expr, *args) -> SExpr:
             return orig
 
-        def rewrite_PyAst_arg(self, orig: ase.Expr, name: str, annotation: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_arg(
+            self, orig: ase.Expr, name: str, annotation: SExpr, loc: SExpr
+        ) -> SExpr:
             return name
 
-        def rewrite_PyAst_arguments(self, orig: ase.Expr, *args: SExpr) -> SExpr:
+        def rewrite_PyAst_arguments(
+            self, orig: ase.Expr, *args: SExpr
+        ) -> SExpr:
             return ase.expr("py_args", *args)
 
-        def rewrite_PyAst_Constant_int(self, orig: ase.Expr, val: int, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_Constant_int(
+            self, orig: ase.Expr, val: int, loc: SExpr
+        ) -> SExpr:
             return ase.expr("py_int", val)
 
-        def rewrite_PyAst_Constant_str(self, orig: ase.Expr, val: int, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_Constant_str(
+            self, orig: ase.Expr, val: int, loc: SExpr
+        ) -> SExpr:
             return ase.expr("py_str", val)
 
         def rewrite_PyAst_None(self, orig: ase.Expr, loc: SExpr) -> SExpr:
@@ -462,21 +496,51 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             [*elts, loc] = rest
             return ase.expr("py_tuple", *elts)
 
-        def rewrite_PyAst_Assign(self, orig: ase.Expr, val: SExpr, *rest: SExpr) -> SExpr:
+        def rewrite_PyAst_Assign(
+            self, orig: ase.Expr, val: SExpr, *rest: SExpr
+        ) -> SExpr:
             [*targets, loc] = rest
             return ase.expr("assign", val, *(t.args[0] for t in targets))
 
-        def rewrite_PyAst_AugAssign(self, orig: ase.Expr, opname: str, left: SExpr, right: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_AugAssign(
+            self,
+            orig: ase.Expr,
+            opname: str,
+            left: SExpr,
+            right: SExpr,
+            loc: SExpr,
+        ) -> SExpr:
             [name] = left.args
-            return ase.expr("assign", ase.expr("py_inplace_binop", opname, self.get_io(), ase.expr("var_load", name), right), name)
+            return ase.expr(
+                "assign",
+                ase.expr(
+                    "py_inplace_binop",
+                    opname,
+                    self.get_io(),
+                    ase.expr("var_load", name),
+                    right,
+                ),
+                name,
+            )
 
-        def rewrite_PyAst_callargs_pos(self, orig: ase.Expr, *args: SExpr) -> SExpr:
+        def rewrite_PyAst_callargs_pos(
+            self, orig: ase.Expr, *args: SExpr
+        ) -> SExpr:
             return args
 
-        def rewrite_PyAst_Call(self, orig: ase.Expr, func: SExpr, posargs: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_Call(
+            self, orig: ase.Expr, func: SExpr, posargs: SExpr, loc: SExpr
+        ) -> SExpr:
             return ase.expr("py_call", self.get_io(), func, *posargs)
 
-        def rewrite_PyAst_Compare(self, orig: ase.Expr, opname: str, left: SExpr, right: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_Compare(
+            self,
+            orig: ase.Expr,
+            opname: str,
+            left: SExpr,
+            right: SExpr,
+            loc: SExpr,
+        ) -> SExpr:
             return ase.expr("py_compare", opname, self.get_io(), left, right)
 
         def rewrite_PyAst_block(self, orig: ase.Expr, *body: SExpr) -> SExpr:
@@ -496,13 +560,23 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                         defs_false = lookup_defined(blk_false) & used
                         defs = sorted(defs_true | defs_false)
                         blk_true = replace_scfg_pass(blk_true, defs_true, defs)
-                        blk_false = replace_scfg_pass(blk_false, defs_false, defs)
+                        blk_false = replace_scfg_pass(
+                            blk_false, defs_false, defs
+                        )
 
                         if uses_io(test):
-                            [(unpack_cond, unpack_name), (io, iovar), (cond, _)] = unpack_tuple(test, [".cond"], force_io=True)
-                            stmt = ase.expr("scfg_if", cond, blk_true, blk_false)
+                            [
+                                (unpack_cond, unpack_name),
+                                (io, iovar),
+                                (cond, _),
+                            ] = unpack_tuple(test, [".cond"], force_io=True)
+                            stmt = ase.expr(
+                                "scfg_if", cond, blk_true, blk_false
+                            )
                             stmt = ase.expr("let", iovar, io, stmt)
-                            stmt = ase.expr("let", unpack_name, unpack_cond, stmt)
+                            stmt = ase.expr(
+                                "let", unpack_name, unpack_cond, stmt
+                            )
                         else:
                             assert False
 
@@ -520,14 +594,26 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                     case ase.Expr("py_return", (retval,)):
                         output = list(unpack_tuple(retval, [".retval"]))
                         match output:
-                            case [(unpack_cond, unpack_name), (io, iovar), (value, valuevar)]:
-                                stmt = ase.expr("py_return", ase.expr("var_load", iovar), ase.expr("var_load", valuevar))
+                            case [
+                                (unpack_cond, unpack_name),
+                                (io, iovar),
+                                (value, valuevar),
+                            ]:
+                                stmt = ase.expr(
+                                    "py_return",
+                                    ase.expr("var_load", iovar),
+                                    ase.expr("var_load", valuevar),
+                                )
                                 stmt = ase.expr("let", valuevar, value, stmt)
                                 stmt = ase.expr("let", iovar, io, stmt)
-                                stmt = ase.expr("let", unpack_name, unpack_cond, stmt)
+                                stmt = ase.expr(
+                                    "let", unpack_name, unpack_cond, stmt
+                                )
                                 last = stmt
                             case [(value, valuevar)]:
-                                stmt = ase.expr("py_return", self.get_io(), value)
+                                stmt = ase.expr(
+                                    "py_return", self.get_io(), value
+                                )
                                 # stmt = ase.expr("let", valuevar, value, stmt)
                                 last = stmt
                             case _:
@@ -538,7 +624,14 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                         raise AssertionError(stmt)
             return last
 
-        def rewrite_PyAst_If(self, orig: ase.Expr, test: SExpr, body: SExpr, orelse: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_If(
+            self,
+            orig: ase.Expr,
+            test: SExpr,
+            body: SExpr,
+            orelse: SExpr,
+            loc: SExpr,
+        ) -> SExpr:
             return ase.expr("py_if", test, body, orelse)
 
         def rewrite_PyAst_While(self, orig: ase.Expr, *rest: SExpr) -> SExpr:
@@ -547,24 +640,43 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                 case ase.Expr("var_load", (str(testname),)):
                     pass
                 case _:
-                    raise AssertionError(f"unsupported while loop: {test.str()}")
+                    raise AssertionError(
+                        f"unsupported while loop: {test.str()}"
+                    )
             return ase.expr("scfg_while", test, *body)
 
-        def rewrite_PyAst_UnaryOp(self, orig: ase.Expr, opname: str, val: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_UnaryOp(
+            self, orig: ase.Expr, opname: str, val: SExpr, loc: SExpr
+        ) -> SExpr:
             return ase.expr("py_unaryop", self.get_io(), opname, val)
 
-        def rewrite_PyAst_BinOp(self, orig: ase.Expr, opname: str, lhs: SExpr, rhs: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_BinOp(
+            self,
+            orig: ase.Expr,
+            opname: str,
+            lhs: SExpr,
+            rhs: SExpr,
+            loc: SExpr,
+        ) -> SExpr:
             return ase.expr("py_binop", opname, self.get_io(), lhs, rhs)
 
-        def rewrite_PyAst_Return(self, orig: ase.Expr, retval: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_Return(
+            self, orig: ase.Expr, retval: SExpr, loc: SExpr
+        ) -> SExpr:
             return ase.expr("py_return", retval)
 
-        def rewrite_PyAst_FunctionDef(self, orig: ase.Expr, fname: str, args: SExpr, body: SExpr, loc: SExpr) -> SExpr:
+        def rewrite_PyAst_FunctionDef(
+            self,
+            orig: ase.Expr,
+            fname: str,
+            args: SExpr,
+            body: SExpr,
+            loc: SExpr,
+        ) -> SExpr:
             return ase.expr("py_func", fname, args, body)
 
         def get_io(self) -> SExpr:
             return ase.expr("var_load", ".io")
-
 
     rewriter = Convert2RVSDG()
     with prgm.tape:
@@ -572,6 +684,7 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
     prgm = rewriter.memo[prgm]
 
     pp(prgm)
+
     # Verify
     def verify(root: SExpr):
         seen = set()
@@ -581,26 +694,30 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             # else:
             #     continue
             match cur:
-                case ase.Expr("scfg_while", (ase.Expr("var_load", (str(testname),)), *_)):
+                case ase.Expr(
+                    "scfg_while", (ase.Expr("var_load", (str(testname),)), *_)
+                ):
                     defn: ase.Expr | None = None
                     for p in reversed(parents):
                         match p:
-                            case ase.Expr("let", (str() as x, ase.Expr() as defn, *_)) if x == testname:
+                            case ase.Expr(
+                                "let", (str() as x, ase.Expr() as defn, *_)
+                            ) if x == testname:
                                 break
 
                     match defn:
                         case ase.Expr("py_int", (1,)):
                             break
                         case _:
-                            raise AssertionError(f"unsupported loop: {cur}\ndefn {defn}")
+                            raise AssertionError(
+                                f"unsupported loop: {cur}\ndefn {defn}"
+                            )
                 case ase.Expr("scfg_while"):
                     raise AssertionError(f"malformed scfg_while: {cur}")
-
 
     verify(prgm)
 
     return prgm
-
 
 
 def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
@@ -615,6 +732,7 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
     let_uses: dict[SExpr, int] = defaultdict(int)
     parent_let_map: dict[SExpr, SExpr] = {}
     var_depth_map: dict[SExpr, int] = {}
+
     def find_parent_let(parents, var_load: ase.Expr, *, excludes=()):
         [varname] = var_load.args
         depth = 0
@@ -642,7 +760,6 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
                     # function arguments do not have parent let.
                     pass
 
-
     def rewrite_let_into_lambda(expr: SExpr, state: ase.TraverseState):
         match expr:
             case ase.Expr("var_load", (str(varname),)):
@@ -654,13 +771,15 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
                     breakpoint()
                 return what
 
-            case ase.Expr("let", (str(varname),
-                                  ase.Expr() as value,
-                                  ase.Expr() as inner)):
+            case ase.Expr(
+                "let", (str(varname), ase.Expr() as value, ase.Expr() as inner)
+            ):
                 return lb.app(lb.lam((yield inner)), (yield value))
 
-            case ase.Expr("py_func", (str(), ase.Expr() as py_args, ase.Expr() as body)):
-                last = (yield body)
+            case ase.Expr(
+                "py_func", (str(), ase.Expr() as py_args, ase.Expr() as body)
+            ):
+                last = yield body
                 # one extra for .io
                 for _ in range(len(py_args.args) + 1):
                     last = lb.lam(last)
@@ -672,13 +791,11 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
             updated_args.append((yield x) if isinstance(x, ase.Expr) else x)
         return ase.expr(expr.head, *updated_args)
 
-
     with prgm.tape:
         memo = prgm.traverse(rewrite_let_into_lambda)
         prgm = memo[prgm]
 
-    return prgm #lb.run_abstraction_pass(prgm)
-
+    return prgm  # lb.run_abstraction_pass(prgm)
 
 
 def restructure_source(function):
@@ -702,14 +819,13 @@ def restructure_source(function):
     rvsdg = convert_to_rvsdg(prgm, varinfo)
 
     from sealir.prettyformat import html_format
-    pp(rvsdg)
 
+    pp(rvsdg)
 
     # out = html_format.to_html(rvsdg)
     # with open("debug.html", "w") as fout:
     #     print(html_format.write_html(out,fout))
     # return
-
 
     lam = convert_to_lambda(rvsdg, varinfo)
     pp(lam)
@@ -717,9 +833,11 @@ def restructure_source(function):
 
     # out = html_format.to_html(lam)
     with open("debug.html", "w") as fout:
-        print(html_format.write_html(fout,
-                                     html_format.to_html(rvsdg),
-                                     html_format.to_html(lam)))
+        print(
+            html_format.write_html(
+                fout, html_format.to_html(rvsdg), html_format.to_html(lam)
+            )
+        )
 
     # return
 
@@ -748,7 +866,9 @@ def restructure_source(function):
     # print(offset + line_offset, '|', lines[line_offset])
     # rvsdg.tape.render_dot(show_metadata=True).view()
 
+
 ######################
+
 
 @dataclass(frozen=True)
 class EvalLamState(ase.TraverseState):
@@ -763,6 +883,7 @@ class EvalIO:
 class SExprValuePair(NamedTuple):
     expr: SExpr
     value: Any
+
 
 @dataclass(frozen=True)
 class EvalCtx:
@@ -800,26 +921,26 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
     indent = len(state.parents)
     ctx = state.context
     from sealir.lam import _app
+
     try:
         print(" " * indent, "EVAL", expr.handle, expr.as_tuple(2))
         match expr:
             case ase.Expr("lam", (body,)):
-                retval = (yield body)
+                retval = yield body
                 return retval
             case ase.Expr("app", (argval, ase.Expr() as lam_func)):
                 with ctx.bind_app(lam_func, (yield argval)):
-                    retval = (yield lam_func)
+                    retval = yield lam_func
                     return retval
             case ase.Expr("arg", (int(argidx),)):
                 for i, v in enumerate(reversed(ctx.blam_stack)):
-                    print(' ', i, '--', v.value)
+                    print(" ", i, "--", v.value)
                 print(" target", -argidx - 1)
                 # breakpoint()
                 retval = ctx.blam_stack[-argidx - 1].value
                 return retval
-            case ase.Expr("unpack", (int(idx),
-                                     ase.Expr() as packed_expr)):
-                packed = (yield packed_expr)
+            case ase.Expr("unpack", (int(idx), ase.Expr() as packed_expr)):
+                packed = yield packed_expr
                 retval = packed[idx]
                 return retval
             case ase.Expr("pack", args):
@@ -829,29 +950,40 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 return tuple(elems)
             case ase.Expr("bind_arg"):
                 return ctx.value_map[expr]
-            case ase.Expr("scfg_if", (ase.Expr() as cond,
-                                      ase.Expr() as br_true,
-                                      ase.Expr() as br_false)):
-                condval = (yield cond)
+            case ase.Expr(
+                "scfg_if",
+                (
+                    ase.Expr() as cond,
+                    ase.Expr() as br_true,
+                    ase.Expr() as br_false,
+                ),
+            ):
+                condval = yield cond
                 if condval:
                     return (yield br_true)
                 else:
                     return (yield br_false)
-            case ase.Expr("py_return", (ase.Expr() as iostate,
-                                        ase.Expr() as retval)):
+            case ase.Expr(
+                "py_return", (ase.Expr() as iostate, ase.Expr() as retval)
+            ):
                 return (yield iostate), (yield retval)
             case ase.Expr("py_tuple", args):
                 elems = []
                 for arg in args:
                     elems.append((yield arg))
                 return tuple(elems)
-            case ase.Expr("py_binop", (str(op),
-                                       ase.Expr() as iostate,
-                                       ase.Expr() as lhs,
-                                       ase.Expr() as rhs)):
+            case ase.Expr(
+                "py_binop",
+                (
+                    str(op),
+                    ase.Expr() as iostate,
+                    ase.Expr() as lhs,
+                    ase.Expr() as rhs,
+                ),
+            ):
                 ioval = ensure_io((yield iostate))
-                lhsval = (yield lhs)
-                rhsval = (yield rhs)
+                lhsval = yield lhs
+                rhsval = yield rhs
                 match op:
                     case "+":
                         retval = lhsval + rhsval
@@ -860,13 +992,18 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                     case _:
                         raise NotImplementedError(op)
                 return ioval, retval
-            case ase.Expr("py_inplace_binop", (str(op),
-                                       ase.Expr() as iostate,
-                                       ase.Expr() as lhs,
-                                       ase.Expr() as rhs)):
+            case ase.Expr(
+                "py_inplace_binop",
+                (
+                    str(op),
+                    ase.Expr() as iostate,
+                    ase.Expr() as lhs,
+                    ase.Expr() as rhs,
+                ),
+            ):
                 ioval = ensure_io((yield iostate))
-                lhsval = (yield lhs)
-                rhsval = (yield rhs)
+                lhsval = yield lhs
+                rhsval = yield rhs
                 match op:
                     case "+":
                         lhsval += rhsval
@@ -876,14 +1013,18 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                         raise NotImplementedError(op)
                 retval = ioval, lhsval
                 return retval
-                raise NotImplementedError(op)
-            case ase.Expr("py_compare", (str(op),
-                                       ase.Expr() as iostate,
-                                       ase.Expr() as lhs,
-                                       ase.Expr() as rhs)):
+            case ase.Expr(
+                "py_compare",
+                (
+                    str(op),
+                    ase.Expr() as iostate,
+                    ase.Expr() as lhs,
+                    ase.Expr() as rhs,
+                ),
+            ):
                 ioval = ensure_io((yield iostate))
-                lhsval = (yield lhs)
-                rhsval = (yield rhs)
+                lhsval = yield lhs
+                rhsval = yield rhs
                 match op:
                     case "<":
                         res = lhsval < rhsval
@@ -899,7 +1040,6 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
             print(" " * indent, "=>", retval)
 
 
-
 def sum1d(n: int, m: int) -> int:
     a = m + n
     c = a
@@ -909,6 +1049,7 @@ def sum1d(n: int, m: int) -> int:
         a = b = n * m
     c += a
     return c
+
 
 # def sum1d(n: int) -> int:
 #     c = 0
@@ -933,11 +1074,14 @@ def sum1d(n: int, m: int) -> int:
 #             c += i + j
 #     return c
 
+
 def test_return_arg0():
     def udt(n: int, m: int) -> int:
         return n
+
     args = (12, 32)
     run(udt, args)
+
 
 def test_return_arg1():
     def udt(n: int, m: int) -> int:
@@ -945,6 +1089,7 @@ def test_return_arg1():
 
     args = (12, 32)
     run(udt, args)
+
 
 def test_simple_add():
     def udt(n: int, m: int) -> int:
@@ -954,11 +1099,13 @@ def test_simple_add():
     args = (12, 32)
     run(udt, args)
 
+
 def test_inplace_add():
     def udt(n: int, m: int) -> int:
         a = n + m
         a += n
         return a
+
     args = (12, 32)
     run(udt, args)
 
@@ -967,6 +1114,7 @@ def test_multi_assign():
     def udt(n: int, m: int) -> int:
         a = b = n + m
         return a, b
+
     args = (12, 32)
     run(udt, args)
 
@@ -986,6 +1134,7 @@ def test_if_else_1():
     args = (32, 12)
     run(udt, args)
 
+
 def test_if_else_2():
     def udt(n: int, m: int) -> int:
         if n < m:
@@ -1003,7 +1152,6 @@ def test_if_else_2():
     run(udt, args)
 
 
-
 def test_if_else_3():
     def udt(n: int, m: int) -> int:
         if m > n:
@@ -1016,7 +1164,6 @@ def test_if_else_3():
     run(udt, args)
     args = (32, 12)
     run(udt, args)
-
 
 
 def test_if_else_hard():
@@ -1037,6 +1184,7 @@ def test_if_else_hard():
     args = (32, 12)
     run(udt, args)
 
+
 def run(func, args):
     lam = restructure_source(func)
 
@@ -1052,11 +1200,8 @@ def run(func, args):
 
     memo = app_root.traverse(lambda_evaluation, EvalLamState(context=ctx))
     res = memo[app_root]
-    print('result', res)
+    print("result", res)
     got = res[1]
 
     assert got == func(*args)
     return got
-
-
-
