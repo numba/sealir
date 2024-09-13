@@ -17,7 +17,15 @@ to process such a S-expression tree.
 from __future__ import annotations
 import sys
 import threading
-from typing import TypeAlias, Union, Iterator, Callable, Any, TypeVar
+from typing import (
+    TypeAlias,
+    Union,
+    Iterator,
+    Callable,
+    Any,
+    TypeVar,
+    LiteralString,
+)
 from collections.abc import Coroutine
 from collections import Counter
 
@@ -32,6 +40,7 @@ from .graphviz_support import graphviz_function
 
 
 T = TypeVar("T")
+
 
 class Context:
     _tls_context = threading.local()
@@ -458,16 +467,15 @@ class Expr:
             else:
                 pending.append(cur)
 
-
         # occurrences.update([cur])
-
 
         class CountOccurrences(TreeVisitor):
             def visit(self, node: Expr):
                 if not node.is_metadata:
                     occurrences.update([cur])
-                    occurrences.update((x for x in node.args
-                                        if isinstance(x, Expr)))
+                    occurrences.update(
+                        (x for x in node.args if isinstance(x, Expr))
+                    )
 
         self.apply_bottomup(CountOccurrences())
 
@@ -657,8 +665,11 @@ class Expr:
             if pred(cur):
                 yield parents, cur
 
-    def traverse(self, corofunc: Callable[[Expr, TraverseState], Coroutine[Expr, T, T]],
-                 state: TraverseState | None = None) -> dict[Expr, T]:
+    def traverse(
+        self,
+        corofunc: Callable[[Expr, TraverseState], Coroutine[Expr, T, T]],
+        state: TraverseState | None = None,
+    ) -> dict[Expr, T]:
         """Traverses the expression tree rooted at the current node, applying
         the provided coroutine function to each node in a depth-first order.
         The traversal is memoized, so that if a node is encountered more than
@@ -672,7 +683,6 @@ class Expr:
         cur_node = self
         state = state or TraverseState()
         coro = corofunc(cur_node, state)
-
 
         def handle_coro(to_send):
             try:
@@ -701,6 +711,11 @@ class Expr:
                 status, (coro, cur_node, item) = handle_coro(None)
 
         return memo
+
+    def reachable_set(self) -> set[Expr]:
+        return {
+            node for _, node in self.walk_descendants_depth_first_no_repeat()
+        }
 
     def contains(self, expr: Expr) -> bool:
         """Is `expr` part of this expression tree."""
@@ -744,19 +759,42 @@ class Expr:
 
     # Apply API
 
-    def apply_bottomup(self, visitor: TreeVisitor, *, reachable: set[Expr] | None = None) -> None:
+    def apply_bottomup(
+        self,
+        visitor: TreeVisitor,
+        *,
+        reachable: set[Expr] | None | LiteralString = "compute",
+    ) -> None:
         """
-        Apply the TreeVisitor to every sexpr bottom up.
-        When a sexpr is visited, it's children must have been visited prior.
-        It will visit more that the subtree under `self`.
+        Apply the TreeVisitor to every sexpr bottom up. When a sexpr is visited,
+        its children must have been visited prior.
+
+        Args:
+            visitor:
+                The visitor to apply to each expression.
+            reachable (optional):
+                The set of reachable expressions.
+                If "compute", the reachable set will be computed.
+                Defaults to "compute".
         """
+        # normalize reachable
+        match reachable:
+            case "compute":
+                reachable = self.reachable_set()
+            case str():
+                raise ValueError(
+                    f"invalid input for `reachable`: {reachable!r}"
+                )
 
         crawler = TapeCrawler(self._tape)
-        if reachable:
-            first_reachable = min(reachable)
-            crawler.seek(first_reachable._handle)
-        else:
-            crawler.move_to_first_record()
+        match reachable:
+            case set():
+                first_reachable = min(reachable)
+                crawler.seek(first_reachable._handle)
+            case None:
+                crawler.move_to_first_record()
+            case _:
+                raise AssertionError("unreachable")
         for rec in crawler.walk():
             if rec.handle <= self._handle:  # visit all younger
                 ex = rec.to_expr()
@@ -893,4 +931,3 @@ def expr(head: str, *args: value_type) -> Expr:
 def _select(iterable, idx: int):
     for args in iterable:
         yield args[idx]
-

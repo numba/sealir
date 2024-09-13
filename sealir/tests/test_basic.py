@@ -1,6 +1,7 @@
 from sealir import ase
 from collections.abc import Generator
 
+
 def test_bottom():
     tape = ase.Tape()
     assert tape._read_token(0) is None
@@ -66,12 +67,17 @@ def test_apply_bottomup():
             buffer.append(expr)
 
     bv = BufferVisitor()
-    e.apply_bottomup(bv)
+    e.apply_bottomup(bv, reachable=None)
 
     # It is expected the visitor will see every S-expr in the Tape.
     # Regardless of whether it is reachable from the root S-expr.
     # But it will not go further then that (exclude `f`)
     assert buffer == [a, b, c, d, e]
+
+    # Rerun with computed reachability
+    buffer.clear()
+    e.apply_bottomup(bv)
+    assert buffer == [a, b, c, e]
 
 
 def test_calculator():
@@ -127,7 +133,9 @@ def test_calculator_traverse():
         d = ase.expr("sub", c, b)
         e = ase.expr("mul", b, d)
 
-    def calc(sexpr: ase.Expr, state: ase.TraverseState) -> Generator[ase.Expr, int, int]:
+    def calc(
+        sexpr: ase.Expr, state: ase.TraverseState
+    ) -> Generator[ase.Expr, int, int]:
         match sexpr:
             case ase.Expr("num", (int(value),)):
                 return value
