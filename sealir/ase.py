@@ -719,10 +719,9 @@ class Expr:
 
     def contains(self, expr: Expr) -> bool:
         """Is `expr` part of this expression tree."""
-        for parents, child in self.walk_descendants():
-            if parents:
-                if child == expr:
-                    return True
+        for _, child in self.walk_descendants():
+            if child == expr:
+                return True
         return False
 
     # Copy API
