@@ -3,6 +3,7 @@ from __future__ import annotations
 from textwrap import dedent
 
 from sealir import ase
+from sealir.ase import Expr
 
 
 def test_match():
@@ -12,54 +13,55 @@ def test_match():
     ase module works as expected. It checks various cases of matching
     expressions with different depths and structures.
     """
-    with ase.Tree():
+    with ase.Tape():
         a = ase.expr("num", 123)
         b = ase.expr("num", 321)
         c = ase.expr("add", a, a)
         d = ase.expr("sub", c, b)
         e = ase.expr("mul", b, d)
 
-    match e.as_tuple():
-        case ('mul', x, y):
+    match e:
+        case Expr("mul", (x, y)):
             assert x == b
             assert y == d
         case _:
             assert False
 
-    match c.as_tuple():
-        case ('add', x, y):
+    match c:
+        case Expr("add", (x, y)):
             assert x == y
-            assert isinstance(x, ase.Expr)
-            match x.as_tuple():
-                case ('num', 123):
+            assert isinstance(x, Expr)
+            match x:
+                case Expr("num", (123,)):
                     ...
                 case _:
                     assert False
         case _:
             assert False
 
-    match c.as_tuple(depth=2):
-        case ('add', ("num", x), ("num", y)):
+    match c:
+        case Expr("add", (Expr("num", (x,)), Expr("num", (y,)))):
             assert x == y
             assert x == 123
         case _:
             assert False
 
-    match d.as_tuple(depth=2):
-        case ('sub', ("add", x, y), ("num", 321)):
-            assert isinstance(x, ase.Expr)
-            assert isinstance(y, ase.Expr)
+    match d:
+        case Expr("sub", (Expr("add", (x, y)), Expr("num", (321,)))):
+            assert isinstance(x, Expr)
+            assert isinstance(y, Expr)
             assert x == a
             assert y == a
         case _:
             assert False
 
-    match d.as_tuple(depth=3):
-        case ('sub', ("add", x, ('num', y)), ("num", 321)):
-            assert isinstance(x, tuple)
+    match d:
+        case Expr(
+            "sub", (Expr("add", (x, Expr("num", (y,)))), Expr("num", (321,)))
+        ):
             assert isinstance(y, int)
             match x:
-                case ("num", z):
+                case Expr("num", (z,)):
                     assert z == y
                 case _:
                     assert False

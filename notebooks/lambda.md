@@ -23,7 +23,6 @@ lambar = LamBuilder()
 ```
 
 ```{code-cell} ipython3
-
 @lambar.lam_func
 def func_body(x):
     a = lambar.expr("mul", x, lambar.expr("num", 2))
@@ -38,11 +37,11 @@ print(lambar.format(func_body))
 ```
 
 ```{code-cell} ipython3
-print(lambar._tree.dump())
+print(lambar.tape.dump())
 ```
 
 ```{code-cell} ipython3
-lambar._tree.render_dot()
+lambar.render_dot()
 ```
 
 ```{code-cell} ipython3
@@ -54,11 +53,11 @@ print(lambar.format(func_body))
 ```
 
 ```{code-cell} ipython3
-print(lambar._tree.dump())
+print(lambar.tape.dump())
 ```
 
 ```{code-cell} ipython3
-lambar._tree.render_dot()
+lambar.render_dot()
 ```
 
 ```{code-cell} ipython3

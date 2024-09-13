@@ -20,7 +20,7 @@ def test_rewrite():
             [y] = rhs.args
             return ase.expr("num", x * y)
 
-    with ase.Tree() as tree:
+    with ase.Tape() as tape:
         a = ase.expr("num", 123)
         b = ase.expr("num", 321)
         c = ase.expr("add", a, a)
@@ -28,9 +28,9 @@ def test_rewrite():
         e = ase.expr("mul", b, d)
 
     calc = RewriteCalcMachine()
-    with tree:
+    with tape:
         e.apply_bottomup(calc)
-    print(e.tree.dump())
+    print(e.tape.dump())
     reduced = calc.memo[e]
     [result] = reduced.args
 
@@ -44,7 +44,7 @@ def test_rewrite():
 
     assert expected() == result
 
-    mintree = ase.Tree()
+    mintree = ase.Tape()
     new_reduced = reduced.copy_tree_into(mintree)
     print(mintree.dump())
     assert new_reduced.str() == reduced.str()

@@ -19,14 +19,29 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
 
     memo: dict[ase.Expr, Union[T, ase.Expr]]
 
+    flag_save_history = True
+
     def __init__(self):
         self.memo = {}
 
     def visit(self, expr: ase.Expr) -> None:
+        if expr in self.memo:
+            return
         res = self._dispatch(expr)
         if res is self.PassThru:
             res = expr
         self.memo[expr] = res
+        # Logic for save history
+        if self.flag_save_history:
+            if res != expr and isinstance(res, ase.Expr):
+                # Insert code that maps replacement back to old
+                cls = type(self)
+                ase.expr(
+                    ".md.rewrite",
+                    f"{cls.__module__}.{cls.__qualname__}",
+                    res,
+                    expr,
+                )
 
     def _dispatch(self, orig: ase.Expr) -> Union[T, ase.Expr]:
         head = orig.head

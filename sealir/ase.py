@@ -2,23 +2,34 @@
 Array-based S-Expression
 ------------------------
 
-For a immutable flat storage of S-expression and fast search in the tree.
-S-expression are stored as integer in a "heap". The number points to other
-S-expression nodes in the heap.
-Tokens are stored in a side table (dict) with mapping from the token
-to a negative integer index. Negative to differentiate from S-expression
+For a immutable flat storage of S-expression and fast search in the
+expression-tree.
+S-expression are stored as integer in a append-only tape.
+The number points to other S-expression nodes in the heap.
+Tokens are stored in a side table with mapping from the token
+to a negative integer index. Negative indices to differentiate from S-expression
 position indices.
 
 The design is to make it so that there are no need for recursive function
 to process such a S-expression tree.
-
 """
 
 from __future__ import annotations
+import sys
 import threading
-from typing import TypeAlias, Union, Iterator, Callable, Any
+from typing import (
+    TypeAlias,
+    Union,
+    Iterator,
+    Callable,
+    Any,
+    TypeVar,
+    LiteralString,
+)
+from collections.abc import Coroutine
+from collections import Counter
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import IntEnum
 from pprint import pformat
 from functools import cached_property
@@ -27,11 +38,15 @@ import html
 
 from .graphviz_support import graphviz_function
 
+
+T = TypeVar("T")
+
+
 class Context:
     _tls_context = threading.local()
 
     @classmethod
-    def get_stack(cls) -> list[Tree]:
+    def get_stack(cls) -> list[Tape]:
         try:
             return cls._tls_context.stack
         except AttributeError:
@@ -39,23 +54,23 @@ class Context:
             return stk
 
     @classmethod
-    def push(cls, tree: Tree):
-        cls.get_stack().append(tree)
+    def push(cls, tape: Tape):
+        cls.get_stack().append(tape)
 
     @classmethod
-    def pop(cls) -> Tree:
+    def pop(cls) -> Tape:
         return cls.get_stack().pop()
 
     @classmethod
-    def top(cls) -> Tree:
+    def top(cls) -> Tape:
         out = cls.top_or_none()
         if out is None:
-            raise MalformedContextError("no active Tree")
+            raise MalformedContextError("no active Tape")
         else:
             return out
 
     @classmethod
-    def top_or_none(cls) -> Tree | None:
+    def top_or_none(cls) -> Tape | None:
         stk = cls.get_stack()
         if not stk:
             return None
@@ -87,9 +102,25 @@ class HandleSentry(IntEnum):
         return f"<{self.name}>"
 
 
-class Tree:
+class Tape:
+    """
+    An append-only Tape for storing all S-expressions.
+    """
+
     _heap: list[handle_type]
+    """The main storage for the S-expressions.
+    """
     _tokens: list[token_type]
+    """Store tokens.
+    """
+    _tokenmap: dict[token_type, int]
+    """
+    Auxiliary. Map tokens to their position in `_tokens`.
+    """
+    _num_records: int
+    """
+    Auxiliary. Number of records (S-expressions).
+    """
 
     def __init__(self):
         # First item on the heap is the None token
@@ -115,7 +146,7 @@ class Tree:
             raise MalformedContextError("malformed stack: top is not self")
 
     def iter_expr(self) -> Iterator[Expr]:
-        crawler = TreeCrawler(self)
+        crawler = TapeCrawler(self)
         crawler.move_to_first_record()
         for rec in crawler.walk():
             yield rec.to_expr()
@@ -136,10 +167,10 @@ class Tree:
     def dump(self) -> str:
         buf = []
         buf.append("\n")
-        buf.append(f"Tree @{hex(id(self))}\n")
+        buf.append(f"Tape @{hex(id(self))}\n")
 
-        crawler = TreeCrawler(self)
-        buf.append(f"| {crawler.pos:6} | <{repr(crawler.get())}: bottom>\n")
+        crawler = TapeCrawler(self)
+        buf.append(f"| {crawler.pos:6} | <{repr(crawler.get())}: none>\n")
         crawler.step()
 
         def fixup(x):
@@ -155,39 +186,81 @@ class Tree:
         return "".join(buf)
 
     @graphviz_function
-    def render_dot(self, *, gv):
+    def render_dot(self, *, gv, show_metadata: bool = False):
         def make_label(i, x):
             if isinstance(x, Expr):
                 return f"<{i}> [{x._handle}]"
             else:
                 return html.escape(f"{x!r} :{type(x).__name__}")
-        g = gv.Digraph(node_attr={'shape': 'record'})
 
-        crawler = TreeCrawler(self)
+        g = gv.Digraph(node_attr={"shape": "record"})
+
+        crawler = TapeCrawler(self)
 
         # Records that are children of the last node
         crawler.seek(self.last())
+
+        # Seek to the first non-metadata in the back
+        while crawler.pos > 0:
+            # Search for the first non-metadata from the back
+            rec = crawler.read_surrounding_record()
+            if rec.read_head().startswith(metadata_prefix):
+                crawler.move_to_previous_record()
+            else:
+                break
+
         reachable = set()
         for _, child_rec in crawler.walk_descendants():
             reachable.add(child_rec.handle)
 
         crawler.move_to_first_record()
         edges = []
+
+        g.node(
+            "start",
+            label="start",
+            rank="min",
+            shape="doublecircle",
+            root="true",
+        )
+        lastname = None
+        maxrank = len(self._heap)
         for record in crawler.walk():
             idx = record.handle
             head = record.read_head()
             args = record.read_args()
-            label = '|'.join(make_label(i, v) for i, v in enumerate(args))
-            kwargs = {}
-            if idx in reachable:
-                kwargs['color'] = 'red'
-            g.node(f"node{idx}", label=f"[{idx}] {head}|{label}",
-                   rank=str(record.handle), **kwargs)
+            if not show_metadata and head.startswith(metadata_prefix):
+                # Skip metadata
+                continue
+            label = "|".join(make_label(i, v) for i, v in enumerate(args))
+            node_kwargs = {}
+            edge_kwargs = {}
+            if idx not in reachable:
+                node_kwargs["color"] = "lightgrey"
+                edge_kwargs["color"] = "lightgrey"
+                edge_kwargs["weight"] = "1"
+            else:
+                edge_kwargs["weight"] = "5"
+            nodename = f"node{idx}"
+            g.node(
+                nodename,
+                label=f"[{idx}] {head}|{label}",
+                rank=str(maxrank - record.handle + 1),
+                **node_kwargs,
+            )
             for i, arg in enumerate(args):
                 if isinstance(arg, Expr):
-                    edges.append((f"node{arg._handle}", f"node{idx}:{i}"))
-        for edge in edges:
-            g.edge(*edge)
+                    args = (f"{nodename}:{i}", f"node{arg._handle}")
+                    kwargs = {**edge_kwargs}
+                    edges.append((args, kwargs))
+            if not head.startswith(metadata_prefix):
+                lastname = nodename
+        # emit start
+        if lastname:
+            edges.append((("start", lastname), {}))
+        # emit edges
+        for args, kwargs in edges:
+            g.edge(*args, **kwargs)
 
         return g
 
@@ -213,7 +286,9 @@ class Tree:
         except ValueError:
             raise NotFound
 
-    def rindex(self, target: handle_type, startpos: handle_type) -> handle_type:
+    def rindex(
+        self, target: handle_type, startpos: handle_type
+    ) -> handle_type:
         pos = startpos
         heap = self._heap
         while pos >= 0 and heap[pos] != target:
@@ -262,8 +337,10 @@ class Tree:
         self.write_token(head)
         for a in args:
             if isinstance(a, Expr):
-                if a._tree is not self:
-                    raise ValueError(f"invalid to assign Expr({a.str()}) to a different tree")
+                if a._tape is not self:
+                    raise ValueError(
+                        f"invalid to assign Expr({a.str()}) to a different tape"
+                    )
                 self._heap.append(a._handle)
             else:
                 self.write_token(a)
@@ -275,7 +352,7 @@ class Tree:
         self._heap.append(ref)
 
     def write_token(self, token: token_type) -> None:
-        if not isinstance(token, (int, str, float)):
+        if token is not None and not isinstance(token, (int, str, float)):
             raise TypeError(f"invalid token type for {type(token)}")
         last = -len(self._tokens)
         handle = self._tokenmap.get(token, last)
@@ -301,63 +378,177 @@ class Tree:
             raise HeapOverflow
 
 
+@dataclass(frozen=True, kw_only=True)
+class TraverseState:
+    parents: list[Expr] = field(default_factory=list)
+
+
+metadata_prefix = "."
+
+
 class Expr:
     """S-expression reference
 
     Default comparison is by identity (the handle).
     """
 
-    _tree: Tree
+    _tape: Tape
     _handle: handle_type
+    __match_args__ = "head", "args"
 
-    def __init__(self, tree: Tree, handle: handle_type) -> None:
-        self._tree = tree
+    def __init__(self, tape: Tape, handle: handle_type) -> None:
+        self._tape = tape
         self._handle = handle
 
     def __eq__(self, value: object) -> bool:
         if isinstance(value, type(self)):
-            return self._tree == value._tree and self._handle == value._handle
+            return self._tape == value._tape and self._handle == value._handle
         else:
             return NotImplemented
 
     def __hash__(self) -> int:
-        return hash((id(self._tree), self._handle))
+        return hash((id(self._tape), self._handle))
 
     @classmethod
-    def write(cls, tree: Tree, head: str, args: tuple[value_type, ...]) -> Expr:
-        handle = tree.write(head, args)
-        return cls(tree, handle)
+    def write(
+        cls, tape: Tape, head: str, args: tuple[value_type, ...]
+    ) -> Expr:
+        handle = tape.write(head, args)
+        return cls(tape, handle)
 
     @property
-    def tree(self) -> Tree:
-        return self._tree
+    def tape(self) -> Tape:
+        return self._tape
+
+    @property
+    def handle(self) -> int:
+        return self._handle
 
     @cached_property
     def head(self) -> str:
-        tree = self._tree
-        return tree.read_head(self._handle)
+        tape = self._tape
+        return tape.read_head(self._handle)
 
     @cached_property
     def args(self) -> tuple[value_type, ...]:
-        tree = self._tree
-        return tree.read_args(self._handle)
+        tape = self._tape
+        return tape.read_args(self._handle)
 
-    def as_tuple(self, depth: int = 1) -> tuple[Any, ...]:
+    @cached_property
+    def is_metadata(self) -> bool:
+        return self.head.startswith(metadata_prefix)
+
+    @cached_property
+    def is_simple(self) -> bool:
         """
-        Recursively converts an Expr object to a tuple, with a specified depth
-        limit.
+        Checks if the expression is a simple expression,
+        where all arguments are not `Expr` objects.
+        """
+        return all(not isinstance(a, Expr) for a in self.args)
+
+    def as_tuple(self, depth: int = 1, dedup=False) -> tuple[Any, ...]:
+        """
+        Converts an Expr object to a tuple, with a specified depth limit.
 
         Args:
             depth (int): The maximum depth to traverse the Expr object.
-
+                         Set to -1 for unbounded.
         """
-        def recur(obj, depth):
-            if depth > 0 and isinstance(obj, Expr):
-                return obj.as_tuple(depth)
-            else:
-                return obj
+        # nothing is actually going to be sys.maxsize big,
+        # so that's what we meant by unbounded.
+        depth = sys.maxsize if depth == -1 else depth
 
-        return (self.head, *map(lambda x: recur(x, depth - 1), self.args))
+        pending = []
+
+        occurrences: Counter[Expr] = Counter()
+        for parents, cur in self.walk_descendants_depth_first_no_repeat():
+            if len(parents) >= depth:
+                break
+            else:
+                pending.append(cur)
+
+        # occurrences.update([cur])
+
+        class CountOccurrences(TreeVisitor):
+            def visit(self, node: Expr):
+                if not node.is_metadata:
+                    occurrences.update([cur])
+                    occurrences.update(
+                        (x for x in node.args if isinstance(x, Expr))
+                    )
+
+        self.apply_bottomup(CountOccurrences())
+
+        dupset = {x for x, ct in occurrences.items() if ct > 1}
+        working_set = set(pending)
+
+        def multi_parents(expr: Expr) -> bool:
+            it = expr.search_parents(lambda x: x in working_set)
+            try:
+                next(it)
+                next(it)
+            except StopIteration:
+                return False
+            else:
+                return True
+
+        memo: dict[Expr, tuple] = {}
+
+        for cur in reversed(pending):
+            args = []
+            for arg in cur.args:
+                if dedup and arg in dupset and occurrences[arg] > 1:
+                    val = f"${arg._handle}"
+                else:
+                    val = memo.get(arg, arg)
+                occurrences[arg] -= 1
+                args.append(val)
+            if dedup and cur in dupset and multi_parents(cur):
+                out = (f"[${cur._handle}]", cur.head, *args)
+            else:
+                out = (cur.head, *args)
+            memo[cur] = out
+
+        return memo[self]
+
+    def as_dict(self) -> dict[str, dict]:
+        """
+        Converts the expression tree into a dictionary representation.
+
+        The `as_dict` method takes an Expr object and returns a dictionary
+        representation of the object. It uses a memoization technique to avoid
+        duplicate references.
+
+        The method also handles simple expressions (where all arguments are not
+        Expr objects) differently, by directly including the argument values in
+        the dictionary.
+        """
+        memo: dict[Expr, dict[str, dict]] = {}
+        seen_once = set()
+
+        class AsDict(TreeVisitor):
+            def visit(self, expr: Expr) -> None:
+                parts: list[dict | token_type] = []
+                for arg in expr.args:
+                    match arg:
+                        case Expr():
+                            if arg in seen_once:
+                                # This handles duplicated references
+                                parts.append(
+                                    dict(ref=f"{arg.head}-{arg._handle}")
+                                )
+                            else:
+                                ref = memo[arg]
+                                if not arg.is_simple:
+                                    seen_once.add(arg)
+                                parts.append(ref)
+                        case _:
+                            parts.append(arg)
+                k = f"{expr.head}-{expr._handle}"
+                memo[expr] = {k: dict(head=expr.head, args=tuple(parts))}
+
+        self.apply_bottomup(AsDict())
+        return memo[self]
 
     def __str__(self):
         return f"Expr({self.head}, {', '.join(map(repr, self.args))})"
@@ -368,10 +559,10 @@ class Expr:
         return pretty_print(self)
 
     def __repr__(self):
-        active_tree = Context.top_or_none()
+        active_tape = Context.top_or_none()
         start = f"<Expr {self.head!r} [{self._handle}]"
-        if active_tree is not self._tree:
-            end = f" @{hex(id(self._tree))}>"
+        if active_tape is not self._tape:
+            end = f" @{hex(id(self._tape))}>"
         else:
             end = ">"
         return start + end
@@ -386,66 +577,162 @@ class Expr:
 
     # Search API
 
-    def find_parents(self) -> Iterator[Expr]:
+    def walk_parents(self) -> Iterator[Expr]:
         """A Iterator that yields Expr that immediately contains this
         object.
         Returned values follow the order of occurrence.
         """
-        crawler = TreeCrawler(self._tree)
+        crawler = TapeCrawler(self._tape)
         crawler.seek(self._handle)
         crawler.skip_to_record_end()
         while crawler.move_to_pos_of(self._handle):
             yield crawler.read_surrounding_record().to_expr()
             crawler.skip_to_record_end()
 
-    def find_children(self) -> Iterator[Expr]:
-        crawler = TreeCrawler(self._tree)
-        crawler.seek(self._handle)
-        record = crawler.read_record()
-        for child in record.children():
-            yield child.to_expr()
-
     def search_parents(self, pred: Callable[[Expr], bool]) -> Iterator[Expr]:
-        """Yields all Expr node `e` in parent nodes of `self` and
-        that `pred(e)` is True
+        for p in self.walk_parents():
+            if pred(p):
+                yield p
+
+    def search_ancestors(self, pred: Callable[[Expr], bool]) -> Iterator[Expr]:
         """
-        candidates = deque(self.find_parents())
+        Recursive breath-first search for parent expressions that match the
+        given predicate.
+
+        NOTE: Implementation is recursion-free.
+
+        This method performs a breath-first search starting from the current
+        expression, following the parent links up the expression tree. It yields
+        all parent expressions that satisfy the given predicate function.
+        """
+        candidates = deque(self.walk_parents())
         seen = set(candidates)
         while candidates:
             p = candidates.popleft()
             if pred(p):
                 yield p
-            for new_p in p.find_parents():
+            for new_p in p.walk_parents():
                 if new_p not in seen:
                     candidates.append(new_p)
                     seen.add(new_p)
 
     def walk_descendants(self) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
         """Walk descendants of this Expr node.
-        Breath-first order.
+        Breath-first order. Left to right.
         """
-        oldtree = self._tree
-        crawler = TreeCrawler(oldtree)
+        oldtree = self._tape
+        crawler = TapeCrawler(oldtree)
         crawler.seek(self._handle)
         for parents, desc in crawler.walk_descendants():
             parent_exprs = tuple(map(lambda x: x.to_expr(), parents))
             yield parent_exprs, desc.to_expr()
 
+    def walk_descendants_depth_first_no_repeat(
+        self,
+    ) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
+        """Walk descendants of this Expr node.
+        Depth-first order. Left to right. Avoid duplication.
+        """
+        stack = [(self, ())]
+        visited = set()
+        while stack:
+            node, parents = stack.pop()
+            if node not in visited:
+                visited.add(node)
+                yield parents, node
+                for arg in reversed(node.args):
+                    if isinstance(arg, Expr):
+                        stack.append((arg, (*parents, node)))
+
+    def walk_descendants_depth_first(
+        self,
+    ) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
+        """Walk descendants of this Expr node.
+        Depth-first order. Left to right.
+        """
+        stack = [(self, ())]
+        while stack:
+            node, parents = stack.pop()
+            yield parents, node
+            for arg in reversed(node.args):
+                if isinstance(arg, Expr):
+                    stack.append((arg, (*parents, node)))
+
+    def search_descendants(
+        self, pred: Callable[[Expr], bool]
+    ) -> Iterator[tuple[tuple[Expr, ...], Expr]]:
+        for parents, cur in self.walk_descendants():
+            if pred(cur):
+                yield parents, cur
+
+    def traverse(
+        self,
+        corofunc: Callable[[Expr, TraverseState], Coroutine[Expr, T, T]],
+        state: TraverseState | None = None,
+    ) -> dict[Expr, T]:
+        """Traverses the expression tree rooted at the current node, applying
+        the provided coroutine function to each node in a depth-first order.
+        The traversal is memoized, so that if a node is encountered more than
+        once, the result from the first visit is reused. The function returns
+        a dictionary mapping each visited node to the value returned by the
+        coroutine function for that node.
+        """
+        stack: list[tuple[Coroutine[Expr, T, T], Expr, Expr]]
+        stack = []
+        memo = {}
+        cur_node = self
+        state = state or TraverseState()
+        coro = corofunc(cur_node, state)
+
+        def handle_coro(to_send):
+            try:
+                item = coro.send(to_send)
+            except StopIteration as stopped:
+                memo[cur_node] = stopped.value
+                if stack:
+                    state.parents.pop()
+                    return True, stack.pop()
+                else:
+                    return False, (None, None, None)
+            else:
+                return True, (coro, cur_node, item)
+
+        status, (coro, cur_node, item) = handle_coro(None)
+        while status:
+            # Loop starts with a fresh item
+            if item in memo:
+                # Already processed?
+                status, (coro, cur_node, item) = handle_coro(memo[item])
+            else:
+                # Not yet seen?
+                stack.append((coro, cur_node, item))
+                state.parents.append(cur_node)
+                coro, cur_node = corofunc(item, state), item
+                status, (coro, cur_node, item) = handle_coro(None)
+
+        return memo
+
+    def reachable_set(self) -> set[Expr]:
+        return {
+            node for _, node in self.walk_descendants_depth_first_no_repeat()
+        }
+
     def contains(self, expr: Expr) -> bool:
         """Is `expr` part of this expression tree."""
-        for _, child in expr.walk_descendants():
+        for _, child in self.walk_descendants():
             if child == expr:
                 return True
         return False
 
     # Copy API
 
-    def copy_tree_into(self, tree: Tree) -> Expr:
-        """Copy all descendants into the given tree.
-        Returns a fresh Expr in the new tree.
+    def copy_tree_into(self, tape: Tape) -> Expr:
+        """Copy all the expression tree starting with this node into the given
+        tape.
+        Returns a fresh Expr in the new tape.
         """
-        oldtree = self._tree
-        crawler = TreeCrawler(oldtree)
+        oldtree = self._tape
+        crawler = TapeCrawler(oldtree)
         crawler.seek(self._handle)
         liveset = set(_select(crawler.walk_descendants(), 1))
         surviving = sorted(liveset)
@@ -454,41 +741,73 @@ class Expr:
             head = oldtree.read_head(oldrec.handle)
             args = oldtree.read_args(oldrec.handle)
 
-            mapping[oldrec.handle] = tree.write_begin()
-            tree.write_token(head)
+            mapping[oldrec.handle] = tape.write_begin()
+            tape.write_token(head)
 
             for arg in args:
                 if isinstance(arg, Expr):
-                    tree.write_ref(mapping[arg._handle])
+                    tape.write_ref(mapping[arg._handle])
                 else:
-                    tree.write_token(arg)
+                    tape.write_token(arg)
 
-            tree.write_end()
+            tape.write_end()
 
-        out = tree.read_value(mapping[self._handle])
+        out = tape.read_value(mapping[self._handle])
         assert isinstance(out, Expr)
         return out
 
     # Apply API
 
-    def apply_bottomup(self, visitor: TreeVisitor) -> None:
+    def apply_bottomup(
+        self,
+        visitor: TreeVisitor,
+        *,
+        reachable: set[Expr] | None | LiteralString = "compute",
+    ) -> None:
         """
-        Apply the TreeVisitor to every sexpr bottom up.
-        When a sexpr is visited, it's children must have been visited prior.
-        It will visit more that the subtree under `self`.
+        Apply the TreeVisitor to every sexpr bottom up. When a sexpr is visited,
+        its children must have been visited prior.
+
+        Args:
+            visitor:
+                The visitor to apply to each expression.
+            reachable (optional):
+                The set of reachable expressions.
+                If "compute", the reachable set will be computed.
+                Defaults to "compute".
         """
-        crawler = TreeCrawler(self._tree)
-        crawler.move_to_first_record()
+        # normalize reachable
+        match reachable:
+            case "compute":
+                reachable = self.reachable_set()
+            case str():
+                raise ValueError(
+                    f"invalid input for `reachable`: {reachable!r}"
+                )
+
+        crawler = TapeCrawler(self._tape)
+        match reachable:
+            case set():
+                first_reachable = min(reachable)
+                crawler.seek(first_reachable._handle)
+            case None:
+                crawler.move_to_first_record()
+            case _:
+                raise AssertionError("unreachable")
         for rec in crawler.walk():
             if rec.handle <= self._handle:  # visit all younger
-                visitor.visit(rec.to_expr())
+                ex = rec.to_expr()
+                if not reachable or ex in reachable:
+                    if not ex.is_metadata:
+                        visitor.visit(ex)
 
     def apply_topdown(self, visitor: TreeVisitor) -> None:
         """
         Apply the TreeVisitor to every sexpr under `self` subtree.
         """
-        for _, node in self.walk_descendants():
-            visitor.visit(node)
+        for _, node in self.walk_descendants_depth_first_no_repeat():
+            if not node.is_metadata:
+                visitor.visit(node)
 
 
 class TreeVisitor:
@@ -496,12 +815,14 @@ class TreeVisitor:
         pass
 
 
-class TreeCrawler:
-    _tree: Tree
+class TapeCrawler:
+    """Provides a file-like API to read the `Tape`."""
+
+    _tape: Tape
     _pos: handle_type
 
-    def __init__(self, tree: Tree) -> None:
-        self._tree = tree
+    def __init__(self, tape: Tape) -> None:
+        self._tape = tape
         self._pos = 0
 
     def move_to_first_record(self) -> None:
@@ -512,10 +833,10 @@ class TreeCrawler:
         return self._pos
 
     def get(self) -> handle_type:
-        return self._tree.get(self._pos)
+        return self._tape.get(self._pos)
 
     def seek(self, pos: handle_type) -> None:
-        start_handle = self._tree.get(pos)
+        start_handle = self._tape.get(pos)
         assert start_handle == HandleSentry.BEGIN
         self._pos = pos
 
@@ -523,10 +844,10 @@ class TreeCrawler:
         self._pos += 1
 
     def skip_to_record_end(self):
-        self._pos = self._tree.index(HandleSentry.END, self._pos + 1)
+        self._pos = self._tape.index(HandleSentry.END, self._pos + 1)
 
     def walk(self) -> Iterator[Record]:
-        while self._pos < self._tree.heap_size:
+        while self._pos < self._tape.heap_size:
             yield self.read_record()
 
     def walk_descendants(self) -> Iterator[tuple[tuple[Record, ...], Record]]:
@@ -545,57 +866,65 @@ class TreeCrawler:
                 todos.append(((*parents, rec), child))
 
     def read_record(self) -> Record:
-        assert self._tree.get(self._pos) == HandleSentry.BEGIN
+        assert self._tape.get(self._pos) == HandleSentry.BEGIN
         begin = self._pos
-        end = self._tree.index(HandleSentry.END, begin)
-        rec = Record(self._tree, begin, end)
+        end = self._tape.index(HandleSentry.END, begin)
+        rec = Record(self._tape, begin, end)
         self._pos = end + 1
         return rec
 
     def read_surrounding_record(self) -> Record:
-        start = self._tree.rindex(HandleSentry.BEGIN, self._pos)
-        stop = self._tree.index(HandleSentry.END, self._pos)
-        return Record(self._tree, start, stop)
+        start = self._tape.rindex(HandleSentry.BEGIN, self._pos)
+        stop = self._tape.index(HandleSentry.END, self._pos)
+        return Record(self._tape, start, stop)
 
     def move_to_pos_of(self, target: handle_type) -> bool:
         try:
-            self._pos = self._tree.index(target, self._pos)
+            self._pos = self._tape.index(target, self._pos)
         except NotFound:
             return False
         else:
             return True
 
+    def move_to_previous_record(self, startpos=None) -> None:
+        startpos = startpos or self._pos
+        # Move to start of current
+        self._pos = self._tape.rindex(HandleSentry.BEGIN, startpos)
+        # Move to start of previous
+        self._pos = self._tape.rindex(HandleSentry.BEGIN, self._pos - 1)
+
 
 @dataclass(frozen=True, order=True)
 class Record:
-    tree: Tree
+    tape: Tape
     handle: handle_type
     end_handle: handle_type
 
     def children(self) -> Iterator[Record]:
         """Return child records. Cannot be tokens."""
-        body = self.tree.load(self.handle + 1, self.end_handle)
+        body = self.tape.load(self.handle + 1, self.end_handle)
         for h in body:
             if h > 0:  # don't include tokens
-                end = self.tree.index(HandleSentry.END, h)
-                yield Record(self.tree, h, end)
+                end = self.tape.index(HandleSentry.END, h)
+                yield Record(self.tape, h, end)
 
     def read_head(self):
-        return self.tree.read_head(self.handle)
+        return self.tape.read_head(self.handle)
 
     def read_args(self):
-        return self.tree.read_args(self.handle)
+        return self.tape.read_args(self.handle)
 
     def to_expr(self) -> Expr:
-        return Expr(self.tree, self.handle)
+        return Expr(self.tape, self.handle)
 
     def __repr__(self):
-        return f"<Record {self.handle}:{self.end_handle} tree@{hex(id(self.tree))} >"
+        return f"<Record {self.handle}:{self.end_handle} tape@{hex(id(self.tape))} >"
 
 
 def expr(head: str, *args: value_type) -> Expr:
-    tree = Context.top()
-    return Expr.write(tree, head, args)
+    """The main API for creating an `Expr`."""
+    tape = Context.top()
+    return Expr.write(tape, head, args)
 
 
 def _select(iterable, idx: int):

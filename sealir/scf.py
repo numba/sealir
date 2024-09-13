@@ -4,8 +4,8 @@ import inspect
 
 
 def region(lambar):
-    """Helper for defining regions that must be a 1-arity lambda.
-    """
+    """Helper for defining regions that must be a 1-arity lambda."""
+
     def outer(fn):
         sig = inspect.signature(fn)
         arity = len(sig.parameters)
@@ -17,4 +17,5 @@ def region(lambar):
             return fn(*bound.args, **bound.kwargs)
 
         return body
-    return  outer
+
+    return outer
