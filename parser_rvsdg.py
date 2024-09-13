@@ -2,6 +2,8 @@ from __future__ import annotations
 import sys
 import ast
 import inspect
+import operator
+from functools import reduce
 from contextlib import contextmanager
 from typing import Type, TypeAlias, Any, Iterator, Sequence, Iterable, NamedTuple
 from pprint import pprint, pformat
@@ -352,32 +354,49 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
     def unpack_assign(val: SExpr, targets: Sequence[str], *, force_io=False) -> Iterable[tuple[SExpr, str]]:
         assert len(targets) > 0
         unpack_io = force_io or uses_io(val)
-        if not unpack_io:
-            yield (val, targets[0])
-        else:
-            # Get packed name
-            packed_name = f".packed.{val.handle}"
+        if unpack_io:
+            packed_name = f".val.{val.handle}"
+            for val, packed_name in unpack_tuple(val, [packed_name], force_io=True):
+                print('??? let', val.str(), packed_name)
+                yield val, packed_name
+                get_val = lambda: ase.expr("var_load", packed_name)
+        elif len(targets) > 1:
+            packed_name = f".val.{val.handle}"
             yield val, packed_name
-            # Unpack IO
-            unpack_io = ase.expr("unpack", 0,
-                                 ase.expr("var_load", packed_name))
-            yield unpack_io, ".io"
-            # Unpack the value for all targets
-            for target in targets:
-                unpack_val = ase.expr("unpack", 1,
-                                      ase.expr("var_load", packed_name))
-                yield unpack_val, target
+            get_val = lambda: ase.expr("var_load", packed_name)
+        else:
+            get_val = lambda: val
+        # Unpack the value for all targets
+        for target in targets:
+            yield get_val(), target
 
-    def lookup(blk: ase.Expr):
-        defs = set()
-        class FindLet(ase.TreeVisitor):
-            def visit(self, expr: SExpr):
-                match expr:
-                    case ase.Expr("let", (varname, *_)):
-                        defs.add(varname)
 
-        blk.apply_topdown(FindLet())
-        return defs
+    def lookup_defined(blk: ase.Expr):
+        def get_varnames_defined_in_block(expr: ase.Expr, state: ase.TraverseState):
+            match expr:
+                case ase.Expr("let", (str(varname),
+                                      ase.Expr() as value,
+                                      ase.Expr() as inner)):
+                    return (yield inner) | {varname}
+                case _:
+                    return set()
+
+        memo = blk.traverse(get_varnames_defined_in_block)
+        return memo[blk]
+
+    empty_set = frozenset()
+    def lookup_used(blk: ase.Expr):
+        class FindUsed(TreeRewriter[set[str]]):
+            flag_save_history = False
+            def rewrite_var_load(self, orig: ase.Expr, varname: str) -> set[str]:
+                return {varname}
+            def rewrite_generic(self, orig: ase.Expr, args: tuple[Any, ...], updated: bool) -> set[str] | ase.Expr:
+                return empty_set
+
+        mypass = FindUsed()
+        blk.apply_bottomup(mypass)
+        memo = mypass.memo
+        return reduce(operator.or_, memo.values())
 
 
     def replace_scfg_pass(block_root: SExpr, defined_names: set[str], all_names: list[str]):
@@ -391,7 +410,12 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                     else:
                         return ase.expr("py_undef")
                 args = [put_load(k) for k in all_names]
-                return ase.expr("pack", *args)
+                print("all_names", all_names)
+                print("defined_names", defined_names)
+                if len(args) > 1:
+                    return ase.expr("pack", *args)
+                else:
+                    return args[0]
 
         rewriter = ConvertSCFGPass()
         block_root.apply_bottomup(rewriter)
@@ -467,10 +491,10 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                     case ase.Expr("py_if", (test, blk_true, blk_false)):
                         # look up variable in each block to find variable
                         # definitions
-                        defs_true = lookup(blk_true)
-                        defs_false = lookup(blk_false)
-                        defs = ['.io'] + sorted(defs_true | defs_false)
-
+                        used = lookup_used(last)
+                        defs_true = lookup_defined(blk_true) & used
+                        defs_false = lookup_defined(blk_false) & used
+                        defs = sorted(defs_true | defs_false)
                         blk_true = replace_scfg_pass(blk_true, defs_true, defs)
                         blk_false = replace_scfg_pass(blk_false, defs_false, defs)
 
@@ -487,7 +511,7 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                             last = ase.expr("let", target, unpacked, last)
 
                     case ase.Expr("scfg_while", (ase.Expr() as test, loopblk)):
-                        defs = sorted(lookup(loopblk))
+                        defs = sorted(lookup_defined(loopblk))
 
                         iterable = unpack_tuple(stmt, defs)
                         for unpacked, target in reversed(list(iterable)):
@@ -593,7 +617,6 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
     var_depth_map: dict[SExpr, int] = {}
     def find_parent_let(parents, var_load: ase.Expr, *, excludes=()):
         [varname] = var_load.args
-
         depth = 0
         for p in reversed(parents):
             match p:
@@ -690,7 +713,7 @@ def restructure_source(function):
 
     lam = convert_to_lambda(rvsdg, varinfo)
     pp(lam)
-
+    print(lam.str())
 
     # out = html_format.to_html(lam)
     with open("debug.html", "w") as fout:
@@ -847,8 +870,12 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 match op:
                     case "+":
                         lhsval += rhsval
-                        retval = ioval, lhsval
-                        return retval
+                    case "*":
+                        lhsval *= rhsval
+                    case _:
+                        raise NotImplementedError(op)
+                retval = ioval, lhsval
+                return retval
                 raise NotImplementedError(op)
             case ase.Expr("py_compare", (str(op),
                                        ase.Expr() as iostate,
@@ -861,7 +888,7 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                     case "<":
                         res = lhsval < rhsval
                     case ">":
-                        res = lhsval < rhsval
+                        res = lhsval > rhsval
                     case _:
                         raise NotImplementedError(op)
                 return ioval, res
@@ -978,7 +1005,21 @@ def test_if_else_2():
 
 
 def test_if_else_3():
-    raise AssertionError("multi assignment is probably wrong")
+    def udt(n: int, m: int) -> int:
+        if m > n:
+            a = b = m
+        else:
+            a = b = n
+        return a, b
+
+    args = (12, 32)
+    run(udt, args)
+    args = (32, 12)
+    run(udt, args)
+
+
+
+def test_if_else_hard():
     def udt(n: int, m: int) -> int:
         a = m + n
         c = a
@@ -987,13 +1028,14 @@ def test_if_else_3():
         else:
             a = b = n * m
         c += a
-        c += b
+        c *= b
         return c
 
     args = (12, 32)
     run(udt, args)
 
-
+    args = (32, 12)
+    run(udt, args)
 
 def run(func, args):
     lam = restructure_source(func)
