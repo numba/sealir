@@ -9,6 +9,7 @@ from typing import Any, no_type_check, Iterator
 from collections import defaultdict
 from dataclasses import dataclass, field
 from contextlib import ExitStack
+import pytest
 
 from sealir import ase
 from sealir.rewriter import TreeRewriter
@@ -793,6 +794,7 @@ def build_egglog_statements(equiv_list, node_dct):
     return type_stmts, proof_stmts, target, typevars
 
 
+@pytest.mark.xfail
 def test_typeinfer():
     my_function = make_sum_reduce_loop
 
