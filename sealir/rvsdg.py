@@ -553,7 +553,13 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_Call(
             self, orig: ase.Expr, func: SExpr, posargs: SExpr, loc: SExpr
         ) -> SExpr:
-            return ase.expr("py_call", self.get_io(), func, *posargs)
+            argnames = [f".tmp.callposarg.{i}" for i in range(len(posargs))]
+            last = ase.expr("py_call", self.get_io(), func,
+                            *map(lambda k: ase.expr("var_load", k), argnames))
+            for k, arg in zip(argnames, posargs):
+                for unpacked, target in reversed(list(unpack_assign(arg, [k]))):
+                    last = ase.expr("let", target, unpacked, last)
+            return last
 
         def rewrite_PyAst_Compare(
             self,

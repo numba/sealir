@@ -144,8 +144,7 @@ def test_while_1():
 
 def test_range_iterator_1():
     def udt(n: int) -> int:
-        rangeobj = range(n)
-        it = iter(rangeobj)
+        it = iter(range(n))
         a = next(it)
         b = next(it)
         return a, b
@@ -157,8 +156,7 @@ def test_range_iterator_1():
 def test_for_loop_reduce_add_1d():
     def udt(n: int) -> int:
         c = 0
-        it = range(n)
-        for i in it:
+        for i in range(n):
             c += i
         return c
 
