@@ -810,7 +810,10 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
             case ase.Expr("var_load", (str(varname),)):
                 blet, depth = find_parent_let(state.parents, expr)
                 if blet is None:
-                    return lb.arg(parameters.index(varname) + depth)
+                    if varname not in parameters:
+                        return ase.expr("py_undef")
+                    else:
+                        return lb.arg(parameters.index(varname) + depth)
                 what = lb.arg(depth)
                 return what
 
@@ -1017,10 +1020,11 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
             ):
                 loop_cond = True
                 while loop_cond:
-                    # TODO: need to wire in the inputs
                     memo = loopblk.traverse(lambda_evaluation, state)
                     loop_end_vars = memo[loopblk]
+                    # Update the loop condition (MUST BE FIRST ITEM)
                     loop_cond = loop_end_vars[0]
+                    # Replace the top of stack with the out going value of the loop body
                     ctx.blam_stack[-1] = ctx.blam_stack[-1]._replace(value=loop_end_vars)
                 return loop_end_vars
             case ase.Expr(
@@ -1032,10 +1036,14 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 for arg in args:
                     elems.append((yield arg))
                 return tuple(elems)
-            case ase.Expr("py_undef"):
+            case ase.Expr("py_undef", ()):
                 return EvalUndef()
+            case ase.Expr("py_none", ()):
+                return None
             case ase.Expr("py_int", (int(ival),)):
                 return ival
+            case ase.Expr("py_str", (str(text),)):
+                return text
             case ase.Expr(
                 "py_unaryop",
                 (str(opname), ase.Expr() as iostate, ase.Expr() as val),
@@ -1105,9 +1113,28 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                         res = lhsval < rhsval
                     case ">":
                         res = lhsval > rhsval
+                    case "!=":
+                        res = lhsval != rhsval
                     case _:
                         raise NotImplementedError(op)
                 return ioval, res
+            case ase.Expr(
+                "py_call",
+                (
+                    ase.Expr() as iostate,
+                    ase.Expr() as callee,
+                    *args,
+                )
+            ):
+                ioval = ensure_io((yield iostate))
+                callee = (yield callee)
+                argvals = []
+                for arg in args:
+                    argvals.append((yield arg))
+                retval = callee(*argvals)
+                return ioval, retval
+            case ase.Expr("py_global_load", (str(glbname),)):
+                return __builtins__[glbname]
             case _:
                 raise AssertionError(expr.as_tuple())
     finally:

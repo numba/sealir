@@ -133,17 +133,41 @@ def test_while_1():
         while i < n:
             c += i * m
             i += 1
-        return c
+        return i, c
 
     args = (5, 3)
     run(udt, args)
 
+    args = (0, 3)
+    run(udt, args)
 
-# def sum1d(n: int) -> int:
-#     c = 0
-#     for i in range(n):
-#         c += i
-#     return c
+
+def test_range_iterator_1():
+    def udt(n: int) -> int:
+        rangeobj = range(n)
+        it = iter(rangeobj)
+        a = next(it)
+        b = next(it)
+        return a, b
+
+    args = (5,)
+    run(udt, args)
+
+
+def test_for_loop_reduce_add_1d():
+    def udt(n: int) -> int:
+        c = 0
+        it = range(n)
+        for i in it:
+            c += i
+        return c
+
+    args = (5,)
+    run(udt, args)
+
+    args = (0,)
+    run(udt, args)
+
 
 # def sum1d(n: int) -> int:
 #     c = 0
