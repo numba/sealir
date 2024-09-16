@@ -32,10 +32,19 @@ def test_simple_add():
     run(udt, args)
 
 
-def test_inplace_add():
+def test_inplace_add_1():
     def udt(n: int, m: int) -> int:
         a = n + m
         a += n
+        return a
+
+    args = (12, 32)
+    run(udt, args)
+
+def test_inplace_add_2():
+    def udt(n: int, m: int) -> int:
+        a = n
+        a +=  n + m
         return a
 
     args = (12, 32)
@@ -98,7 +107,7 @@ def test_if_else_3():
     run(udt, args)
 
 
-def test_if_else_hard():
+def test_if_else_4():
     def udt(n: int, m: int) -> int:
         a = m + n
         c = a
@@ -114,6 +123,19 @@ def test_if_else_hard():
     run(udt, args)
 
     args = (32, 12)
+    run(udt, args)
+
+
+def test_while_1():
+    def udt(n: int, m: int) -> int:
+        i = 0
+        c = 0
+        while i < n:
+            c += i * m
+            i += 1
+        return c
+
+    args = (5, 3)
     run(udt, args)
 
 

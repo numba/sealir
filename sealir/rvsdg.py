@@ -338,17 +338,13 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
     ) -> SExpr:
         return next(expr.search_parents(lambda x: x.head == "PyAst_block"))
 
-    def uses_io(val):
-        for child in val.args:
-            match child:
-                case ase.Expr("var_load", (".io",)):
-                    return True
-        return False
+    def uses_io(val: SExpr):
+        return any(val.search_descendants(lambda x: x.head == "var_load" and x.args == (".io",)))
 
     def unpack_tuple(
         val: SExpr, targets: Sequence[str], *, force_io=False
     ) -> Iterable[tuple[SExpr, str]]:
-        if force_io or uses_io(val):
+        if (force_io or uses_io(val)) and ".io" not in targets:
             targets = (".io", *targets)
         if len(targets) == 1:
             yield (val, targets[0])
@@ -369,7 +365,6 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             for val, packed_name in unpack_tuple(
                 val, [packed_name], force_io=True
             ):
-                print("??? let", val.str(), packed_name)
                 yield val, packed_name
                 get_val = lambda: ase.expr("var_load", packed_name)
         elif len(targets) > 1:
@@ -396,7 +391,9 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                     return set()
 
         memo = blk.traverse(get_varnames_defined_in_block)
-        return memo[blk]
+        # return memo[blk]
+        defs = memo[blk]
+        return {k for k in defs if k != '.io' and not k.startswith('.')}
 
     empty_set = frozenset()
 
@@ -419,22 +416,45 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         memo = mypass.memo
         return reduce(operator.or_, memo.values())
 
+    def lookup_input_vars(blk: ase.Expr):
+        defined = set()
+        external_references = set()
+        def lookup_algo(expr: ase.Expr, state: ase.TraverseState):
+            match expr:
+                case ase.Expr("let", (str(varname),
+                                      ase.Expr() as value,
+                                      ase.Expr() as body)):
+                    yield value
+                    defined.add(varname)
+                    yield body
+                case ase.Expr("var_load", (str(varname),)):
+                    if varname not in defined:
+                        external_references.add(varname)
+                case ase.Expr("lam"):
+                    pass  # do not recurse into lambda
+                case ase.Expr():
+                    assert expr.head != "var_load"
+                    for child in expr.args:
+                        yield child
+
+        blk.traverse(lookup_algo)
+        return external_references
+
     def replace_scfg_pass(
-        block_root: SExpr, defined_names: set[str], all_names: list[str]
+        block_root: SExpr, all_names: list[str]
     ):
         class ConvertSCFGPass(TreeRewriter[SExpr]):
             def rewrite_scfg_pass(self, orig: ase.Expr) -> SExpr:
                 def put_load(varname):
                     if varname == ".io":
                         return ase.expr("var_load", ".io")
-                    elif varname in defined_names:
-                        return ase.expr("var_load", varname)
                     else:
-                        return ase.expr("py_undef")
+                        return ase.expr("var_load", varname)
 
                 args = [put_load(k) for k in all_names]
-                print("all_names", all_names)
-                print("defined_names", defined_names)
+                # print("all_names", all_names)
+                # print("defined_names", defined_names)
+                # breakpoint()
                 if len(args) > 1:
                     return ase.expr("pack", *args)
                 else:
@@ -510,18 +530,20 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             right: SExpr,
             loc: SExpr,
         ) -> SExpr:
-            [name] = left.args
-            return ase.expr(
-                "assign",
-                ase.expr(
-                    "py_inplace_binop",
-                    opname,
-                    self.get_io(),
-                    ase.expr("var_load", name),
-                    right,
-                ),
-                name,
+            [lhs_name] = left.args
+            rhs_name = f".rhs.{orig.handle}"
+            last = ase.expr(
+                "py_inplace_binop",
+                opname,
+                self.get_io(),
+                ase.expr("var_load", lhs_name),
+                ase.expr("var_load", rhs_name),
             )
+            for val, name in reversed(list(unpack_assign(right, targets=[rhs_name]))):
+                last = ase.expr("let", name, val, last)
+            out = ase.expr("assign", last, lhs_name)
+            return out
+
 
         def rewrite_PyAst_callargs_pos(
             self, orig: ase.Expr, *args: SExpr
@@ -555,13 +577,13 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                     case ase.Expr("py_if", (test, blk_true, blk_false)):
                         # look up variable in each block to find variable
                         # definitions
-                        used = lookup_used(last)
-                        defs_true = lookup_defined(blk_true) & used
-                        defs_false = lookup_defined(blk_false) & used
+                        # used = lookup_used(last)
+                        defs_true = lookup_defined(blk_true) | {".io"} #& used
+                        defs_false = lookup_defined(blk_false) | {".io"} #& used
                         defs = sorted(defs_true | defs_false)
-                        blk_true = replace_scfg_pass(blk_true, defs_true, defs)
+                        blk_true = replace_scfg_pass(blk_true, defs)
                         blk_false = replace_scfg_pass(
-                            blk_false, defs_false, defs
+                            blk_false, defs
                         )
 
                         if uses_io(test):
@@ -578,16 +600,39 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                                 "let", unpack_name, unpack_cond, stmt
                             )
                         else:
-                            assert False
+                            raise NotImplementedError
 
-                        iterable = unpack_tuple(stmt, defs)
+                        iterable = unpack_tuple(stmt, defs, force_io=True)
                         for unpacked, target in reversed(list(iterable)):
                             last = ase.expr("let", target, unpacked, last)
 
-                    case ase.Expr("scfg_while", (ase.Expr() as test, loopblk)):
-                        defs = sorted(lookup_defined(loopblk))
+                    case ase.Expr("py_while", (ase.Expr("var_load") as test,
+                                                 ase.Expr() as loopblk)):
+                        # look for variables used before defined
+                        used = lookup_input_vars(loopblk)
+                        # look for defined names
+                        defs = lookup_defined(loopblk) | {".io"}
+                        # variables that loopback
+                        backedge_var_prefix = '__scfg_backedge_var_'
+                        loop_cont = '__scfg_loop_cont__'
+                        loopback_vars = [loop_cont, *sorted(used & defs)]
+                        # output variables
+                        output_vars = [*loopback_vars,
+                                       *sorted(defs - {loop_cont, *loopback_vars})]
+                        loopblk = replace_scfg_pass(loopblk, output_vars)
+                        pack_name = f".packed.{loopblk.handle}"
+                        # create packing for mutated variables
+                        for unpacked, target in reversed(list(unpack_tuple(ase.expr("var_load", pack_name), loopback_vars))):
+                            loopblk = ase.expr("let", target, unpacked, loopblk)
+                        stmt = ase.expr("scfg_while", test, loopblk)
+                        def prep_pack(k):
+                            if k.startswith(backedge_var_prefix):
+                                return ase.expr("py_undef")
+                            return ase.expr("var_load", k)
+                        packed = ase.expr("pack", *map(prep_pack, output_vars))
+                        stmt = ase.expr("let", pack_name, packed, stmt)
 
-                        iterable = unpack_tuple(stmt, defs)
+                        iterable = unpack_tuple(stmt, output_vars)
                         for unpacked, target in reversed(list(iterable)):
                             last = ase.expr("let", target, unpacked, last)
 
@@ -643,12 +688,12 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                     raise AssertionError(
                         f"unsupported while loop: {test.str()}"
                     )
-            return ase.expr("scfg_while", test, *body)
+            return ase.expr("py_while", test, *body)
 
         def rewrite_PyAst_UnaryOp(
             self, orig: ase.Expr, opname: str, val: SExpr, loc: SExpr
         ) -> SExpr:
-            return ase.expr("py_unaryop", self.get_io(), opname, val)
+            return ase.expr("py_unaryop", opname, self.get_io(), val)
 
         def rewrite_PyAst_BinOp(
             self,
@@ -687,10 +732,10 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
 
     # Verify
     def verify(root: SExpr):
-        seen = set()
-        for parents, cur in root.walk_descendants():
-            if cur not in seen:
-                seen.add(cur)
+        # seen = set()
+        for parents, cur in root.walk_descendants_depth_first_no_repeat():
+            # if cur not in seen:
+            #     seen.add(cur)
             # else:
             #     continue
             match cur:
@@ -767,8 +812,6 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
                 if blet is None:
                     return lb.arg(parameters.index(varname) + depth)
                 what = lb.arg(depth)
-                if what.handle == 636:
-                    breakpoint()
                 return what
 
             case ase.Expr(
@@ -880,6 +923,10 @@ class EvalIO:
         return "IO"
 
 
+class EvalUndef:
+    def __repr__(self) -> str:
+        return "UNDEFINED"
+
 class SExprValuePair(NamedTuple):
     expr: SExpr
     value: Any
@@ -934,9 +981,7 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                     return retval
             case ase.Expr("arg", (int(argidx),)):
                 for i, v in enumerate(reversed(ctx.blam_stack)):
-                    print(" ", i, "--", v.value)
-                print(" target", -argidx - 1)
-                # breakpoint()
+                    print(" " * indent, i, "--", v.value)
                 retval = ctx.blam_stack[-argidx - 1].value
                 return retval
             case ase.Expr("unpack", (int(idx), ase.Expr() as packed_expr)):
@@ -964,6 +1009,21 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 else:
                     return (yield br_false)
             case ase.Expr(
+                "scfg_while",
+                (
+                    _, # condition
+                    ase.Expr() as loopblk,
+                ),
+            ):
+                loop_cond = True
+                while loop_cond:
+                    # TODO: need to wire in the inputs
+                    memo = loopblk.traverse(lambda_evaluation, state)
+                    loop_end_vars = memo[loopblk]
+                    loop_cond = loop_end_vars[0]
+                    ctx.blam_stack[-1] = ctx.blam_stack[-1]._replace(value=loop_end_vars)
+                return loop_end_vars
+            case ase.Expr(
                 "py_return", (ase.Expr() as iostate, ase.Expr() as retval)
             ):
                 return (yield iostate), (yield retval)
@@ -972,6 +1032,21 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 for arg in args:
                     elems.append((yield arg))
                 return tuple(elems)
+            case ase.Expr("py_undef"):
+                return EvalUndef()
+            case ase.Expr("py_int", (int(ival),)):
+                return ival
+            case ase.Expr(
+                "py_unaryop",
+                (str(opname), ase.Expr() as iostate, ase.Expr() as val),
+            ):
+                ioval = (yield iostate)
+                match opname:
+                    case "not":
+                        retval = not (yield val)
+                    case _:
+                        raise NotImplementedError(opname)
+                return ioval, retval
             case ase.Expr(
                 "py_binop",
                 (
@@ -1037,4 +1112,4 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 raise AssertionError(expr.as_tuple())
     finally:
         if "retval" in locals():
-            print(" " * indent, "=>", retval)
+            print(" " * indent, f"({expr.handle})=>", retval)
