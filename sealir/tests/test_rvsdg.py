@@ -167,22 +167,39 @@ def test_for_loop_reduce_add_1d():
     run(udt, args)
 
 
-# def sum1d(n: int) -> int:
-#     c = 0
-#     for i in range(n):
-#         for j in range(i):
-#             c += i * j
-#             if c > 100:
-#                 break
-#     return c
+
+def test_for_loop_reduce_add_2d():
+    def udt(n: int) -> int:
+        c = 0
+        for i in range(n):
+            for j in range(i):
+                c += i + j
+        return c
+
+    args = (5,)
+    run(udt, args)
+
+    args = (0,)
+    run(udt, args)
 
 
-# def sum1d(n: int) -> int:
-#     c = 0
-#     for i in range(n):
-#         for j in range(i):
-#             c += i + j
-#     return c
+
+def test_for_loop_reduce_add_2d_w_break():
+    def udt(n: int) -> int:
+        c = 0
+        for i in range(n):
+            for j in range(i):
+                c += i * j
+                if c > 20:
+                    break
+        return c
+
+    args = (5,)
+    run(udt, args)
+
+    args = (0,)
+    run(udt, args)
+
 
 
 def run(func, args):

@@ -1121,6 +1121,8 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                         res = lhsval > rhsval
                     case "!=":
                         res = lhsval != rhsval
+                    case "in":
+                        res = lhsval in rhsval
                     case _:
                         raise NotImplementedError(op)
                 return ioval, res
