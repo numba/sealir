@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import time
 import operator
 from collections import defaultdict
 from contextlib import contextmanager
@@ -19,16 +20,20 @@ from sealir import ase
 from sealir.lam import LamBuilder
 from sealir.rewriter import TreeRewriter
 
+
+_DEBUG = False
+
 SExpr: TypeAlias = ase.Expr
 
 
 def pp(expr: SExpr):
-    print(
-        pformat(expr.as_tuple(-1, dedup=True))
-        .replace(",", "")
-        .replace("'", "")
-    )
-    # print(pformat(expr.as_dict()))
+    if _DEBUG:
+        print(
+            pformat(expr.as_tuple(-1, dedup=True))
+            .replace(",", "")
+            .replace("'", "")
+        )
+        # print(pformat(expr.as_dict()))
 
 
 class ConvertToSExpr(ast.NodeTransformer):
@@ -254,7 +259,8 @@ class ConvertToSExpr(ast.NodeTransformer):
 def convert_to_sexpr(node: ast.AST):
     with ase.Tape() as stree:
         out = ConvertToSExpr(stree).visit(node)
-    pprint(out.as_tuple(depth=2**30))
+    if _DEBUG:
+        pprint(out.as_tuple(depth=2**30))
     return out
 
 
@@ -397,24 +403,24 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
 
     empty_set = frozenset()
 
-    def lookup_used(blk: ase.Expr):
-        class FindUsed(TreeRewriter[set[str]]):
-            flag_save_history = False
+    # def lookup_used(blk: ase.Expr):
+    #     class FindUsed(TreeRewriter[set[str]]):
+    #         flag_save_history = False
 
-            def rewrite_var_load(
-                self, orig: ase.Expr, varname: str
-            ) -> set[str]:
-                return {varname}
+    #         def rewrite_var_load(
+    #             self, orig: ase.Expr, varname: str
+    #         ) -> set[str]:
+    #             return {varname}
 
-            def rewrite_generic(
-                self, orig: ase.Expr, args: tuple[Any, ...], updated: bool
-            ) -> set[str] | ase.Expr:
-                return empty_set
+    #         def rewrite_generic(
+    #             self, orig: ase.Expr, args: tuple[Any, ...], updated: bool
+    #         ) -> set[str] | ase.Expr:
+    #             return empty_set
 
-        mypass = FindUsed()
-        blk.apply_bottomup(mypass)
-        memo = mypass.memo
-        return reduce(operator.or_, memo.values())
+    #     mypass = FindUsed()
+    #     blk.apply_bottomup(mypass)
+    #     memo = mypass.memo
+    #     return reduce(operator.or_, memo.values())
 
     def lookup_input_vars(blk: ase.Expr):
         defined = set()
@@ -439,6 +445,17 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
 
         blk.traverse(lookup_algo)
         return external_references
+
+    @contextmanager
+    def handle_chained_expr(*args: SExpr):
+        argnames = [f".tmp.callarg.{i}" for i in range(len(args))]
+        argloads = [ase.expr("var_load", k) for k in argnames]
+        def gen(last: SExpr):
+            for k, v in zip(argnames, args, strict=True):
+                for unpacked, target in reversed(list(unpack_assign(v, [k]))):
+                    last = ase.expr("let", target, unpacked, last)
+            return last
+        yield argloads, gen
 
     def replace_scfg_pass(
         block_root: SExpr, all_names: list[str]
@@ -551,15 +568,11 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             return args
 
         def rewrite_PyAst_Call(
-            self, orig: ase.Expr, func: SExpr, posargs: SExpr, loc: SExpr
+            self, orig: ase.Expr, func: SExpr, posargs: tuple[SExpr, ...], loc: SExpr
         ) -> SExpr:
-            argnames = [f".tmp.callposarg.{i}" for i in range(len(posargs))]
-            last = ase.expr("py_call", self.get_io(), func,
-                            *map(lambda k: ase.expr("var_load", k), argnames))
-            for k, arg in zip(argnames, posargs):
-                for unpacked, target in reversed(list(unpack_assign(arg, [k]))):
-                    last = ase.expr("let", target, unpacked, last)
-            return last
+            with handle_chained_expr(*posargs) as (args, finish):
+                last = finish(ase.expr("py_call", self.get_io(), func, *args))
+                return last
 
         def rewrite_PyAst_Compare(
             self,
@@ -569,7 +582,8 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             right: SExpr,
             loc: SExpr,
         ) -> SExpr:
-            return ase.expr("py_compare", opname, self.get_io(), left, right)
+            with handle_chained_expr(left, right) as (args, finish):
+                return finish(ase.expr("py_compare", opname, self.get_io(), *args))
 
         def rewrite_PyAst_block(self, orig: ase.Expr, *body: SExpr) -> SExpr:
             last = ase.expr("scfg_pass")
@@ -699,7 +713,8 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_UnaryOp(
             self, orig: ase.Expr, opname: str, val: SExpr, loc: SExpr
         ) -> SExpr:
-            return ase.expr("py_unaryop", opname, self.get_io(), val)
+            with handle_chained_expr(val) as (args, finish):
+                return finish(ase.expr("py_unaryop", opname, self.get_io(), *args))
 
         def rewrite_PyAst_BinOp(
             self,
@@ -709,7 +724,8 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             rhs: SExpr,
             loc: SExpr,
         ) -> SExpr:
-            return ase.expr("py_binop", opname, self.get_io(), lhs, rhs)
+            with handle_chained_expr(lhs, rhs) as (args, finish):
+                return finish(ase.expr("py_binop", opname, self.get_io(), *args))
 
         def rewrite_PyAst_Return(
             self, orig: ase.Expr, retval: SExpr, loc: SExpr
@@ -797,6 +813,9 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
                             depth += 1
         return None, depth
 
+
+    ts = time.time()
+
     reachable = set()
     for parents, child in prgm.walk_descendants_depth_first_no_repeat():
         reachable.add(child)
@@ -810,6 +829,8 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
                 else:
                     # function arguments do not have parent let.
                     pass
+
+    print("   var_load - let analysis", time.time() - ts)
 
     def rewrite_let_into_lambda(expr: SExpr, state: ase.TraverseState):
         match expr:
@@ -844,7 +865,10 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
         return ase.expr(expr.head, *updated_args)
 
     with prgm.tape:
+
+        ts = time.time()
         memo = prgm.traverse(rewrite_let_into_lambda)
+        print("   rewrite_let_into_lambda", time.time() - ts)
         prgm = memo[prgm]
 
     return prgm  # lb.run_abstraction_pass(prgm)
@@ -863,12 +887,26 @@ def restructure_source(function):
 
     print(ast.unparse(transformed_ast))
 
+
+
+    t_start = time.time()
+
     prgm = convert_to_sexpr(transformed_ast)
+
+    print("convert_to_sexpr", time.time() - t_start)
 
     varinfo = find_variable_info(prgm)
     pprint(varinfo)
 
+
+    print("find_variable_info", time.time() - t_start)
+
     rvsdg = convert_to_rvsdg(prgm, varinfo)
+
+
+
+
+    print("convert_to_rvsdg", time.time() - t_start)
 
     from sealir.prettyformat import html_format
 
@@ -880,8 +918,10 @@ def restructure_source(function):
     # return
 
     lam = convert_to_lambda(rvsdg, varinfo)
-    pp(lam)
-    print(lam.str())
+    print("convert_to_lambda", time.time() - t_start)
+    if _DEBUG:
+        pp(lam)
+        print(lam.str())
 
     # out = html_format.to_html(lam)
     with open("debug.html", "w") as fout:
@@ -974,12 +1014,19 @@ def ensure_io(obj: Any) -> EvalIO:
 
 
 def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
+    DEBUG = _DEBUG
+
     indent = len(state.parents)
     ctx = state.context
-    from sealir.lam import _app
+
+    if DEBUG:
+        dbg_print = print
+    else:
+        def dbg_print(*args):
+            pass
 
     try:
-        print(" " * indent, "EVAL", expr.handle, expr.as_tuple(2))
+        dbg_print(" " * indent, "EVAL", expr.handle, expr.as_tuple(2))
         match expr:
             case ase.Expr("lam", (body,)):
                 retval = yield body
@@ -990,7 +1037,7 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                     return retval
             case ase.Expr("arg", (int(argidx),)):
                 for i, v in enumerate(reversed(ctx.blam_stack)):
-                    print(" " * indent, i, "--", v.value)
+                    dbg_print(" " * indent, i, "--", v.value)
                 retval = ctx.blam_stack[-argidx - 1].value
                 return retval
             case ase.Expr("unpack", (int(idx), ase.Expr() as packed_expr)):
@@ -1147,4 +1194,4 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 raise AssertionError(expr.as_tuple())
     finally:
         if "retval" in locals():
-            print(" " * indent, f"({expr.handle})=>", retval)
+            dbg_print(" " * indent, f"({expr.handle})=>", retval)

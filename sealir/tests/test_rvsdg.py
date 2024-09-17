@@ -32,6 +32,15 @@ def test_simple_add():
     run(udt, args)
 
 
+def test_chained_binop():
+    def udt(n: int, m: int) -> int:
+        a = n + m * 10
+        return a
+
+    args = (12, 32)
+    run(udt, args)
+
+
 def test_inplace_add_1():
     def udt(n: int, m: int) -> int:
         a = n + m
@@ -201,6 +210,46 @@ def test_for_loop_reduce_add_2d_w_break():
     run(udt, args)
 
 
+# _GLOBAL = 1234  # used in test_f_o_r_t_r_a_n
+
+# def test_f_o_r_t_r_a_n():
+#     import numpy  as np
+
+#     _FREEVAR = 0xCAFE
+
+#     def foo(a, b, c=12, d=1j, e=None):
+#         f = a + b
+#         a += _FREEVAR
+#         g = np.zeros(c, dtype=np.complex64)
+#         h = f + g
+#         i = 1j / d
+#         # For SSA, zero init, n and t
+#         n = 0
+#         t = 0
+#         if np.abs(i) > 0:
+#             k = h / i
+#             l = np.arange(1, c + 1)
+#             m = np.sqrt(l - g) + e * k
+#             if np.abs(m[0]) < 1:
+#                 for o in range(a):
+#                     n += 0
+#                     if np.abs(n) < 3:
+#                         break
+#                 n += m[2]
+#             p = g / l
+#             q = []
+#             for r in range(len(p)):
+#                 q.append(p[r])
+#                 if r > 4 + 1:
+#                     s = 123
+#                     t = 5
+#                     if s > 122 - c:
+#                         t += s
+#                 t += q[0] + _GLOBAL
+
+#         return f + o + r + t + r + a + n
+
+
 
 def run(func, args):
     lam = restructure_source(func)
@@ -212,8 +261,8 @@ def run(func, args):
     with lam.tape:
         app_root = lb.app(lam, *ctx.make_arg_node())
 
-    out = lb.format(app_root)
-    print(out)
+    # out = lb.format(app_root)
+    # print(out)
 
     memo = app_root.traverse(lambda_evaluation, EvalLamState(context=ctx))
     res = memo[app_root]
