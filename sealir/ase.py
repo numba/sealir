@@ -27,6 +27,7 @@ from functools import cached_property
 from pprint import pformat
 from typing import (
     Any,
+    Type,
     Callable,
     Iterator,
     LiteralString,
@@ -111,7 +112,7 @@ class Tape:
     _tokens: list[token_type]
     """Store tokens.
     """
-    _tokenmap: dict[token_type, int]
+    _tokenmap: dict[tuple[Type, token_type], int]
     """
     Auxiliary. Map tokens to their position in `_tokens`.
     """
@@ -124,7 +125,7 @@ class Tape:
         # First item on the heap is the None token
         self._heap = [0]
         self._tokens = [None]
-        self._tokenmap = {None: 0}
+        self._tokenmap = {(type(None), None): 0}
         self._num_records = 0
 
     def __len__(self) -> int:
@@ -353,10 +354,10 @@ class Tape:
         if token is not None and not isinstance(token, (int, str, float)):
             raise TypeError(f"invalid token type for {type(token)}")
         last = -len(self._tokens)
-        handle = self._tokenmap.get(token, last)
+        handle = self._tokenmap.get((type(token), token), last)
         if handle == last:
             self._tokens.append(token)
-            self._tokenmap[token] = handle
+            self._tokenmap[type(token), token] = handle
         self._heap.append(handle)
 
     def write_begin(self) -> handle_type:
@@ -922,7 +923,8 @@ class Record:
 def expr(head: str, *args: value_type) -> Expr:
     """The main API for creating an `Expr`."""
     tape = Context.top()
-    return Expr.write(tape, head, args)
+    out = Expr.write(tape, head, args)
+    return out
 
 
 def _select(iterable, idx: int):
