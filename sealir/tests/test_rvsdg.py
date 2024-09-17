@@ -1,3 +1,5 @@
+from collections import ChainMap
+
 from sealir.lam import LamBuilder
 from sealir.rvsdg import (
     EvalCtx,
@@ -210,64 +212,152 @@ def test_for_loop_reduce_add_2d_w_break():
     run(udt, args)
 
 
-# _GLOBAL = 1234  # used in test_f_o_r_t_r_a_n
+_GLOBAL = 1234  # used in test_f_o_r_t_r_a_n
 
-# def test_f_o_r_t_r_a_n():
-#     import numpy  as np
+def test_f_o_r_t_r_a_n():
+    import numpy  as np
 
-#     _FREEVAR = 0xCAFE
+    _FREEVAR = 0xCAFE
 
-#     def foo(a, b, c=12, d=1j, e=None):
-#         f = a + b
-#         a += _FREEVAR
-#         g = np.zeros(c, dtype=np.complex64)
-#         h = f + g
-#         i = 1j / d
-#         # For SSA, zero init, n and t
-#         n = 0
-#         t = 0
-#         if np.abs(i) > 0:
-#             k = h / i
-#             l = np.arange(1, c + 1)
-#             m = np.sqrt(l - g) + e * k
-#             if np.abs(m[0]) < 1:
-#                 for o in range(a):
-#                     n += 0
-#                     if np.abs(n) < 3:
-#                         break
-#                 n += m[2]
-#             p = g / l
-#             q = []
-#             for r in range(len(p)):
-#                 q.append(p[r])
-#                 if r > 4 + 1:
-#                     s = 123
-#                     t = 5
-#                     if s > 122 - c:
-#                         t += s
-#                 t += q[0] + _GLOBAL
+    # default argument not supported yet
+    # FIXME: original : def foo(a, b, c=12, d=1j, e=None):
+    def foo(a, b, c, d, e):
+        f = a + b
+        a += _FREEVAR
+        # FIXME: original : g = np.zeros(c, dtype=np.complex64)
+        g = np.zeros(c, np.complex64)
+        h = f + g
+        i = 1j / d
+        # For SSA, zero init, n and t
+        n = 0
+        t = 0
+        if np.abs(i) > 0:
+            k = h / i
+            l = np.arange(1, c + 1)
+            m = np.sqrt(l - g) + e * k
+            # FIXME  original : if np.abs(m[0]) < 1:
+            if np.abs(m[0]) < 5:
+                for o in range(a):
+                    n += 0
+                    if np.abs(n) < 3:
+                        break
+                n += m[2]
+            p = g / l
+            q = []
+            for r in range(len(p)):
+                q.append(p[r])
+                if r > 4 + 1:
+                    s = 123
+                    t = 5
+                    if s > 122 - c:
+                        t += s
+                t += q[0] + _GLOBAL
 
-#         return f + o + r + t + r + a + n
+        return f + o + r + t + r + a + n
 
 
 
-def run(func, args):
+    def transformed_foo(a, b, c, d, e):
+        f = a + b
+        a += _FREEVAR
+        g = np.zeros(c, np.complex64)
+        h = f + g
+        i = 1j / d
+        n = 0
+        t = 0
+        if np.abs(i) > 0:
+            k = h / i
+            l = np.arange(1, c + 1)
+            m = np.sqrt(l - g) + e * k
+            if np.abs(m[0]) < 5:
+                __scfg_iterator_7__ = iter(range(a))
+                o = None
+                __scfg_loop_cont__ = True
+                while __scfg_loop_cont__:
+                    __scfg_iter_last_7__ = o
+                    o = next(__scfg_iterator_7__, '__scfg_sentinel__')
+                    if o != '__scfg_sentinel__':
+                        n += 0
+                        if np.abs(n) < 3:
+                            __scfg_exit_var_1__ = 0
+                            __scfg_backedge_var_1__ = 1
+                        else:
+                            __scfg_backedge_var_1__ = 0
+                            __scfg_exit_var_1__ = -1
+                    else:
+                        __scfg_exit_var_1__ = 1
+                        __scfg_backedge_var_1__ = 1
+                    __scfg_loop_cont__ = not __scfg_backedge_var_1__
+                if __scfg_exit_var_1__ in (0,):
+                    pass
+                else:
+                    o = __scfg_iter_last_7__
+                n += m[2]
+            else:
+                pass
+            p = g / l
+            q = []
+            __scfg_iterator_14__ = iter(range(len(p)))
+            r = None
+            __scfg_loop_cont__ = True
+            while __scfg_loop_cont__:
+                __scfg_iter_last_14__ = r
+                r = next(__scfg_iterator_14__, '__scfg_sentinel__')
+                if r != '__scfg_sentinel__':
+                    q.append(p[r])
+                    if r > 4 + 1:
+                        s = 123
+                        t = 5
+                        if s > 122 - c:
+                            t += s
+                        else:
+                            pass
+                    else:
+                        pass
+                    t += q[0] + _GLOBAL
+                    __scfg_backedge_var_0__ = 0
+                else:
+                    __scfg_backedge_var_0__ = 1
+                __scfg_loop_cont__ = not __scfg_backedge_var_0__
+            r = __scfg_iter_last_14__
+        else:
+            pass
+        return f + o + r + t + r + a + n
+
+
+    args = (1, 1, 12, 1j, 1)
+    a = foo(*args)
+    b = transformed_foo(*args)
+    assert a == b
+
+    run(foo, args, localscope=ChainMap(locals(), globals()))
+
+
+def run(func, args, *, localscope=None):
+    expected = func(*args)
+
     lam = restructure_source(func)
 
     # Prepare run
     lb = LamBuilder(lam.tape)
 
-    ctx = EvalCtx.from_arguments(*args)
+    if localscope is None:
+        ctx = EvalCtx.from_arguments(*args)
+    else:
+        ctx = EvalCtx.from_arguments_and_locals(args, localscope)
+
     with lam.tape:
         app_root = lb.app(lam, *ctx.make_arg_node())
 
     # out = lb.format(app_root)
     # print(out)
 
+
+
     memo = app_root.traverse(lambda_evaluation, EvalLamState(context=ctx))
     res = memo[app_root]
     print("result", res)
     got = res[1]
 
-    assert got == func(*args)
+    assert got == expected
     return got

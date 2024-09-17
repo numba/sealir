@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import time
 import operator
-from collections import defaultdict
+from collections import defaultdict, ChainMap
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import reduce
@@ -62,6 +62,9 @@ class ConvertToSExpr(ast.NodeTransformer):
             self.get_loc(node),
         )
 
+    def visit_Pass(self, node: ast.Return) -> SExpr:
+        return ase.expr("PyAst_Pass", self.get_loc(node))
+
     def visit_Return(self, node: ast.Return) -> SExpr:
         return ase.expr(
             "PyAst_Return",
@@ -84,7 +87,7 @@ class ConvertToSExpr(ast.NodeTransformer):
         return ase.expr(
             "PyAst_arg",
             node.arg,
-            self.visit(node.annotation),
+            self.visit(node.annotation) if node.annotation is not None else ase.expr("PyAst_None", self.get_loc(node)),
             self.get_loc(node),
         )
 
@@ -98,6 +101,14 @@ class ConvertToSExpr(ast.NodeTransformer):
             case _:
                 raise NotImplementedError(node.ctx)
         return ase.expr("PyAst_Name", node.id, ctx, self.get_loc(node))
+
+    def visit_Expr(self, node: ast.Expr) -> SExpr:
+        return ase.expr(
+            "PyAst_Assign",
+            self.visit(node.value),
+            ase.expr("PyAst_Name", ".void", "store", self.get_loc(node)),
+            self.get_loc(node),
+        )
 
     def visit_Assign(self, node: ast.Assign) -> SExpr:
         return ase.expr(
@@ -154,6 +165,22 @@ class ConvertToSExpr(ast.NodeTransformer):
             self.get_loc(node),
         )
 
+    def visit_Attribute(self, node: ast.Attribute) -> SExpr:
+        return ase.expr(
+            "PyAst_Attribute",
+            self.visit(node.value),
+            node.attr,
+            self.get_loc(node),
+        )
+
+    def visit_Subscript(self, node: ast.Subscript) -> SExpr:
+        return ase.expr(
+            "PyAst_Subscript",
+            self.visit(node.value),
+            self.visit(node.slice),
+            self.get_loc(node),
+        )
+
     def visit_Call(self, node: ast.Call) -> SExpr:
         # TODO
         assert not node.keywords
@@ -207,6 +234,13 @@ class ConvertToSExpr(ast.NodeTransformer):
                         node.value,
                         self.get_loc(node),
                     )
+                case complex():
+                    return ase.expr(
+                        "PyAst_Constant_complex",
+                        node.value.real,
+                        node.value.imag,
+                        self.get_loc(node),
+                    )
                 case None:
                     return ase.expr(
                         "PyAst_None",
@@ -222,13 +256,22 @@ class ConvertToSExpr(ast.NodeTransformer):
 
     def visit_Tuple(self, node: ast.Tuple) -> SExpr:
         match node:
-            case ast.Tuple(elts=[*constants], ctx=ast.Load()):
+            case ast.Tuple(elts=[*elements], ctx=ast.Load()):
                 # e.g. Tuple(elts=[Constant(value=0)], ctx=Load())
                 return ase.expr(
                     "PyAst_Tuple",
-                    *map(self.visit, constants),
+                    *map(self.visit, elements),
                     self.get_loc(node),
                 )
+
+        raise NotImplementedError(ast.dump(node))
+
+    def visit_List(self, node: ast.List) -> SExpr:
+        match node:
+            case ast.List(elts=[*elements], ctx=ast.Load()):
+                return ase.expr("PyAst_List",
+                                *map(self.visit, elements),
+                                self.get_loc(node),)
 
         raise NotImplementedError(ast.dump(node))
 
@@ -240,6 +283,10 @@ class ConvertToSExpr(ast.NodeTransformer):
                 return "-"
             case ast.Mult():
                 return "*"
+            case ast.Div():
+                return "/"
+            case ast.FloorDiv():
+                return "//"
             case ast.Not():
                 return "not"
             case _:
@@ -521,6 +568,11 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         ) -> SExpr:
             return ase.expr("py_int", val)
 
+        def rewrite_PyAst_Constant_complex(
+            self, orig: ase.Expr, real: float, imag: float, loc: SExpr
+        ) -> SExpr:
+            return ase.expr("py_complex", real, imag)
+
         def rewrite_PyAst_Constant_str(
             self, orig: ase.Expr, val: int, loc: SExpr
         ) -> SExpr:
@@ -532,6 +584,10 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_Tuple(self, orig: ase.Expr, *rest: SExpr) -> SExpr:
             [*elts, loc] = rest
             return ase.expr("py_tuple", *elts)
+
+        def rewrite_PyAst_List(self, orig: ase.Expr, *rest: SExpr) -> SExpr:
+            [*elts, loc] = rest
+            return ase.expr("py_list", *elts)
 
         def rewrite_PyAst_Assign(
             self, orig: ase.Expr, val: SExpr, *rest: SExpr
@@ -570,9 +626,22 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_Call(
             self, orig: ase.Expr, func: SExpr, posargs: tuple[SExpr, ...], loc: SExpr
         ) -> SExpr:
-            with handle_chained_expr(*posargs) as (args, finish):
+            with handle_chained_expr(func, *posargs) as (args, finish):
+                [func, *args] = args
                 last = finish(ase.expr("py_call", self.get_io(), func, *args))
                 return last
+
+        def rewrite_PyAst_Attribute(
+            self, orig: ase.Expr, value: SExpr, attr: str, loc: SExpr,
+        ) -> SExpr:
+            with handle_chained_expr(value) as ((arg,), finish):
+                return finish(ase.expr("py_getattr", attr, self.get_io(), arg))
+
+        def rewrite_PyAst_Subscript(
+            self, orig: ase.Expr, value: SExpr, slice: SExpr, loc: SExpr,
+        ) -> SExpr:
+            with handle_chained_expr(value, slice) as (args, finish):
+                return finish(ase.expr("py_getitem", self.get_io(), *args))
 
         def rewrite_PyAst_Compare(
             self,
@@ -684,7 +753,7 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
                             case _:
                                 assert False
                     case ase.Expr("py_pass"):
-                        last = stmt
+                        pass
                     case _:
                         raise AssertionError(stmt)
             return last
@@ -731,6 +800,11 @@ def convert_to_rvsdg(prgm: SExpr, varinfo: VariableInfo):
             self, orig: ase.Expr, retval: SExpr, loc: SExpr
         ) -> SExpr:
             return ase.expr("py_return", retval)
+
+        def rewrite_PyAst_Pass(
+            self, orig: ase.Expr, loc: SExpr
+        ) -> SExpr:
+            return ase.expr("py_pass")
 
         def rewrite_PyAst_FunctionDef(
             self,
@@ -887,8 +961,6 @@ def restructure_source(function):
 
     print(ast.unparse(transformed_ast))
 
-
-
     t_start = time.time()
 
     prgm = convert_to_sexpr(transformed_ast)
@@ -902,8 +974,6 @@ def restructure_source(function):
     print("find_variable_info", time.time() - t_start)
 
     rvsdg = convert_to_rvsdg(prgm, varinfo)
-
-
 
 
     print("convert_to_rvsdg", time.time() - t_start)
@@ -921,17 +991,13 @@ def restructure_source(function):
     print("convert_to_lambda", time.time() - t_start)
     if _DEBUG:
         pp(lam)
-        print(lam.str())
+    print(lam.str())
 
     # out = html_format.to_html(lam)
     with open("debug.html", "w") as fout:
-        print(
-            html_format.write_html(
-                fout, html_format.to_html(rvsdg), html_format.to_html(lam)
-            )
+        html_format.write_html(
+            fout, html_format.to_html(rvsdg), html_format.to_html(lam)
         )
-
-    # return
 
     return lam
 
@@ -984,12 +1050,18 @@ class SExprValuePair(NamedTuple):
 @dataclass(frozen=True)
 class EvalCtx:
     args: tuple[Any, ...]
+    localscope: dict[str, Any]
     value_map: dict[SExpr, Any] = field(default_factory=dict)
     blam_stack: list[SExprValuePair] = field(default_factory=list)
 
     @classmethod
     def from_arguments(cls, *args):
-        return EvalCtx(args=tuple(reversed([EvalIO(), *args])))
+        return cls.from_arguments_and_locals(args, {})
+
+    @classmethod
+    def from_arguments_and_locals(cls, args, locals):
+        return EvalCtx(args=tuple(reversed([EvalIO(), *args])),
+                       localscope=locals)
 
     def make_arg_node(self):
         ba = []
@@ -1084,19 +1156,42 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 "py_return", (ase.Expr() as iostate, ase.Expr() as retval)
             ):
                 return (yield iostate), (yield retval)
+            case ase.Expr("py_pass", ()):
+                return
             case ase.Expr("py_tuple", args):
                 elems = []
                 for arg in args:
                     elems.append((yield arg))
                 return tuple(elems)
+            case ase.Expr("py_list", args):
+                elems = []
+                for arg in args:
+                    elems.append((yield arg))
+                return list(elems)
             case ase.Expr("py_undef", ()):
                 return EvalUndef()
             case ase.Expr("py_none", ()):
                 return None
             case ase.Expr("py_int", (int(ival),)):
                 return ival
+            case ase.Expr("py_complex", (float(freal), float(fimag))):
+                return complex(freal, fimag)
             case ase.Expr("py_str", (str(text),)):
                 return text
+            case ase.Expr("py_getattr", (str(attrname),
+                                         ase.Expr() as iostate,
+                                         ase.Expr() as value)):
+                ioval = ensure_io((yield iostate))
+                retval = getattr((yield value), attrname)
+                return ioval, retval
+            case ase.Expr("py_getitem", (ase.Expr() as iostate,
+                                         ase.Expr() as value,
+                                         ase.Expr() as index)):
+                ioval = ensure_io((yield iostate))
+                base_val = (yield value)
+                index_val = (yield index)
+                retval = base_val[index_val]
+                return ioval, retval
             case ase.Expr(
                 "py_unaryop",
                 (str(opname), ase.Expr() as iostate, ase.Expr() as val),
@@ -1123,8 +1218,14 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 match op:
                     case "+":
                         retval = lhsval + rhsval
+                    case "-":
+                        retval = lhsval - rhsval
                     case "*":
                         retval = lhsval * rhsval
+                    case "/":
+                        retval = lhsval / rhsval
+                    case "//":
+                        retval = lhsval // rhsval
                     case _:
                         raise NotImplementedError(op)
                 return ioval, retval
@@ -1189,7 +1290,7 @@ def lambda_evaluation(expr: ase.Expr, state: EvalLamState):
                 retval = callee(*argvals)
                 return ioval, retval
             case ase.Expr("py_global_load", (str(glbname),)):
-                return __builtins__[glbname]
+                return ChainMap(ctx.localscope, __builtins__)[glbname]
             case _:
                 raise AssertionError(expr.as_tuple())
     finally:
