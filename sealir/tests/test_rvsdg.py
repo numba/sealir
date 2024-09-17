@@ -52,10 +52,11 @@ def test_inplace_add_1():
     args = (12, 32)
     run(udt, args)
 
+
 def test_inplace_add_2():
     def udt(n: int, m: int) -> int:
         a = n
-        a +=  n + m
+        a += n + m
         return a
 
     args = (12, 32)
@@ -178,7 +179,6 @@ def test_for_loop_reduce_add_1d():
     run(udt, args)
 
 
-
 def test_for_loop_reduce_add_2d():
     def udt(n: int) -> int:
         c = 0
@@ -192,7 +192,6 @@ def test_for_loop_reduce_add_2d():
 
     args = (0,)
     run(udt, args)
-
 
 
 def test_for_loop_reduce_add_2d_w_break():
@@ -214,8 +213,9 @@ def test_for_loop_reduce_add_2d_w_break():
 
 _GLOBAL = 1234  # used in test_f_o_r_t_r_a_n
 
+
 def test_f_o_r_t_r_a_n():
-    import numpy  as np
+    import numpy as np
 
     _FREEVAR = 0xCAFE
 
@@ -255,8 +255,6 @@ def test_f_o_r_t_r_a_n():
 
         return f + o + r + t + r + a + n
 
-
-
     def transformed_foo(a, b, c, d, e):
         f = a + b
         a += _FREEVAR
@@ -275,8 +273,8 @@ def test_f_o_r_t_r_a_n():
                 __scfg_loop_cont__ = True
                 while __scfg_loop_cont__:
                     __scfg_iter_last_7__ = o
-                    o = next(__scfg_iterator_7__, '__scfg_sentinel__')
-                    if o != '__scfg_sentinel__':
+                    o = next(__scfg_iterator_7__, "__scfg_sentinel__")
+                    if o != "__scfg_sentinel__":
                         n += 0
                         if np.abs(n) < 3:
                             __scfg_exit_var_1__ = 0
@@ -302,8 +300,8 @@ def test_f_o_r_t_r_a_n():
             __scfg_loop_cont__ = True
             while __scfg_loop_cont__:
                 __scfg_iter_last_14__ = r
-                r = next(__scfg_iterator_14__, '__scfg_sentinel__')
-                if r != '__scfg_sentinel__':
+                r = next(__scfg_iterator_14__, "__scfg_sentinel__")
+                if r != "__scfg_sentinel__":
                     q.append(p[r])
                     if r > 4 + 1:
                         s = 123
@@ -323,7 +321,6 @@ def test_f_o_r_t_r_a_n():
         else:
             pass
         return f + o + r + t + r + a + n
-
 
     args = (1, 1, 12, 1j, 1)
     a = foo(*args)
@@ -351,8 +348,6 @@ def run(func, args, *, localscope=None):
 
     # out = lb.format(app_root)
     # print(out)
-
-
 
     memo = app_root.traverse(lambda_evaluation, EvalLamState(context=ctx))
     res = memo[app_root]

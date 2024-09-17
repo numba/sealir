@@ -27,10 +27,10 @@ from functools import cached_property
 from pprint import pformat
 from typing import (
     Any,
-    Type,
     Callable,
     Iterator,
     LiteralString,
+    Type,
     TypeAlias,
     TypeVar,
     Union,
