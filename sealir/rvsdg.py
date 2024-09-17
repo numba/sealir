@@ -870,78 +870,97 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
         case _:
             raise AssertionError(prgm.as_tuple(1))
 
-    let_uses: dict[SExpr, int] = defaultdict(int)
+    # Map var_load to parent
     parent_let_map: dict[SExpr, SExpr] = {}
     var_depth_map: dict[SExpr, int] = {}
 
-    def find_parent_let(parents, var_load: ase.Expr, *, excludes=()):
-        [varname] = var_load.args
-        depth = 0
-        for p in reversed(parents):
-            match p:
-                case ase.Expr("let", (str(name), _, body)):
-                    if body.contains(var_load):
-                        if name == varname:
-                            return p, depth
-                        if p not in excludes:
-                            depth += 1
-        return None, depth
-
-
+    # Compute parent let of (var_load x)
     ts = time.time()
 
-    reachable = set()
-    for parents, child in prgm.walk_descendants_depth_first_no_repeat():
-        reachable.add(child)
-        match child:
-            case ase.Expr("var_load"):
-                parent_let, depth = find_parent_let(parents, child)
-                var_depth_map[child] = depth
-                if parent_let is not None:
-                    let_uses[parent_let] += 1
-                    parent_let_map[child] = parent_let
-                else:
-                    # function arguments do not have parent let.
-                    pass
+    @dataclass(frozen=True)
+    class ParentLetInfo:
+        var_load_map: dict[SExpr, int]
+
+        def __or__(self, other) -> ParentLetInfo:
+            if isinstance(other, self.__class__):
+                new = self.var_load_map.copy()
+                for k, v in other.var_load_map.items():
+                    assert k not in new
+                    new[k] = v
+                return ParentLetInfo(new)
+            else:
+                return NotImplemented
+
+        def drop(self, *varloads: SExpr) -> ParentLetInfo:
+            new = self.var_load_map.copy()
+            for vl in varloads:
+                assert vl.head == "var_load"
+                new.pop(vl)
+            return ParentLetInfo(new)
+
+        def up(self) -> ParentLetInfo:
+            return ParentLetInfo({k: v + 1 for k, v in self.var_load_map.items()})
+
+    class FindParentLet(TreeRewriter[ParentLetInfo]):
+        """Bottom up pass
+        """
+        def rewrite_var_load(self, orig: ase.Expr, varname: str) -> ParentLetInfo:
+            # Propagate (var_load ) up the tree
+            return ParentLetInfo({orig: 0})
+
+        def rewrite_let(self, orig: ase.Expr, varname: str, valset: ParentLetInfo, bodyset: ParentLetInfo) -> ParentLetInfo:
+            # Find matching let
+            matched = set()
+            for varload, depth in bodyset.var_load_map.items():
+                if varname == varload.args[0]:
+                    parent_let_map[varload] = orig
+                    var_depth_map[varload] = depth
+                    matched.add(varload)
+
+            # Propagate (var_load) from both value and body
+            return (valset | bodyset.drop(*matched).up())
+
+        def rewrite_py_func(self, orig: ase.Expr, fname: str, args: ParentLetInfo, bodyset: ParentLetInfo) -> ParentLetInfo:
+            for varload, depth in bodyset.var_load_map.items():
+                var_depth_map[varload] = depth
+            return bodyset
+
+        def rewrite_generic(self, orig: ase.Expr, args: tuple[Any, ...], updated: bool) -> Any | ase.Expr:
+            # Propagate the union of all sets in the args
+            return reduce(operator.or_,
+                          filter(lambda x: isinstance(x, ParentLetInfo), args),
+                          ParentLetInfo({}))
+
+    reachable = prgm.reachable_set()
+    prgm.apply_bottomup(FindParentLet(), reachable=reachable)
 
     print("   var_load - let analysis", time.time() - ts)
 
-    def rewrite_let_into_lambda(expr: SExpr, state: ase.TraverseState):
-        match expr:
-            case ase.Expr("var_load", (str(varname),)):
-                blet, depth = find_parent_let(state.parents, expr)
-                if blet is None:
-                    if varname not in parameters:
-                        return ase.expr("py_undef")
-                    else:
-                        return lb.arg(parameters.index(varname) + depth)
-                what = lb.arg(depth)
-                return what
+    class RewriteToLambda(TreeRewriter[SExpr]):
+        def rewrite_var_load(self, orig: SExpr, varname: str) -> SExpr:
+            blet = parent_let_map.get(orig)
+            depth = var_depth_map.get(orig, 0)
+            if blet is None:
+                if varname not in parameters:
+                    return ase.expr("py_undef")
+                else:
+                    return lb.arg(parameters.index(varname) + depth)
+            return lb.arg(depth)
 
-            case ase.Expr(
-                "let", (str(varname), ase.Expr() as value, ase.Expr() as inner)
-            ):
-                return lb.app(lb.lam((yield inner)), (yield value))
+        def rewrite_let(self, orig: SExpr, varname: str, value: SExpr, body: SExpr) -> SExpr:
+            return lb.app(lb.lam(body), value)
 
-            case ase.Expr(
-                "py_func", (str(), ase.Expr() as py_args, ase.Expr() as body)
-            ):
-                last = yield body
-                # one extra for .io
-                for _ in range(len(py_args.args) + 1):
-                    last = lb.lam(last)
-                return last
-
-        # Update node
-        updated_args = []
-        for x in expr.args:
-            updated_args.append((yield x) if isinstance(x, ase.Expr) else x)
-        return ase.expr(expr.head, *updated_args)
+        def rewrite_py_func(self, orig: SExpr, fname: str, args: SExpr, body: SExpr) -> SExpr:
+            # one extra for .io
+            for _ in range(len(args.args) + 1):
+                body = lb.lam(body)
+            return body
 
     with prgm.tape:
-
         ts = time.time()
-        memo = prgm.traverse(rewrite_let_into_lambda)
+        rtl = RewriteToLambda()
+        prgm.apply_bottomup(rtl, reachable=reachable)
+        memo = rtl.memo
         print("   rewrite_let_into_lambda", time.time() - ts)
         prgm = memo[prgm]
 
