@@ -375,7 +375,7 @@ class BaseExpr:
             return NotImplemented
 
     def __hash__(self) -> int:
-        return hash((id(self._tape), self._tape))
+        return hash((id(self._tape), self._handle))
 
     def __str__(self):
         head = self._head
