@@ -3,7 +3,7 @@ from __future__ import annotations
 from textwrap import dedent
 
 from sealir import ase
-from sealir.ase import Expr
+from sealir.ase import SimpleExpr as Expr
 
 
 def test_match():
