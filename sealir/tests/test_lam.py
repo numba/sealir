@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from textwrap import dedent
 
+from sealir import ase
 from sealir.lam import LamBuilder
 
 
@@ -15,11 +16,11 @@ def test_lam():
         return lambar.expr("tuple", c, d)
 
     out = lambar.app(lam1, lambar.expr("num", 1), lambar.expr("num", 2))
-    print(out.str())
+    print(ase.pretty_str(out))
     beta_out2 = lambar.beta_reduction(out)
-    print(beta_out2.str())
+    print(ase.pretty_str(beta_out2))
     assert (
-        beta_out2.str()
+        ase.pretty_str(beta_out2)
         == "(expr 'tuple' (expr 'add' (expr 'num' 1) (expr 'num' 2)) (expr 'sub' (expr 'num' 1) (expr 'num' 1)))"
     )
 
@@ -61,7 +62,7 @@ def test_lam_loop():
     toplevel = lambar.expr("func", func_body, "foo", 1)
 
     print("Format")
-    print(toplevel.str())
+    print(ase.pretty_str(toplevel))
     print(lambar.format(toplevel))
 
     print(lambar._tape.dump())
@@ -105,8 +106,8 @@ def test_lam_abstract():
 
     func_body = lambar.run_abstraction_pass(func_body)
     print(lambar.format(func_body))
-    assert expected_func_body.str() == func_body.str()
-    print(func_body.str())
+    assert ase.pretty_str(expected_func_body) == ase.pretty_str(func_body)
+    print(ase.pretty_str(func_body))
 
 
 def test_lam_abstract_deeper():
@@ -152,8 +153,8 @@ def test_lam_abstract_deeper():
 
     func_body = lambar.run_abstraction_pass(func_body)
     print(lambar.format(func_body))
-    assert expected_func_body.str() == func_body.str()
-    print(func_body.str())
+    assert ase.pretty_str(expected_func_body) == ase.pretty_str(func_body)
+    print(ase.pretty_str(func_body))
 
 
 def test_lam_identity():
@@ -173,4 +174,4 @@ def test_lam_identity():
     """
     )
     assert out.strip() == expected_str.strip()
-    assert func_body.str() == "(lam (arg 0))"
+    assert ase.pretty_str(func_body) == "(lam (arg 0))"
