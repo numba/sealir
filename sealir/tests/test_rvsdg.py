@@ -235,8 +235,7 @@ def test_f_o_r_t_r_a_n():
             k = h / i
             l = np.arange(1, c + 1)
             m = np.sqrt(l - g) + e * k
-            # FIXME  original : if np.abs(m[0]) < 1:
-            if np.abs(m[0]) < 5:
+            if np.abs(m[0]) < 1:
                 for o in range(a):
                     n += 0
                     if np.abs(n) < 3:
@@ -267,7 +266,7 @@ def test_f_o_r_t_r_a_n():
             k = h / i
             l = np.arange(1, c + 1)
             m = np.sqrt(l - g) + e * k
-            if np.abs(m[0]) < 5:
+            if np.abs(m[0]) < 1:
                 __scfg_iterator_7__ = iter(range(a))
                 o = None
                 __scfg_loop_cont__ = True
@@ -322,7 +321,7 @@ def test_f_o_r_t_r_a_n():
             pass
         return f + o + r + t + r + a + n
 
-    args = (1, 1, 12, 1j, 1)
+    args = (1, 1, 12, 1j, -0.1)
     a = foo(*args)
     b = transformed_foo(*args)
     assert a == b
