@@ -15,21 +15,21 @@ def test_basic():
         c = tp.expr("add", a, b)
         d = tp.expr("sub", a, a)
 
-    assert c.str() == "(add (num 1) (num 2))"
-    assert c.head == "add"
-    assert c.args[0].head == "num"
-    assert c.args[0].args == (1,)
-    assert c.args[1].head == "num"
-    assert c.args[1].args == (2,)
+    assert ase.pretty_str(c) == "(add (num 1) (num 2))"
+    assert ase.get_head(c) == "add"
+    assert ase.get_head(ase.get_args(c)[0]) == "num"
+    assert ase.get_args(ase.get_args(c)[0]) == (1,)
+    assert ase.get_head(ase.get_args(c)[1]) == "num"
+    assert ase.get_args(ase.get_args(c)[1]) == (2,)
 
-    parent_of_a = list(a.walk_parents())
+    parent_of_a = list(ase.walk_parents(a))
     assert parent_of_a[0] == c
     assert parent_of_a[0] != a
     assert parent_of_a[0] != b
     assert parent_of_a[1] == d
 
     for p in parent_of_a:
-        assert p.contains(a)
+        assert ase.contains(p, a)
 
 
 def test_copy_tree():
@@ -43,13 +43,13 @@ def test_copy_tree():
         e = tp.expr("mul", b, d)
 
     new_tree = ase.Tape()
-    new_e = e.copy_tree_into(new_tree)
+    new_e = ase.copy_tree_into(e, new_tree)
 
     assert len(new_tree._heap) < len(tp._heap)
     assert len(new_tree._tokens) < len(tp._tokens)
 
     assert new_e != e
-    assert new_e.str() == e.str()
+    assert ase.pretty_str(new_e) == ase.pretty_str(e)
 
 
 def test_apply_bottomup():
@@ -64,11 +64,11 @@ def test_apply_bottomup():
     buffer = []
 
     class BufferVisitor(ase.TreeVisitor):
-        def visit(self, expr: ase.Expr):
+        def visit(self, expr: ase.BaseExpr):
             buffer.append(expr)
 
     bv = BufferVisitor()
-    e.apply_bottomup(bv, reachable=None)
+    ase.apply_bottomup(e, bv, reachable=None)
 
     # It is expected the visitor will see every S-expr in the Tape.
     # Regardless of whether it is reachable from the root S-expr.
@@ -77,7 +77,7 @@ def test_apply_bottomup():
 
     # Rerun with computed reachability
     buffer.clear()
-    e.apply_bottomup(bv)
+    ase.apply_bottomup(e, bv)
     assert buffer == [a, b, c, e]
 
 
@@ -93,26 +93,22 @@ def test_calculator():
         def __init__(self):
             self.memo = {}
 
-        def visit(self, expr: ase.Expr):
-            if expr.head == "num":
-                self.memo[expr] = expr.args[0]
-            elif expr.head == "add":
-                self.memo[expr] = (
-                    self.memo[expr.args[0]] + self.memo[expr.args[1]]
-                )
-            elif expr.head == "sub":
-                self.memo[expr] = (
-                    self.memo[expr.args[0]] - self.memo[expr.args[1]]
-                )
-            elif expr.head == "mul":
-                self.memo[expr] = (
-                    self.memo[expr.args[0]] * self.memo[expr.args[1]]
-                )
+        def visit(self, expr: ase.BaseExpr):
+            head = ase.get_head(expr)
+            args = ase.get_args(expr)
+            if head == "num":
+                self.memo[expr] = args[0]
+            elif head == "add":
+                self.memo[expr] = self.memo[args[0]] + self.memo[args[1]]
+            elif head == "sub":
+                self.memo[expr] = self.memo[args[0]] - self.memo[args[1]]
+            elif head == "mul":
+                self.memo[expr] = self.memo[args[0]] * self.memo[args[1]]
             else:
                 raise AssertionError("unknown op")
 
     calc = Calc()
-    e.apply_bottomup(calc)
+    ase.apply_bottomup(e, calc)
     result = calc.memo[e]
 
     def expected():
@@ -135,8 +131,8 @@ def test_calculator_traverse():
         e = tp.expr("mul", b, d)
 
     def calc(
-        sexpr: ase.Expr, state: ase.TraverseState
-    ) -> Generator[ase.Expr, int, int]:
+        sexpr: ase.BaseExpr, state: ase.TraverseState
+    ) -> Generator[ase.BaseExpr, int, int]:
         match sexpr:
             case ase.Expr("num", (int(value),)):
                 return value
@@ -149,5 +145,5 @@ def test_calculator_traverse():
             case _:
                 raise AssertionError(sexpr)
 
-    memo = e.traverse(calc)
+    memo = ase.traverse(e, calc)
     print(memo)
