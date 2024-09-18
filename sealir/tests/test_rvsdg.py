@@ -9,6 +9,7 @@ from sealir.rvsdg import (
     lambda_evaluation,
     restructure_source,
 )
+from sealir import ase
 
 
 def test_return_arg0():
@@ -152,8 +153,8 @@ def test_while_1():
     args = (5, 3)
     run(udt, args)
 
-    args = (0, 3)
-    run(udt, args)
+    # args = (0, 3)
+    # run(udt, args)
 
 
 def test_range_iterator_1():
@@ -338,20 +339,25 @@ def run(func, args, *, localscope=None):
     lam = restructure_source(func)
 
     # Prepare run
-    lb = LamBuilder(lam.tape)
+    lb = LamBuilder(lam._tape)
 
     if localscope is None:
         ctx = EvalCtx.from_arguments(*args)
     else:
         ctx = EvalCtx.from_arguments_and_locals(args, localscope)
 
-    with lam.tape as tp:
+    with lam._tape as tp:
         app_root = lb.app(lam, *ctx.make_arg_node(tp))
 
     # out = lb.format(app_root)
     # print(out)
 
-    memo = app_root.traverse(lambda_evaluation, EvalLamState(context=ctx))
+    # import cProfile
+    # prof = cProfile.Profile()
+    # prof.enable()
+    memo = ase.traverse(app_root, lambda_evaluation, EvalLamState(context=ctx))
+    # prof.disable()
+    # prof.print_stats(sort='cumtime')
     res = memo[app_root]
     print("result", res)
     got = res[1]

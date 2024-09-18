@@ -43,8 +43,8 @@ def pretty_print(expr: BaseExpr) -> str:
 
         return ret
 
-    for key in sorted(ctr, key=lambda k: ase.get_handle(k)):
-        items = [ase.get_head(key), *map(fmt, ase.get_args(key))]
+    for key in sorted(ctr, key=lambda k: k._handle):
+        items = [key._head, *map(fmt, key._args)]
         text = " ".join(items)
         formatted[key] = f"({text})"
 

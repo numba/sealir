@@ -28,7 +28,7 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
 
     def new_typevar(self, orig: ase.BaseExpr) -> ase.BaseExpr:
         with self.type_expr_tree as tp:
-            return tp.expr("typevar", ase.get_handle(orig))
+            return tp.expr("typevar", orig._handle)
 
     def new_type(self, *args) -> ase.BaseExpr:
         with self.type_expr_tree as tp:
@@ -64,9 +64,9 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
 
     def find_arg(self, orig_body: ase.BaseExpr) -> Iterator[ase.BaseExpr]:
         for parents, child in ase.walk_descendants(orig_body):
-            if ase.get_head(child) == "arg":
-                lam_depth = len([p for p in parents if ase.get_head(p) == "lam"])
-                [argidx] = ase.get_args(child)
+            if child._head == "arg":
+                lam_depth = len([p for p in parents if p._head == "lam"])
+                [argidx] = child._args
                 if argidx == lam_depth:
                     yield child
 
@@ -83,7 +83,7 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
         return self.new_typevar(orig)
 
     def rewrite_lam(self, orig: ase.BaseExpr, body: ase.BaseExpr):
-        [orig_body] = ase.get_args(orig)
+        [orig_body] = orig._args
         assert isinstance(orig_body, ase.BaseExpr)
         tv = self.new_typevar(orig)
         arg_node = first(self.find_arg(orig_body))
@@ -155,12 +155,12 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
                 return self.new_type("Tuple", *args)
             case "tuple.getitem":
                 [tup, idx] = args
-                [_, orig_tup, orig_idx] = ase.get_args(orig)
+                [_, orig_tup, orig_idx] = orig._args
                 tv = self.new_typevar(orig)
                 if not isinstance(orig_idx, int):
-                    match ase.get_args(orig_idx):
+                    match orig_idx._args:
                         case ("num", constant):
-                            if ase.get_head(idx) == "typevar":
+                            if idx._head == "typevar":
                                 orig_idx = constant
                                 self.new_equiv(idx, self.new_type("Int"))
                         case _:
@@ -172,7 +172,7 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
                 return tv
             case "scf.dowhile":
                 [loop_body, loop_arg] = args
-                [_, orig_body, _] = ase.get_args(orig)
+                [_, orig_body, _] = orig._args
                 tv = self.new_typevar(orig)
                 self.new_equiv(tv, self.new_type("App", loop_body, loop_arg))
                 self.apply_arg_rules(orig_body, loop_arg)
@@ -223,8 +223,8 @@ def find_relevant_rules(root: ase.BaseExpr, equiv_list: list[ase.BaseExpr]):
         update_relevant(equiv)
 
     return sorted(
-        [rule for rule in relset if ase.get_head(rule) == "equiv"],
-        key=lambda x: ase.get_handle(x),
+        [rule for rule in relset if rule._head == "equiv"],
+        key=lambda x: x._handle,
     )
 
 
@@ -240,8 +240,8 @@ def replace_equivalent(equiv_list: list[ase.BaseExpr]):
     for equiv in equiv_list:
 
         def get_typevars():
-            for arg in ase.get_args(equiv):
-                if ase.get_head(arg) == "typevar":
+            for arg in equiv._args:
+                if arg._head == "typevar":
                     yield arg
 
         if tvs := list(get_typevars()):
@@ -277,7 +277,7 @@ def replace_equivalent(equiv_list: list[ase.BaseExpr]):
         #         print("old", *(n.str() for n in nodes))
         #         print("new", *(n.str() for n in repl))
         #         breakpoint()
-        #     return ase.expr(ase.get_head(orig), *repl)
+        #     return ase.expr(orig._head, *repl)
 
     ps = Replace()
     ps.memo.update(repl_map)
@@ -703,16 +703,16 @@ class TypeRef:
 def build_egglog_statements(equiv_list, node_dct):
     def flatten():
         for rule in equiv_list:
-            args = ase.get_args(rule)
-            assert ase.get_head(args[0]) == "typevar", repr(args)
+            args = rule._args
+            assert args[0]._head == "typevar", repr(args)
             match len(args):
                 case 2:
-                    yield (ase.get_head(rule), *args)
+                    yield (rule._head, *args)
                 case n:
                     assert n > 2
                     [head, *tail] = args
                     for other in tail:
-                        yield ase.get_head(rule), head, other
+                        yield rule._head, head, other
 
     typevars = {}
 
@@ -774,7 +774,7 @@ def build_egglog_statements(equiv_list, node_dct):
     proof_stmts = []
 
     for op, lhs, rhs in equiv_pairs:
-        assert ase.get_head(lhs) == "typevar", (ase.pretty_str(lhs), ase.pretty_str(rhs))
+        assert lhs._head == "typevar", (ase.pretty_str(lhs), ase.pretty_str(rhs))
         match ase.as_tuple(lhs):
             case "typevar", x:
                 pass
@@ -859,7 +859,7 @@ def test_typeinfer():
     equiv_list = [
         expr
         for expr in type_expr_tree.iter_expr()
-        if ase.get_head(expr).startswith("rule-")
+        if expr._head.startswith("rule-")
     ]
 
     print("equiv".center(80, "-"))
@@ -870,8 +870,8 @@ def test_typeinfer():
     tyinferdata = do_egglog(equiv_list)
     namer = UnknownNamer()
 
-    for op in sorted(map_op_to_typevar, key=lambda x: ase.get_handle(x)):
-        tv_key = str(ase.get_handle(op))
+    for op in sorted(map_op_to_typevar, key=lambda x: x._handle):
+        tv_key = str(op._handle)
 
         eclass = tyinferdata.typevar_to_eclass.get(tv_key)
         print(f"typevar {tv_key} eclass {eclass}".center(80, "-"))

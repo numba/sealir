@@ -24,7 +24,7 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         self.memo = {}
 
     def visit(self, expr: ase.BaseExpr) -> None:
-        tp = ase.get_tape(expr)
+        tp = expr._tape
         if expr in self.memo:
             return
         res = self._dispatch(expr)
@@ -44,8 +44,8 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
                 )
 
     def _dispatch(self, orig: ase.BaseExpr) -> Union[T, ase.BaseExpr]:
-        head = ase.get_head(orig)
-        args = ase.get_args(orig)
+        head = orig._head
+        args = orig._args
         updated = False
 
         def _lookup(val):
@@ -71,8 +71,8 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         children are updated; otherwise, returns the original expression if
         its children are unmodified.
         """
-        tp = ase.get_tape(orig)
+        tp = orig._tape
         if updated:
-            return tp.expr(ase.get_head(orig), *args)
+            return tp.expr(orig._head, *args)
         else:
             return orig

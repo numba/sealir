@@ -83,12 +83,12 @@ class LamBuilder:
         for i, cell in enumerate(fn.__closure__):
             val = cell.cell_contents
             if isinstance(val, ase.BaseExpr):
-                if ase.get_head(val) == "arg":
+                if val._head == "arg":
                     # increase de bruijn index
-                    [idx] = ase.get_args(val)
+                    [idx] = val._args
                     new_closure.append(types.CellType(self.arg(idx + 1)))
                     changed = True
-                elif ase.get_head(val) != "lam":
+                elif val._head != "lam":
                     # cannot refer to Expr by freevars
                     raise ValueError(
                         "cannot refer to non-argument Expr by freevars"
@@ -124,27 +124,27 @@ class LamBuilder:
 
     def beta_reduction(self, app_expr: ase.BaseExpr) -> ase.BaseExpr:
         """Reduces a (app (lam ...) arg)"""
-        assert ase.get_head(app_expr) == "app"
+        assert app_expr._head == "app"
 
         target = app_expr
 
         app_exprs = []
-        while ase.get_head(app_expr) == "app":
+        while app_expr._head == "app":
             app_exprs.append(app_expr)
-            app_expr = _app(*ase.get_args(app_expr)).body
+            app_expr = _app(*app_expr._args).body
         napps = len(app_exprs)
 
         arg2repl = {}
         drops = set(app_exprs)
         for parents, child in ase.walk_descendants(app_expr):
-            if ase.get_head(child) == "arg":
-                lams = [x for x in parents if ase.get_head(x) == "lam"]
+            if child._head == "arg":
+                lams = [x for x in parents if x._head == "lam"]
                 if len(lams) <= napps:  # don't go deeper
-                    [debruijn] = ase.get_args(child)
+                    [debruijn] = child._args
                     # in range?
                     if isinstance(debruijn, int) and debruijn < len(lams):
                         arg2repl[debruijn] = _app(
-                            *ase.get_args(app_exprs[-debruijn - 1]),
+                            *app_exprs[-debruijn - 1]._args,
                         ).arg
                         drops.add(lams[-debruijn - 1])
 
@@ -183,7 +183,7 @@ class LamBuilder:
                 def visit(self, expr: ase.BaseExpr):
                     if expr not in seen:
                         seen.add(expr)
-                        for arg in ase.get_args(expr):
+                        for arg in expr._args:
                             if isinstance(arg, ase.BaseExpr) and not is_simple(
                                 arg
                             ):
@@ -203,7 +203,7 @@ class LamBuilder:
 
             # find parent lambda
             def parent_containing_this(x: ase.BaseExpr):
-                return ase.get_head(x) == "lam"
+                return x._head == "lam"
 
             host_lam = first(
                 ase.search_ancestors(expr, parent_containing_this)
@@ -242,12 +242,12 @@ def replace_by_abstraction(
     lam_depth_map = {}
     for parents, child in ase.walk_descendants_depth_first_no_repeat(lamexpr):
         lam_depth_map[child] = len(
-            [p for p in parents if ase.get_head(p) == "lam"]
+            [p for p in parents if p._head == "lam"]
         )
 
     # rewrite these children nodes into a new lambda abstraction
     # replacing the `anchor` node with an arg node.
-    [old_node] = ase.get_args(lamexpr)
+    [old_node] = lamexpr._args
     new_node = rewrite_into_abstraction(
         lambar, old_node, anchor, lam_depth_map
     )
@@ -340,7 +340,7 @@ def format_lambda(expr: ase.BaseExpr):
 
     def first_lam_parent(parents) -> ase.BaseExpr | None:
         for p in reversed(parents):
-            if ase.get_head(p) == "lam":
+            if p._head == "lam":
                 return p
         return None
 
@@ -358,9 +358,9 @@ def format_lambda(expr: ase.BaseExpr):
 
     def compute_lam_depth(expr):
         depth = 0
-        while ase.get_head(expr) == "lam":
+        while expr._head == "lam":
             depth += 1
-            expr = ase.get_args(expr)[0]
+            expr = expr._args[0]
         return depth
 
     def flush(child_scope, wr):
@@ -379,15 +379,15 @@ def format_lambda(expr: ase.BaseExpr):
         if child not in formatted:
             if is_simple(child) and parents:
                 parts = [
-                    f"{ase.get_head(child)}",
-                    *map(fmt, ase.get_args(child)),
+                    f"{child._head}",
+                    *map(fmt, child._args),
                 ]
                 formatted[child] = f"({" ".join(parts)})"
-            elif ase.get_head(child) == "lam":
+            elif child._head == "lam":
                 child_scope = grouped[child]
                 child_scope.lambda_depth = compute_lam_depth(child)
 
-                if not parents or ase.get_head(parents[-1]) != "lam":
+                if not parents or parents[-1]._head != "lam":
                     # top-level lambda in this chain
                     wr.write(
                         "let",
@@ -411,8 +411,8 @@ def format_lambda(expr: ase.BaseExpr):
                     "let",
                     f"${ident}",
                     "=",
-                    ase.get_head(child),
-                    *map(fmt, ase.get_args(child)),
+                    child._head,
+                    *map(fmt, child._args),
                 )
                 formatted[child] = f"${ident}"
     assert None in grouped
@@ -420,7 +420,7 @@ def format_lambda(expr: ase.BaseExpr):
 
 
 def is_simple(expr):
-    return not any(isinstance(x, ase.BaseExpr) for x in ase.get_args(expr))
+    return not any(isinstance(x, ase.BaseExpr) for x in expr._args)
 
 
 class BetaReduction(TreeRewriter[ase.BaseExpr]):
@@ -434,13 +434,13 @@ class BetaReduction(TreeRewriter[ase.BaseExpr]):
     def rewrite_generic(
         self, old: ase.BaseExpr, args: tuple[Any, ...], updated: bool
     ) -> ase.BaseExpr:
-        if ase.get_head(old) == "arg":
+        if old._head == "arg":
             # Replace argument
-            return self._repl.get(ase.get_args(old)[0], old)
+            return self._repl.get(old._args[0], old)
         elif old in self._drops:
             # Drop the lambda
-            assert ase.get_head(old) in {"app", "lam"}
-            match ase.get_head(old):
+            assert old._head in {"app", "lam"}
+            match old._head:
                 case "app":
                     return _app(*args).body
                 case "lam":

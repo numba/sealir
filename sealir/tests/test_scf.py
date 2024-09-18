@@ -1,4 +1,4 @@
-from sealir import scf
+from sealir import scf, ase
 from sealir.lam import LamBuilder
 
 
@@ -41,6 +41,6 @@ def test_scf_sum_reduce_loop():
     lambar = LamBuilder()
     func_body = make_sum_reduce_loop(lambar)
     print(lambar.format(func_body))
-    print(func_body.str())
+    print(ase.pretty_str(func_body))
     # lambar = lambar.simplify()
     # lambar.render_dot().view()

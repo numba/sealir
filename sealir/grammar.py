@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, NamedTuple, Type, cast, dataclass_transform
-
+from functools import cached_property
 from sealir import ase
 
 
@@ -33,7 +33,7 @@ class Grammar:
         return MyRecord
 
     def downcast(self, expr: ase.BaseExpr) -> ExprWithRule:
-        head = ase.get_head(expr)
+        head = expr._head
         rulety = self.start._subtypes[head]
         return ExprWithRule(self, rulety, expr)
 
@@ -73,7 +73,7 @@ class _Field(NamedTuple):
 class _MetaRule(type):
     def __instancecheck__(cls, instance: Any) -> bool:
         if isinstance(instance, ase.BaseExpr):
-            return ase.get_head(instance) == cls._sexpr_head
+            return instance._head == cls._sexpr_head
         else:
             return type.__instancecheck__(cls, instance)
 
@@ -101,8 +101,10 @@ class Rule(metaclass=_MetaRule):
 
 class ExprWithRule(ase.BaseExpr):
     def __init__(
-        self, grammar: Grammar, rulety: Type[Rule], expr: ase.BaseExpr
+        self, grammar: Grammar, rulety: Type[Rule], expr: ase.SimpleExpr
     ) -> None:
+        self._tape = expr._tape
+        self._handle = expr._handle
         self._grammar = grammar
         self._rulety = rulety
         self._slots = {k: i for i, k in enumerate(rulety.__match_args__)}
@@ -111,41 +113,29 @@ class ExprWithRule(ase.BaseExpr):
 
     def __getattr__(self, name: str) -> ase.value_type:
         idx = self._slots[name]
-        return ase.get_args(self)[idx]
+        return self._args[idx]
 
     def __repr__(self) -> str:
         inner = repr(self._expr)
         return f"{self._rulety._sexpr_head}!{inner}"
 
+    @cached_property
+    def _head(self) -> str:
+        return self._expr._head
+
+    @cached_property
+    def _args(self) -> tuple[ase.value_type, ...]:
+        g = self._grammar
+
+        def cast(x: ase.value_type) -> ase.value_type:
+            if isinstance(x, ase.BaseExpr):
+                return g.downcast(x)
+            else:
+                return x
+
+        return tuple(map(cast, self._expr._args))
+
 
 @ase._get_downcast.register
 def _(sexpr: ExprWithRule) -> ase.Tape:
     return sexpr._grammar.downcast
-
-
-@ase.get_tape.register
-def _(sexpr: ExprWithRule) -> ase.Tape:
-    return sexpr._expr._tape
-
-
-@ase.get_handle.register
-def _(sexpr: ExprWithRule) -> ase.handle_type:
-    return sexpr._expr._handle
-
-
-@ase.get_head.register
-def _(sexpr: ExprWithRule) -> str:
-    return sexpr._expr._head
-
-
-@ase.get_args.register
-def _(sexpr: ExprWithRule) -> tuple[ase.value_type, ...]:
-    g = sexpr._grammar
-
-    def cast(x: ase.value_type) -> ase.value_type:
-        if isinstance(x, ase.BaseExpr):
-            return g.downcast(x)
-        else:
-            return x
-
-    return tuple(map(cast, sexpr._expr._args))

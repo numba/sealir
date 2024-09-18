@@ -1,14 +1,15 @@
 import html
 from typing import Any
 
-from sealir.ase import Expr
+from sealir.ase import BaseExpr
+from sealir import ase
 from sealir.rewriter import TreeRewriter
 
 
-def to_html(root: Expr) -> str:
+def to_html(root: BaseExpr) -> str:
 
     reachable = {
-        node for _, node in root.walk_descendants_depth_first_no_repeat()
+        node for _, node in ase.walk_descendants_depth_first_no_repeat(root)
     }
 
     class ToHtml(TreeRewriter[str]):
@@ -16,32 +17,32 @@ def to_html(root: Expr) -> str:
         reference_already = set()
 
         def rewrite_generic(
-            self, orig: Expr, args: tuple[Any, ...], updated: bool
-        ) -> str | Expr:
+            self, orig: BaseExpr, args: tuple[Any, ...], updated: bool
+        ) -> str | BaseExpr:
             if orig in reachable:
                 args = list(args)
-                for i, child in enumerate(orig.args):
-                    if isinstance(child, Expr):
+                for i, child in enumerate(orig._args):
+                    if isinstance(child, BaseExpr):
                         if (
-                            not child.is_simple
+                            not ase.is_simple(child)
                             and child in self.reference_already
                         ):
                             args[i] = (
-                                f"<div class='handle_ref handle' data-ref='{child.handle}'>${child.handle}</div>"
+                                f"<div class='handle_ref handle' data-ref='{child._handle}'>${child._handle}</div>"
                             )
                         else:
                             self.reference_already.add(child)
 
-                parts = [html.escape(orig.head)]
+                parts = [html.escape(orig._head)]
                 parts.extend(map(str, args))
-                handle = f"<div class='handle_origin handle' data-ref='{orig.handle}'>${orig.handle}</div>"
+                handle = f"<div class='handle_origin handle' data-ref='{orig._handle}'>${orig._handle}</div>"
                 out = f"<div class='sexpr'>{handle} {' '.join(parts)}</div>"
                 return out
             else:
                 return None
 
     cvt = ToHtml()
-    root.apply_bottomup(cvt)
+    ase.apply_bottomup(root, cvt)
     return cvt.memo[root]
 
 

@@ -58,7 +58,7 @@ def test_calculator():
 
         def visit(self, expr: ase.BaseExpr):
             memo = self.memo
-            match grm.match(expr):
+            match expr:
                 case Num(value=val):
                     result = val
                 case Add(lhs=lhs, rhs=rhs):

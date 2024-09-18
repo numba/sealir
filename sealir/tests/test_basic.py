@@ -16,11 +16,11 @@ def test_basic():
         d = tp.expr("sub", a, a)
 
     assert ase.pretty_str(c) == "(add (num 1) (num 2))"
-    assert ase.get_head(c) == "add"
-    assert ase.get_head(ase.get_args(c)[0]) == "num"
-    assert ase.get_args(ase.get_args(c)[0]) == (1,)
-    assert ase.get_head(ase.get_args(c)[1]) == "num"
-    assert ase.get_args(ase.get_args(c)[1]) == (2,)
+    assert c._head == "add"
+    assert c._args[0]._head == "num"
+    assert c._args[0]._args == (1,)
+    assert c._args[1]._head == "num"
+    assert c._args[1]._args == (2,)
 
     parent_of_a = list(ase.walk_parents(a))
     assert parent_of_a[0] == c
@@ -94,8 +94,8 @@ def test_calculator():
             self.memo = {}
 
         def visit(self, expr: ase.BaseExpr):
-            head = ase.get_head(expr)
-            args = ase.get_args(expr)
+            head = expr._head
+            args = expr._args
             if head == "num":
                 self.memo[expr] = args[0]
             elif head == "add":

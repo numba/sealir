@@ -308,11 +308,11 @@ class Tape:
         self.write_token(head)
         for a in args:
             if isinstance(a, BaseExpr):
-                if get_tape(a) is not self:
+                if a._tape is not self:
                     raise ValueError(
                         f"invalid to assign Expr({repr(a)}) to a different tape"
                     )
-                self._heap.append(get_handle(a))
+                self._heap.append(a._handle)
             else:
                 self.write_token(a)
         self.write_end()
@@ -355,55 +355,37 @@ class TraverseState:
 
 
 class BaseExpr:
+    _tape: Tape
+    _handle: handle_type
+    _head: str
+    _args: tuple[value_type, ...]
 
     # Comparison API
 
     def __lt__(self, other) -> bool:
         if isinstance(other, BaseExpr):
-            return get_handle(self) < get_handle(other)
+            return self._handle < other._handle
         else:
             return NotImplemented
 
     def __eq__(self, value) -> bool:
         if isinstance(value, BaseExpr):
-            return get_handle(self) == get_handle(value) and get_handle(
-                self
-            ) == get_handle(value)
+            return self._tape == value._tape and self._handle == value._handle
         else:
             return NotImplemented
 
     def __hash__(self) -> int:
-        return hash((id(get_tape(self)), get_tape(self)))
+        return hash((id(self._tape), self._tape))
 
     def __str__(self):
-        head = get_head(self)
-        args = get_args(self)
+        head = self._head
+        args = self._args
         return (
             f"{self.__class__.__name__}({head}, {', '.join(map(repr, args))})"
         )
 
 
 metadata_prefix = "."
-
-
-@singledispatch
-def get_tape(sexpr: BaseExpr) -> Tape:
-    raise NotImplementedError(type(sexpr))
-
-
-@singledispatch
-def get_handle(sexpr: BaseExpr) -> handle_type:
-    raise NotImplementedError(type(sexpr))
-
-
-@singledispatch
-def get_head(sexpr: BaseExpr) -> str:
-    raise NotImplementedError(type(sexpr))
-
-
-@singledispatch
-def get_args(sexpr: BaseExpr) -> tuple[value_type]:
-    raise NotImplementedError(type(sexpr))
 
 
 @singledispatch
@@ -419,7 +401,7 @@ def pretty_str(expr: BaseExpr) -> str:
 
 
 def is_metadata(sexpr: BaseExpr) -> bool:
-    return get_head(sexpr).startswith(metadata_prefix)
+    return sexpr._head.startswith(metadata_prefix)
 
 
 def is_simple(sexpr: BaseExpr) -> bool:
@@ -427,7 +409,7 @@ def is_simple(sexpr: BaseExpr) -> bool:
     Checks if the expression is a simple expression,
     where all arguments are not `Expr` objects.
     """
-    return all(not isinstance(a, BaseExpr) for a in get_args(sexpr))
+    return all(not isinstance(a, BaseExpr) for a in sexpr._args)
 
 
 # Search API
@@ -438,10 +420,10 @@ def walk_parents(self: BaseExpr) -> Iterator[BaseExpr]:
     object.
     Returned values follow the order of occurrence.
     """
-    crawler = TapeCrawler(get_tape(self), _get_downcast(self))
-    crawler.seek(get_handle(self))
+    crawler = TapeCrawler(self._tape, _get_downcast(self))
+    crawler.seek(self._handle)
     crawler.skip_to_record_end()
-    while crawler.move_to_pos_of(get_handle(self)):
+    while crawler.move_to_pos_of(self._handle):
         yield crawler.read_surrounding_record().to_expr()
         crawler.skip_to_record_end()
 
@@ -485,9 +467,9 @@ def walk_descendants(
     """Walk descendants of this Expr node.
     Breath-first order. Left to right.
     """
-    oldtree = get_tape(self)
+    oldtree = self._tape
     crawler = TapeCrawler(oldtree, _get_downcast(self))
-    crawler.seek(get_handle(self))
+    crawler.seek(self._handle)
     for parents, desc in crawler.walk_descendants():
         parent_exprs = tuple(map(lambda x: x.to_expr(), parents))
         yield parent_exprs, desc.to_expr()
@@ -506,7 +488,7 @@ def walk_descendants_depth_first_no_repeat(
         if node not in visited:
             visited.add(node)
             yield parents, node
-            for arg in reversed(get_args(node)):
+            for arg in reversed(node._args):
                 if isinstance(arg, BaseExpr):
                     stack.append((arg, (*parents, node)))
 
@@ -521,7 +503,7 @@ def walk_descendants_depth_first(
     while stack:
         node, parents = stack.pop()
         yield parents, node
-        for arg in reversed(get_args(node)):
+        for arg in reversed(node._args):
             if isinstance(arg, BaseExpr):
                 stack.append((arg, (*parents, node)))
 
@@ -622,17 +604,17 @@ def apply_bottomup(
         case str():
             raise ValueError(f"invalid input for `reachable`: {reachable!r}")
 
-    crawler = TapeCrawler(get_tape(self), _get_downcast(self))
+    crawler = TapeCrawler(self._tape, _get_downcast(self))
     match reachable:
         case set():
             first_reachable = min(reachable)
-            crawler.seek(get_handle(first_reachable))
+            crawler.seek(first_reachable._handle)
         case None:
             crawler.move_to_first_record()
         case _:
             raise AssertionError("unreachable")
     for rec in crawler.walk():
-        if rec.handle <= get_handle(self):  # visit all younger
+        if rec.handle <= self._handle:  # visit all younger
             ex = rec.to_expr()
             if not reachable or ex in reachable:
                 if not is_metadata(ex):
@@ -677,7 +659,7 @@ def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
             if not is_metadata(node):
                 occurrences.update([cur])
                 occurrences.update(
-                    (x for x in get_args(node) if isinstance(x, BaseExpr))
+                    (x for x in node._args if isinstance(x, BaseExpr))
                 )
 
     apply_bottomup(self, CountOccurrences())
@@ -699,17 +681,17 @@ def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
 
     for cur in reversed(pending):
         args = []
-        for arg in get_args(cur):
+        for arg in cur._args:
             if dedup and arg in dupset and occurrences[arg] > 1:
-                val = f"${get_handle(arg)}"
+                val = f"${arg._handle}"
             else:
                 val = memo.get(arg, arg)
             occurrences[arg] -= 1
             args.append(val)
         if dedup and cur in dupset and multi_parents(cur):
-            out = (f"[${get_handle(cur)}]", get_head(cur), *args)
+            out = (f"[${cur._handle}]", cur._head, *args)
         else:
-            out = (get_head(cur), *args)
+            out = (cur._head, *args)
         memo[cur] = out
 
     return memo[self]
@@ -733,13 +715,13 @@ def as_dict(self) -> dict[str, dict]:
     class AsDict(TreeVisitor):
         def visit(self, expr: BaseExpr) -> None:
             parts: list[dict | token_type] = []
-            for arg in get_args(expr):
+            for arg in expr._args:
                 match arg:
                     case BaseExpr():
                         if arg in seen_once:
                             # This handles duplicated references
                             parts.append(
-                                dict(ref=f"{get_head(arg)}-{get_handle(arg)}")
+                                dict(ref=f"{arg._head}-{arg._handle}")
                             )
                         else:
                             ref = memo[arg]
@@ -748,8 +730,8 @@ def as_dict(self) -> dict[str, dict]:
                             parts.append(ref)
                     case _:
                         parts.append(arg)
-            k = f"{get_head(expr)}-{get_handle(expr)}"
-            memo[expr] = {k: dict(head=get_head(expr), args=tuple(parts))}
+            k = f"{expr._head}-{expr._handle}"
+            memo[expr] = {k: dict(head=expr._head, args=tuple(parts))}
 
     self.apply_bottomup(AsDict())
     return memo[self]
@@ -763,9 +745,9 @@ def copy_tree_into(self: BaseExpr, tape: Tape) -> BaseExpr:
     tape.
     Returns a fresh Expr in the new tape.
     """
-    oldtree = get_tape(self)
+    oldtree = self._tape
     crawler = TapeCrawler(oldtree, _get_downcast(self))
-    crawler.seek(get_handle(self))
+    crawler.seek(self._handle)
     liveset = set(_select(crawler.walk_descendants(), 1))
     surviving = sorted(liveset)
     mapping = {}
@@ -778,13 +760,13 @@ def copy_tree_into(self: BaseExpr, tape: Tape) -> BaseExpr:
 
         for arg in args:
             if isinstance(arg, BaseExpr):
-                tape.write_ref(mapping[get_handle(arg)])
+                tape.write_ref(mapping[arg._handle])
             else:
                 tape.write_token(arg)
 
         tape.write_end()
 
-    out = tape.read_value(mapping[get_handle(self)])
+    out = tape.read_value(mapping[self._handle])
     assert isinstance(out, BaseExpr)
     return out
 
@@ -825,25 +807,6 @@ class SimpleExpr(BaseExpr):
         end = f" @{hex(id(self._tape))}>"
         return start + end
 
-
-@get_tape.register
-def _(sexpr: SimpleExpr) -> Tape:
-    return sexpr._tape
-
-
-@get_handle.register
-def _(sexpr: SimpleExpr) -> handle_type:
-    return sexpr._handle
-
-
-@get_head.register
-def _(sexpr: SimpleExpr) -> str:
-    return sexpr._head
-
-
-@get_args.register
-def _(sexpr: SimpleExpr) -> tuple[value_type, ...]:
-    return sexpr._args
 
 
 class TreeVisitor:

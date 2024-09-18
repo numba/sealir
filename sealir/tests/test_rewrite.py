@@ -4,23 +4,23 @@ from sealir.rewriter import TreeRewriter
 
 def test_rewrite():
 
-    class RewriteCalcMachine(TreeRewriter[ase.Expr]):
+    class RewriteCalcMachine(TreeRewriter[ase.BaseExpr]):
         def rewrite_add(self, orig, lhs, rhs):
-            tp = orig.tape
-            [x] = lhs.args
-            [y] = rhs.args
+            tp = orig._tape
+            [x] = lhs._args
+            [y] = rhs._args
             return tp.expr("num", x + y)
 
         def rewrite_sub(self, orig, lhs, rhs):
-            tp = orig.tape
-            [x] = lhs.args
-            [y] = rhs.args
+            tp = orig._tape
+            [x] = lhs._args
+            [y] = rhs._args
             return tp.expr("num", x - y)
 
         def rewrite_mul(self, orig, lhs, rhs):
-            tp = orig.tape
-            [x] = lhs.args
-            [y] = rhs.args
+            tp = orig._tape
+            [x] = lhs._args
+            [y] = rhs._args
             return tp.expr("num", x * y)
 
     with ase.Tape() as tp:
@@ -32,10 +32,10 @@ def test_rewrite():
 
     calc = RewriteCalcMachine()
     with tp:
-        e.apply_bottomup(calc)
-    print(e.tape.dump())
+        ase.apply_bottomup(e, calc)
+    print(e._tape.dump())
     reduced = calc.memo[e]
-    [result] = reduced.args
+    [result] = reduced._args
 
     def expected():
         a = 123
@@ -48,7 +48,7 @@ def test_rewrite():
     assert expected() == result
 
     mintree = ase.Tape()
-    new_reduced = reduced.copy_tree_into(mintree)
+    new_reduced = ase.copy_tree_into(reduced, mintree)
     print(mintree.dump())
-    assert new_reduced.str() == reduced.str()
+    assert ase.pretty_str(new_reduced) == ase.pretty_str(reduced)
     assert len(mintree) == 1
