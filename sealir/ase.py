@@ -110,7 +110,7 @@ class Tape:
             raise MalformedContextError("malformed stack: top is not self")
         self._open_counter -= 1
 
-    def iter_expr(self) -> Iterator[Expr]:
+    def iter_expr(self) -> Iterator[BaseExpr]:
         crawler = TapeCrawler(self, self._downcast)
         crawler.move_to_first_record()
         for rec in crawler.walk():
@@ -118,9 +118,9 @@ class Tape:
 
     # Write API
 
-    def expr(self, head: str, *args: value_type) -> Expr:
+    def expr(self, head: str, *args: value_type) -> BaseExpr:
         """The main API for creating an `Expr`."""
-        return Expr.write(self, head, args)
+        return SimpleExpr.write(self, head, args)
 
     # Debug API
 
@@ -145,7 +145,7 @@ class Tape:
         crawler.step()
 
         def fixup(x):
-            if isinstance(x, Expr):
+            if isinstance(x, BaseExpr):
                 return f"<{x._handle}>"
             else:
                 return repr(x)
@@ -159,7 +159,7 @@ class Tape:
     @graphviz_function
     def render_dot(self, *, gv, show_metadata: bool = False):
         def make_label(i, x):
-            if isinstance(x, Expr):
+            if isinstance(x, BaseExpr):
                 return f"<{i}> [{x._handle}]"
             else:
                 return html.escape(f"{x!r} :{type(x).__name__}")
@@ -220,7 +220,7 @@ class Tape:
                 **node_kwargs,
             )
             for i, arg in enumerate(args):
-                if isinstance(arg, Expr):
+                if isinstance(arg, BaseExpr):
                     args = (f"{nodename}:{i}", f"node{arg._handle}")
                     kwargs = {**edge_kwargs}
                     edges.append((args, kwargs))
@@ -293,7 +293,7 @@ class Tape:
         if handle <= 0:
             return self._read_token(handle)
         elif handle < HandleSentry.BEGIN:
-            return Expr(self, handle)
+            return SimpleExpr(self, handle)
         else:
             raise MalformedContextError
 
@@ -310,7 +310,7 @@ class Tape:
             if isinstance(a, BaseExpr):
                 if get_tape(a) is not self:
                     raise ValueError(
-                        f"invalid to assign Expr({a.str()}) to a different tape"
+                        f"invalid to assign Expr({repr(a)}) to a different tape"
                     )
                 self._heap.append(get_handle(a))
             else:
@@ -407,7 +407,7 @@ def get_args(sexpr: BaseExpr) -> tuple[value_type]:
 
 
 @singledispatch
-def _get_downcast(sexpr: BaseExpr) -> BaseExpr:
+def _get_downcast(sexpr: BaseExpr) -> Callable[[BaseExpr], BaseExpr]:
     # identity function by default
     return lambda x: x
 
@@ -677,7 +677,7 @@ def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
             if not is_metadata(node):
                 occurrences.update([cur])
                 occurrences.update(
-                    (x for x in get_args(node) if isinstance(x, Expr))
+                    (x for x in get_args(node) if isinstance(x, BaseExpr))
                 )
 
     apply_bottomup(self, CountOccurrences())
@@ -685,7 +685,7 @@ def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
     dupset = {x for x, ct in occurrences.items() if ct > 1}
     working_set = set(pending)
 
-    def multi_parents(expr: Expr) -> bool:
+    def multi_parents(expr: BaseExpr) -> bool:
         it = search_parents(expr, lambda x: x in working_set)
         try:
             next(it)
@@ -758,7 +758,7 @@ def as_dict(self) -> dict[str, dict]:
 # Copy API
 
 
-def copy_tree_into(self: BaseExpr, tape: Tape) -> Expr:
+def copy_tree_into(self: BaseExpr, tape: Tape) -> BaseExpr:
     """Copy all the expression tree starting with this node into the given
     tape.
     Returns a fresh Expr in the new tape.
@@ -777,19 +777,19 @@ def copy_tree_into(self: BaseExpr, tape: Tape) -> Expr:
         tape.write_token(head)
 
         for arg in args:
-            if isinstance(arg, Expr):
-                tape.write_ref(mapping[arg._handle])
+            if isinstance(arg, BaseExpr):
+                tape.write_ref(mapping[get_handle(arg)])
             else:
                 tape.write_token(arg)
 
         tape.write_end()
 
     out = tape.read_value(mapping[get_handle(self)])
-    assert isinstance(out, Expr)
+    assert isinstance(out, BaseExpr)
     return out
 
 
-class Expr(BaseExpr):
+class SimpleExpr(BaseExpr):
     """S-expression reference
 
     Default comparison is by identity (the handle).
@@ -806,7 +806,7 @@ class Expr(BaseExpr):
     @classmethod
     def write(
         cls, tape: Tape, head: str, args: tuple[value_type, ...]
-    ) -> Expr:
+    ) -> SimpleExpr:
         handle = tape.write(head, args)
         return cls(tape, handle)
 
@@ -827,22 +827,22 @@ class Expr(BaseExpr):
 
 
 @get_tape.register
-def _(sexpr: Expr) -> Tape:
+def _(sexpr: SimpleExpr) -> Tape:
     return sexpr._tape
 
 
 @get_handle.register
-def _(sexpr: Expr) -> handle_type:
+def _(sexpr: SimpleExpr) -> handle_type:
     return sexpr._handle
 
 
 @get_head.register
-def _(sexpr: Expr) -> str:
+def _(sexpr: SimpleExpr) -> str:
     return sexpr._head
 
 
 @get_args.register
-def _(sexpr: Expr) -> tuple[value_type, ...]:
+def _(sexpr: SimpleExpr) -> tuple[value_type, ...]:
     return sexpr._args
 
 
@@ -955,7 +955,7 @@ class Record:
         return self.tape.read_args(self.handle)
 
     def to_expr(self) -> BaseExpr:
-        return self.downcast(Expr(self.tape, self.handle))
+        return self.downcast(SimpleExpr(self.tape, self.handle))
 
     def __repr__(self):
         return f"<Record {self.handle}:{self.end_handle} tape@{hex(id(self.tape))} >"

@@ -134,13 +134,19 @@ def test_calculator_traverse():
         sexpr: ase.BaseExpr, state: ase.TraverseState
     ) -> Generator[ase.BaseExpr, int, int]:
         match sexpr:
-            case ase.Expr("num", (int(value),)):
+            case ase.SimpleExpr("num", (int(value),)):
                 return value
-            case ase.Expr("add", (ase.Expr() as lhs, ase.Expr() as rhs)):
+            case ase.SimpleExpr(
+                "add", (ase.SimpleExpr() as lhs, ase.SimpleExpr() as rhs)
+            ):
                 return (yield lhs) + (yield rhs)
-            case ase.Expr("sub", (ase.Expr() as lhs, ase.Expr() as rhs)):
+            case ase.SimpleExpr(
+                "sub", (ase.SimpleExpr() as lhs, ase.SimpleExpr() as rhs)
+            ):
                 return (yield lhs) - (yield rhs)
-            case ase.Expr("mul", (ase.Expr() as lhs, ase.Expr() as rhs)):
+            case ase.SimpleExpr(
+                "mul", (ase.SimpleExpr() as lhs, ase.SimpleExpr() as rhs)
+            ):
                 return (yield lhs) * (yield rhs)
             case _:
                 raise AssertionError(sexpr)
