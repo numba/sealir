@@ -32,13 +32,13 @@ class LamBuilder:
 
     def expr(self, head: str, *args) -> ase.Expr:
         """Makes a user defined expression"""
-        with self._tape:
-            return ase.expr("expr", head, *args)
+        with self._tape as tp:
+            return tp.expr("expr", head, *args)
 
     def lam(self, body_expr: ase.Expr) -> ase.Expr:
         """Makes a lambda abstraction"""
-        with self._tape:
-            return ase.expr("lam", body_expr)
+        with self._tape as tp:
+            return tp.expr("lam", body_expr)
 
     def lam_func(self, fn):
         """Decorator to help build lambda expressions from a Python function.
@@ -106,18 +106,18 @@ class LamBuilder:
         )
 
     def arg(self, index: int) -> ase.Expr:
-        with self._tape:
-            return ase.expr("arg", index)
+        with self._tape as tp:
+            return tp.expr("arg", index)
 
     def app(self, lam, arg0, *more_args) -> ase.Expr:
         """Makes an apply expression."""
         args = (arg0, *more_args)
-        with self._tape:
+        with self._tape as tp:
             stack = list(args)
             out = lam
             while stack:
                 arg = stack.pop()
-                out = ase.expr("app", *_app(body=out, arg=arg))
+                out = tp.expr("app", *_app(body=out, arg=arg))
         return out
 
     def beta_reduction(self, app_expr: ase.Expr) -> ase.Expr:

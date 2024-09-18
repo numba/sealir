@@ -9,11 +9,11 @@ def test_bottom():
 
 
 def test_basic():
-    with ase.Tape() as tape:
-        a = ase.expr("num", 1)
-        b = ase.expr("num", 2)
-        c = ase.expr("add", a, b)
-        d = ase.expr("sub", a, a)
+    with ase.Tape() as tp:
+        a = tp.expr("num", 1)
+        b = tp.expr("num", 2)
+        c = tp.expr("add", a, b)
+        d = tp.expr("sub", a, a)
 
     assert c.str() == "(add (num 1) (num 2))"
     assert c.head == "add"
@@ -33,33 +33,33 @@ def test_basic():
 
 
 def test_copy_tree():
-    with ase.Tape() as tape:
-        ase.expr("num", 0)
-        a = ase.expr("num", 1)
-        b = ase.expr("num", 2)
-        ase.expr("num", 3)
-        ase.expr("add", a, b)
-        d = ase.expr("sub", a, a)
-        e = ase.expr("mul", b, d)
+    with ase.Tape() as tp:
+        tp.expr("num", 0)
+        a = tp.expr("num", 1)
+        b = tp.expr("num", 2)
+        tp.expr("num", 3)
+        tp.expr("add", a, b)
+        d = tp.expr("sub", a, a)
+        e = tp.expr("mul", b, d)
 
     new_tree = ase.Tape()
     new_e = e.copy_tree_into(new_tree)
 
-    assert len(new_tree._heap) < len(tape._heap)
-    assert len(new_tree._tokens) < len(tape._tokens)
+    assert len(new_tree._heap) < len(tp._heap)
+    assert len(new_tree._tokens) < len(tp._tokens)
 
     assert new_e != e
     assert new_e.str() == e.str()
 
 
 def test_apply_bottomup():
-    with ase.Tape():
-        a = ase.expr("num", 1)
-        b = ase.expr("num", 2)
-        c = ase.expr("sub", a, a)
-        d = ase.expr("add", c, b)
-        e = ase.expr("mul", b, c)
-        f = ase.expr("div", e, d)
+    with ase.Tape() as tp:
+        a = tp.expr("num", 1)
+        b = tp.expr("num", 2)
+        c = tp.expr("sub", a, a)
+        d = tp.expr("add", c, b)
+        e = tp.expr("mul", b, c)
+        f = tp.expr("div", e, d)
 
     buffer = []
 
@@ -82,12 +82,12 @@ def test_apply_bottomup():
 
 
 def test_calculator():
-    with ase.Tape():
-        a = ase.expr("num", 123)
-        b = ase.expr("num", 321)
-        c = ase.expr("add", a, a)
-        d = ase.expr("sub", c, b)
-        e = ase.expr("mul", b, d)
+    with ase.Tape() as tp:
+        a = tp.expr("num", 123)
+        b = tp.expr("num", 321)
+        c = tp.expr("add", a, a)
+        d = tp.expr("sub", c, b)
+        e = tp.expr("mul", b, d)
 
     class Calc(ase.TreeVisitor):
         def __init__(self):
@@ -127,12 +127,12 @@ def test_calculator():
 
 
 def test_calculator_traverse():
-    with ase.Tape():
-        a = ase.expr("num", 123)
-        b = ase.expr("num", 321)
-        c = ase.expr("add", a, a)
-        d = ase.expr("sub", c, b)
-        e = ase.expr("mul", b, d)
+    with ase.Tape() as tp:
+        a = tp.expr("num", 123)
+        b = tp.expr("num", 321)
+        c = tp.expr("add", a, a)
+        d = tp.expr("sub", c, b)
+        e = tp.expr("mul", b, d)
 
     def calc(
         sexpr: ase.Expr, state: ase.TraverseState

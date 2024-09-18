@@ -345,8 +345,8 @@ def run(func, args, *, localscope=None):
     else:
         ctx = EvalCtx.from_arguments_and_locals(args, localscope)
 
-    with lam.tape:
-        app_root = lb.app(lam, *ctx.make_arg_node())
+    with lam.tape as tp:
+        app_root = lb.app(lam, *ctx.make_arg_node(tp))
 
     # out = lb.format(app_root)
     # print(out)

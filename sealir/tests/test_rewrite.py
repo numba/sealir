@@ -6,29 +6,32 @@ def test_rewrite():
 
     class RewriteCalcMachine(TreeRewriter[ase.Expr]):
         def rewrite_add(self, orig, lhs, rhs):
+            tp = orig.tape
             [x] = lhs.args
             [y] = rhs.args
-            return ase.expr("num", x + y)
+            return tp.expr("num", x + y)
 
         def rewrite_sub(self, orig, lhs, rhs):
+            tp = orig.tape
             [x] = lhs.args
             [y] = rhs.args
-            return ase.expr("num", x - y)
+            return tp.expr("num", x - y)
 
         def rewrite_mul(self, orig, lhs, rhs):
+            tp = orig.tape
             [x] = lhs.args
             [y] = rhs.args
-            return ase.expr("num", x * y)
+            return tp.expr("num", x * y)
 
-    with ase.Tape() as tape:
-        a = ase.expr("num", 123)
-        b = ase.expr("num", 321)
-        c = ase.expr("add", a, a)
-        d = ase.expr("sub", c, b)
-        e = ase.expr("mul", b, d)
+    with ase.Tape() as tp:
+        a = tp.expr("num", 123)
+        b = tp.expr("num", 321)
+        c = tp.expr("add", a, a)
+        d = tp.expr("sub", c, b)
+        e = tp.expr("mul", b, d)
 
     calc = RewriteCalcMachine()
-    with tape:
+    with tp:
         e.apply_bottomup(calc)
     print(e.tape.dump())
     reduced = calc.memo[e]

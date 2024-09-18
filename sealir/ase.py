@@ -41,41 +41,6 @@ from .graphviz_support import graphviz_function
 T = TypeVar("T")
 
 
-class Context:
-    _tls_context = threading.local()
-
-    @classmethod
-    def get_stack(cls) -> list[Tape]:
-        try:
-            return cls._tls_context.stack
-        except AttributeError:
-            stk = cls._tls_context.stack = []
-            return stk
-
-    @classmethod
-    def push(cls, tape: Tape):
-        cls.get_stack().append(tape)
-
-    @classmethod
-    def pop(cls) -> Tape:
-        return cls.get_stack().pop()
-
-    @classmethod
-    def top(cls) -> Tape:
-        out = cls.top_or_none()
-        if out is None:
-            raise MalformedContextError("no active Tape")
-        else:
-            return out
-
-    @classmethod
-    def top_or_none(cls) -> Tape | None:
-        stk = cls.get_stack()
-        if not stk:
-            return None
-        return stk[-1]
-
-
 class MalformedContextError(RuntimeError):
     pass
 
@@ -127,6 +92,7 @@ class Tape:
         self._tokens = [None]
         self._tokenmap = {(type(None), None): 0}
         self._num_records = 0
+        self._open_counter = 0
 
     def __len__(self) -> int:
         return self._num_records
@@ -136,19 +102,25 @@ class Tape:
         return len(self._heap)
 
     def __enter__(self):
-        Context.push(self)
+        self._open_counter += 1
         return self
 
     def __exit__(self, exc_val, exc_typ, exc_tb):
-        out = Context.pop()
-        if out is not self:
+        if self._open_counter <= 0:
             raise MalformedContextError("malformed stack: top is not self")
+        self._open_counter -= 1
 
     def iter_expr(self) -> Iterator[Expr]:
         crawler = TapeCrawler(self)
         crawler.move_to_first_record()
         for rec in crawler.walk():
             yield rec.to_expr()
+
+    # Write API
+
+    def expr(self, head: str, *args: value_type) -> Expr:
+        """The main API for creating an `Expr`."""
+        return Expr.write(self, head, args)
 
     # Debug API
 
@@ -558,12 +530,8 @@ class Expr:
         return pretty_print(self)
 
     def __repr__(self):
-        active_tape = Context.top_or_none()
         start = f"<Expr {self.head!r} [{self._handle}]"
-        if active_tape is not self._tape:
-            end = f" @{hex(id(self._tape))}>"
-        else:
-            end = ">"
+        end = f" @{hex(id(self._tape))}>"
         return start + end
 
     # Comparison API
@@ -918,13 +886,6 @@ class Record:
 
     def __repr__(self):
         return f"<Record {self.handle}:{self.end_handle} tape@{hex(id(self.tape))} >"
-
-
-def expr(head: str, *args: value_type) -> Expr:
-    """The main API for creating an `Expr`."""
-    tape = Context.top()
-    out = Expr.write(tape, head, args)
-    return out
 
 
 def _select(iterable, idx: int):

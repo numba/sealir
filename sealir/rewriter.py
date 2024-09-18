@@ -24,6 +24,7 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         self.memo = {}
 
     def visit(self, expr: ase.Expr) -> None:
+        tp = expr.tape
         if expr in self.memo:
             return
         res = self._dispatch(expr)
@@ -35,7 +36,7 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
             if res != expr and isinstance(res, ase.Expr):
                 # Insert code that maps replacement back to old
                 cls = type(self)
-                ase.expr(
+                tp.expr(
                     ".md.rewrite",
                     f"{cls.__module__}.{cls.__qualname__}",
                     res,
@@ -70,7 +71,8 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         children are updated; otherwise, returns the original expression if
         its children are unmodified.
         """
+        tp = orig.tape
         if updated:
-            return ase.expr(orig.head, *args)
+            return tp.expr(orig.head, *args)
         else:
             return orig
