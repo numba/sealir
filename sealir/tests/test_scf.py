@@ -1,4 +1,4 @@
-from sealir import scf, ase
+from sealir import ase, scf
 from sealir.lam import LamBuilder
 
 

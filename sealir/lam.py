@@ -241,9 +241,7 @@ def replace_by_abstraction(
     # Find lambda depth of children in the lambda node
     lam_depth_map = {}
     for parents, child in ase.walk_descendants_depth_first_no_repeat(lamexpr):
-        lam_depth_map[child] = len(
-            [p for p in parents if p._head == "lam"]
-        )
+        lam_depth_map[child] = len([p for p in parents if p._head == "lam"])
 
     # rewrite these children nodes into a new lambda abstraction
     # replacing the `anchor` node with an arg node.

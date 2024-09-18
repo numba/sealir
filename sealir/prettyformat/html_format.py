@@ -1,8 +1,8 @@
 import html
 from typing import Any
 
-from sealir.ase import BaseExpr
 from sealir import ase
+from sealir.ase import BaseExpr
 from sealir.rewriter import TreeRewriter
 
 

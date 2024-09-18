@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, NamedTuple, Type, cast, dataclass_transform
 from functools import cached_property
+from typing import Any, Callable, NamedTuple, Type, cast, dataclass_transform
+
 from sealir import ase
 
 
@@ -18,19 +19,6 @@ class Grammar:
         args = [getattr(rule, k.name) for k in rule._fields]
         expr = self._tape.expr(rule._sexpr_head, *args)
         return ExprWithRule(self, type(rule), expr)
-
-    def match(self, expr: ase.Expr) -> Rule:
-        return cast(Rule, expr)
-
-    def get_record_class(self) -> Type[ase.Record]:
-        grammar = self
-
-        @dataclass(frozen=True)
-        class MyRecord(ase.Record):
-            def to_expr(self) -> ase.BaseExpr:
-                return grammar.downcast(super().to_expr())
-
-        return MyRecord
 
     def downcast(self, expr: ase.BaseExpr) -> ExprWithRule:
         head = expr._head
@@ -101,7 +89,7 @@ class Rule(metaclass=_MetaRule):
 
 class ExprWithRule(ase.BaseExpr):
     def __init__(
-        self, grammar: Grammar, rulety: Type[Rule], expr: ase.SimpleExpr
+        self, grammar: Grammar, rulety: Type[Rule], expr: ase.BaseExpr
     ) -> None:
         self._tape = expr._tape
         self._handle = expr._handle
@@ -135,7 +123,5 @@ class ExprWithRule(ase.BaseExpr):
 
         return tuple(map(cast, self._expr._args))
 
-
-@ase._get_downcast.register
-def _(sexpr: ExprWithRule) -> ase.Tape:
-    return sexpr._grammar.downcast
+    def _get_downcast(self) -> Callable[[ase.BaseExpr], ExprWithRule]:
+        return self._grammar.downcast

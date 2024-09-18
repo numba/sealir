@@ -2,6 +2,7 @@ from collections import ChainMap
 
 import pytest
 
+from sealir import ase
 from sealir.lam import LamBuilder
 from sealir.rvsdg import (
     EvalCtx,
@@ -9,7 +10,6 @@ from sealir.rvsdg import (
     lambda_evaluation,
     restructure_source,
 )
-from sealir import ase
 
 
 def test_return_arg0():

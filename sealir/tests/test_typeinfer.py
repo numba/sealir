@@ -70,7 +70,9 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
                 if argidx == lam_depth:
                     yield child
 
-    def apply_arg_rules(self, orig_body: ase.BaseExpr, arg: ase.BaseExpr) -> None:
+    def apply_arg_rules(
+        self, orig_body: ase.BaseExpr, arg: ase.BaseExpr
+    ) -> None:
         for arg_node in self.find_arg(orig_body):
             self.new_equiv(arg, self.memo[arg_node])
 
@@ -90,7 +92,9 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
         self.new_equiv(tv, self.new_type("Lam", body, self.memo[arg_node]))
         return tv
 
-    def rewrite_app(self, orig: ase.BaseExpr, lam: ase.BaseExpr, arg: ase.BaseExpr):
+    def rewrite_app(
+        self, orig: ase.BaseExpr, lam: ase.BaseExpr, arg: ase.BaseExpr
+    ):
         tv = self.new_typevar(orig)
         self.new_equiv(tv, self.new_type("App", lam, arg))
         return tv
@@ -190,12 +194,12 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
                 tv = self.new_typevar(orig)
                 self.new_equiv(tv, *branches_tvs)
                 # TODO:
-#                 raise AssertionError(
-#                     """
-# Solve the merge type.
-# Currently it doesn't propagate
-# """
-#                 )
+                #                 raise AssertionError(
+                #                     """
+                # Solve the merge type.
+                # Currently it doesn't propagate
+                # """
+                #                 )
                 # self.new_equiv(tv, self.new_type("Merge", cond, *branches_tvs))
                 self.new_proof(tv, self.new_proof_of(cond))
                 return tv
@@ -774,12 +778,17 @@ def build_egglog_statements(equiv_list, node_dct):
     proof_stmts = []
 
     for op, lhs, rhs in equiv_pairs:
-        assert lhs._head == "typevar", (ase.pretty_str(lhs), ase.pretty_str(rhs))
+        assert lhs._head == "typevar", (
+            ase.pretty_str(lhs),
+            ase.pretty_str(rhs),
+        )
         match ase.as_tuple(lhs):
             case "typevar", x:
                 pass
             case _:
-                raise AssertionError(f"{op} {ase.pretty_str(lhs)} {ase.pretty_str(rhs)}")
+                raise AssertionError(
+                    f"{op} {ase.pretty_str(lhs)} {ase.pretty_str(rhs)}"
+                )
         first = node_dct.TypeInfo.typevar(x)
         second = proc_second(rhs)
         match op:

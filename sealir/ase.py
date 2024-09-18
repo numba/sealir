@@ -16,13 +16,14 @@ to process such a S-expression tree.
 
 from __future__ import annotations
 
+import abc
 import html
 import sys
 from collections import Counter, deque
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from enum import IntEnum
-from functools import cached_property, singledispatch
+from functools import cached_property
 from pprint import pformat
 from typing import (
     Any,
@@ -354,11 +355,23 @@ class TraverseState:
     parents: list[BaseExpr] = field(default_factory=list)
 
 
-class BaseExpr:
+class BaseExpr(abc.ABC):
     _tape: Tape
     _handle: handle_type
-    _head: str
-    _args: tuple[value_type, ...]
+
+    @property
+    @abc.abstractmethod
+    def _head(self) -> str:
+        pass
+
+    @property
+    @abc.abstractmethod
+    def _args(self) -> tuple[value_type, ...]:
+        pass
+
+    @abc.abstractmethod
+    def _get_downcast(self) -> Callable[[BaseExpr], BaseExpr]:
+        pass
 
     # Comparison API
 
@@ -388,12 +401,6 @@ class BaseExpr:
 metadata_prefix = "."
 
 
-@singledispatch
-def _get_downcast(sexpr: BaseExpr) -> Callable[[BaseExpr], BaseExpr]:
-    # identity function by default
-    return lambda x: x
-
-
 def pretty_str(expr: BaseExpr) -> str:
     from .prettyprinter import pretty_print
 
@@ -420,7 +427,7 @@ def walk_parents(self: BaseExpr) -> Iterator[BaseExpr]:
     object.
     Returned values follow the order of occurrence.
     """
-    crawler = TapeCrawler(self._tape, _get_downcast(self))
+    crawler = TapeCrawler(self._tape, self._get_downcast())
     crawler.seek(self._handle)
     crawler.skip_to_record_end()
     while crawler.move_to_pos_of(self._handle):
@@ -468,7 +475,7 @@ def walk_descendants(
     Breath-first order. Left to right.
     """
     oldtree = self._tape
-    crawler = TapeCrawler(oldtree, _get_downcast(self))
+    crawler = TapeCrawler(oldtree, self._get_downcast())
     crawler.seek(self._handle)
     for parents, desc in crawler.walk_descendants():
         parent_exprs = tuple(map(lambda x: x.to_expr(), parents))
@@ -604,7 +611,7 @@ def apply_bottomup(
         case str():
             raise ValueError(f"invalid input for `reachable`: {reachable!r}")
 
-    crawler = TapeCrawler(self._tape, _get_downcast(self))
+    crawler = TapeCrawler(self._tape, self._get_downcast())
     match reachable:
         case set():
             first_reachable = min(reachable)
@@ -746,7 +753,7 @@ def copy_tree_into(self: BaseExpr, tape: Tape) -> BaseExpr:
     Returns a fresh Expr in the new tape.
     """
     oldtree = self._tape
-    crawler = TapeCrawler(oldtree, _get_downcast(self))
+    crawler = TapeCrawler(oldtree, self._get_downcast())
     crawler.seek(self._handle)
     liveset = set(_select(crawler.walk_descendants(), 1))
     surviving = sorted(liveset)
@@ -807,6 +814,14 @@ class SimpleExpr(BaseExpr):
         end = f" @{hex(id(self._tape))}>"
         return start + end
 
+    def _get_downcast(self) -> Callable[[BaseExpr], SimpleExpr]:
+        def downcast(expr):
+            if isinstance(expr, SimpleExpr):
+                return expr
+            else:
+                return SimpleExpr(expr._tape, expr._handle)
+
+        return downcast
 
 
 class TreeVisitor:
