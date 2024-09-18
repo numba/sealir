@@ -15,8 +15,8 @@ class Num(Val):
 
 @grammar.rule
 class BinOp(Val):
-    lhs: Val
-    rhs: Val
+    lhs: ase.BaseExpr
+    rhs: ase.BaseExpr
 
 
 @grammar.rule
@@ -84,3 +84,31 @@ def test_calculator():
         return e
 
     assert expected() == result
+
+
+def test_calculator_traverse():
+    with ase.Tape() as tp:
+        grm = CalcGrammar(tp)
+        a = grm.write(Num(value=123))
+        b = grm.write(Num(value=321))
+        c = grm.write(Add(lhs=a, rhs=a))
+        d = grm.write(Sub(lhs=c, rhs=b))
+        e = grm.write(Mul(lhs=b, rhs=d))
+
+    def calc(
+        sexpr: ase.BaseExpr, state: ase.TraverseState
+    ) -> Generator[ase.BaseExpr, int, int]:
+        match sexpr:
+            case Num(value=int(value)):
+                return value
+            case Add(lhs=lhs, rhs=rhs):
+                return (yield lhs) + (yield rhs)
+            case Sub(lhs=lhs, rhs=rhs):
+                return (yield lhs) - (yield rhs)
+            case Mul(lhs=lhs, rhs=rhs):
+                return (yield lhs) * (yield rhs)
+            case _:
+                raise AssertionError(sexpr)
+
+    memo = ase.traverse(e, calc)
+    print(memo)
