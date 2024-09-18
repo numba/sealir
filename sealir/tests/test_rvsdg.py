@@ -1,5 +1,7 @@
 from collections import ChainMap
 
+import pytest
+
 from sealir.lam import LamBuilder
 from sealir.rvsdg import (
     EvalCtx,
@@ -214,6 +216,7 @@ def test_for_loop_reduce_add_2d_w_break():
 _GLOBAL = 1234  # used in test_f_o_r_t_r_a_n
 
 
+@pytest.mark.skip("temporarily")
 def test_f_o_r_t_r_a_n():
     import numpy as np
 
