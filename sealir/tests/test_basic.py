@@ -152,4 +152,14 @@ def test_calculator_traverse():
                 raise AssertionError(sexpr)
 
     memo = ase.traverse(e, calc)
-    print(memo)
+    result = memo[e]
+
+    def expected():
+        a = 123
+        b = 321
+        c = a + a
+        d = c - b
+        e = b * d
+        return e
+
+    assert expected() == result

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from collections import ChainMap
+from collections.abc import MutableMapping
 from functools import cached_property
 from itertools import chain
+from types import UnionType
 from typing import (
     Any,
     Callable,
@@ -25,6 +28,18 @@ class Grammar:
     def __init__(self, tape: ase.Tape) -> None:
         self._tape = tape
 
+    def __init_subclass__(cls) -> None:
+        if isinstance(cls.start, UnionType):
+            newcls: type[_CombinedRule] = type(
+                "_CombinedRule",
+                (_CombinedRule,),
+                {
+                    "_combined": tuple(cls.start.__args__),
+                },
+            )
+            newcls._rules = ChainMap(*(t._rules for t in cls.start.__args__))
+            cls.start = newcls
+
     def write(self, rule) -> ExprWithRule:
         if not isinstance(rule, self.start):
             raise ValueError(f"{type(rule)} is not a {self.start}")
@@ -34,7 +49,7 @@ class Grammar:
 
     def downcast(self, expr: ase.BaseExpr) -> ExprWithRule:
         head = expr._head
-        rulety = self.start._subtypes[head]
+        rulety = self.start._rules[head]
         return ExprWithRule(self, rulety, expr)
 
     def __enter__(self) -> Self:
@@ -46,7 +61,7 @@ class Grammar:
 
 
 @dataclass_transform()
-def rule(clsdef: Any) -> Type[Rule]:
+def rule(clsdef: type) -> Type[Rule]:
     fields: dict[str, Any] = {}
 
     hints = get_type_hints(clsdef)
@@ -70,6 +85,7 @@ def rule(clsdef: Any) -> Type[Rule]:
             "_fields": tuple(_Field(k, v) for k, v in fields.items()),
             "__match_args__": tuple(fields.keys()),
             "_sexpr_head": clsdef.__name__,
+            "_rules": {},
         },
     )
     return newcls
@@ -83,8 +99,17 @@ class _Field(NamedTuple):
         return isinstance(self.annotation, type(tuple[Any]))
 
 
+@dataclass_transform()
 class _MetaRule(type):
+    _fields: tuple[_Field, ...]
+    __match_args__: tuple[str]
+    _is_root: bool
+    _sexpr_head: str
+    _rules: MutableMapping[str, Type[Rule]]
+
     def __instancecheck__(cls, instance: Any) -> bool:
+        if issubclass(cls, _CombinedRule):
+            return any(isinstance(instance, t) for t in cls._combined)
         if isinstance(instance, ase.BaseExpr):
             return instance._head == cls._sexpr_head
         else:
@@ -92,10 +117,6 @@ class _MetaRule(type):
 
 
 class Rule(metaclass=_MetaRule):
-    _sexpr_head: str
-    _fields: tuple[_Field, ...] = ()
-    _subtypes: dict[str, Type[Rule]] = {}
-    __match_args__: tuple[str]
 
     def __init__(self, *args, **kwargs):
         fields = dict(self._fields)
@@ -110,10 +131,31 @@ class Rule(metaclass=_MetaRule):
             raise TypeError(f"missing arguments: {fields}")
 
     def __init_subclass__(cls) -> None:
-        if cls is not Rule:
-            super().__init_subclass__()
-            first_base = [c for c in cls.__mro__ if issubclass(c, Rule)][1]
-            first_base._subtypes[cls.__name__] = cls
+        # Find the root for this grammar
+        root_bases = [
+            c
+            for c in reversed(cls.__mro__[1:])
+            if issubclass(c, Rule) and getattr(c, "_is_root", False)
+        ]
+        assert 0 <= len(root_bases) <= 1
+
+        # init subclass fields
+        fields: dict[str, Any] = {}
+
+        hints = get_type_hints(cls)
+        for k, v in hints.items():
+            if not k.startswith("_"):
+                fields[k] = v
+
+        cls._fields = tuple(_Field(k, v) for k, v in fields.items())
+        cls.__match_args__ = tuple(fields.keys())
+        cls._sexpr_head = cls.__name__
+        cls._is_root = not root_bases
+        if cls._is_root:
+            # only root has a fresh _rules
+            cls._rules = {}
+        # insert this class to _rules
+        cls._rules[cls._sexpr_head] = cls
 
     def __repr__(self):
         name = self._sexpr_head
@@ -136,6 +178,10 @@ class Rule(metaclass=_MetaRule):
         return out
 
 
+class _CombinedRule(Rule):
+    _combined: tuple[type[Rule], ...]
+
+
 class ExprWithRule(ase.BaseExpr):
     def __init__(
         self, grammar: Grammar, rulety: Type[Rule], expr: ase.BaseExpr
@@ -151,6 +197,8 @@ class ExprWithRule(ase.BaseExpr):
     def __getattr__(
         self, name: str
     ) -> ase.value_type | tuple[ase.value_type, ...]:
+        if name.startswith("_"):
+            return super().__getattribute__(name)
         try:
             idx = self._slots[name]
         except IndexError:
@@ -165,7 +213,7 @@ class ExprWithRule(ase.BaseExpr):
 
     def __repr__(self) -> str:
         inner = repr(self._expr)
-        return f"{self._rulety._sexpr_head}!{inner}"
+        return inner
 
     @cached_property
     def _head(self) -> str:

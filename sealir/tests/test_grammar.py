@@ -3,31 +3,25 @@ from collections.abc import Generator
 from sealir import ase, grammar
 
 
-@grammar.rule
 class Val(grammar.Rule):
     pass
 
 
-@grammar.rule
 class Num(Val):
     value: int
 
 
-@grammar.rule
 class BinOp(Val):
     lhs: ase.BaseExpr
     rhs: ase.BaseExpr
 
 
-@grammar.rule
 class Add(BinOp): ...
 
 
-@grammar.rule
 class Sub(BinOp): ...
 
 
-@grammar.rule
 class Mul(BinOp): ...
 
 
@@ -41,6 +35,17 @@ def test_calculator() -> None:
     assert Add.__match_args__ == ("lhs", "rhs")
     assert Sub.__match_args__ == ("lhs", "rhs")
     assert Mul.__match_args__ == ("lhs", "rhs")
+
+    assert Mul._rules is Val._rules
+
+    assert Val._rules == {
+        "Val": Val,
+        "Num": Num,
+        "BinOp": BinOp,
+        "Add": Add,
+        "Sub": Sub,
+        "Mul": Mul,
+    }
 
     with ase.Tape() as tp:
         grm = CalcGrammar(tp)
@@ -111,29 +116,40 @@ def test_calculator_traverse():
                 raise AssertionError(sexpr)
 
     memo = ase.traverse(e, calc)
-    print(memo)
+    result = memo[e]
+
+    def expected():
+        a = 123
+        b = 321
+        c = a + a
+        d = c - b
+        e = b * d
+        return e
+
+    assert expected() == result
 
 
-@grammar.rule
-class Grouped(Val):
+class Grouped(grammar.Rule):  # new root
     head: str
     vargs: tuple[ase.value_type, ...]
 
 
-class VarargGrammar(grammar.Grammar):
-    start = Val
-
-
 def test_vararg():
 
+    class VarargGrammar(grammar.Grammar):
+        start = Grouped | Val
+
+    assert VarargGrammar.start._rules["Grouped"] is Grouped
+
     with VarargGrammar(ase.Tape()) as grm:
-        g1 = grm.write(Grouped(head="heading", vargs=(123, 1321)))
+        n1 = grm.write(Num(123))
+        g1 = grm.write(Grouped(head="heading", vargs=(n1, 1321)))
         g2 = grm.write(Grouped(head="heading2", vargs=(123, g1)))
 
     print(grm._tape.dump())
     assert g1._head == "Grouped"
 
-    assert g1._args == ("heading", 123, 1321)
+    assert g1._args == ("heading", n1, 1321)
     assert g2._args == ("heading2", 123, g1)
     assert g2.vargs == (123, g1)
 
@@ -146,4 +162,20 @@ def test_vararg():
     match v2:
         case Grouped(head="heading", vargs=vargs):
             pass
-    assert vargs == (123, 1321)
+    assert vargs == (n1, 1321)
+
+
+def test_three_grammar():
+
+    class Another(grammar.Rule):  # new root
+        value: ase.BaseExpr
+
+    class ThreeGrammar(grammar.Grammar):
+        start = Grouped | Val | Another
+
+    with ThreeGrammar(ase.Tape()) as grm:
+        n1 = grm.write(Num(123))
+        g1 = grm.write(Grouped("a", vargs=(n1,)))
+        a1 = grm.write(Another(value=g1))
+
+    assert ThreeGrammar.start._combined == (Grouped, Val, Another)

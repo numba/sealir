@@ -10,28 +10,23 @@ from sealir.itertools import first
 from sealir.rewriter import TreeRewriter
 
 
-@grammar.rule
 class _Value(grammar.Rule):
     pass
 
 
-@grammar.rule
 class Lam(_Value):
     body: ase.BaseExpr
 
 
-@grammar.rule
 class Expr(_Value):
     head: str
     args: tuple[ase.value_type, ...]
 
 
-@grammar.rule
 class Arg(_Value):
     index: int
 
 
-@grammar.rule
 class App(_Value):
     arg: ase.BaseExpr
     lam: ase.BaseExpr
