@@ -21,7 +21,7 @@ def test_lam():
     print(ase.pretty_str(beta_out2))
     assert (
         ase.pretty_str(beta_out2)
-        == "(expr 'tuple' (expr 'add' (expr 'num' 1) (expr 'num' 2)) (expr 'sub' (expr 'num' 1) (expr 'num' 1)))"
+        == "(Expr 'tuple' (Expr 'add' (Expr 'num' 1) (Expr 'num' 2)) (Expr 'sub' (Expr 'num' 1) (Expr 'num' 1)))"
     )
 
 
@@ -169,9 +169,9 @@ def test_lam_identity():
     expected_str = dedent(
         """
         let $1 = λ {
-          (arg 0)
+          (Arg 0)
         }
     """
     )
     assert out.strip() == expected_str.strip()
-    assert ase.pretty_str(func_body) == "(lam (arg 0))"
+    assert ase.pretty_str(func_body) == "(Lam (Arg 0))"
