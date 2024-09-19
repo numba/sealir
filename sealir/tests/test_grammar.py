@@ -4,7 +4,7 @@ from sealir import ase, grammar
 
 
 @grammar.rule
-class Val:
+class Val(grammar.Rule):
     pass
 
 
@@ -35,7 +35,7 @@ class CalcGrammar(grammar.Grammar):
     start = Val
 
 
-def test_calculator():
+def test_calculator() -> None:
 
     assert Num.__match_args__ == ("value",)
     assert Add.__match_args__ == ("lhs", "rhs")
@@ -112,3 +112,38 @@ def test_calculator_traverse():
 
     memo = ase.traverse(e, calc)
     print(memo)
+
+
+@grammar.rule
+class Grouped(Val):
+    head: str
+    vargs: tuple[ase.value_type, ...]
+
+
+class VarargGrammar(grammar.Grammar):
+    start = Val
+
+
+def test_vararg():
+
+    with VarargGrammar(ase.Tape()) as grm:
+        g1 = grm.write(Grouped(head="heading", vargs=(123, 1321)))
+        g2 = grm.write(Grouped(head="heading2", vargs=(123, g1)))
+
+    print(grm._tape.dump())
+    assert g1._head == "Grouped"
+
+    assert g1._args == ("heading", 123, 1321)
+    assert g2._args == ("heading2", 123, g1)
+    assert g2.vargs == (123, g1)
+
+    match g2:
+        case Grouped(head=head, vargs=(v1, v2)):
+            pass
+    assert head == "heading2"
+    assert v1 == 123
+    assert v2 == g1
+    match v2:
+        case Grouped(head="heading", vargs=vargs):
+            pass
+    assert vargs == (123, 1321)

@@ -53,10 +53,6 @@ class NotFound(ValueError):
     pass
 
 
-token_type: TypeAlias = Union[int, float, str, None]
-value_type: TypeAlias = Union[token_type, "BaseExpr"]
-handle_type: TypeAlias = int
-
 
 class HandleSentry(IntEnum):
     BEGIN = 0xFFFF_FFFE
@@ -942,3 +938,7 @@ class Record:
 def _select(iterable, idx: int):
     for args in iterable:
         yield args[idx]
+
+token_type: TypeAlias = Union[int, float, str, None]
+value_type: TypeAlias = Union[token_type, BaseExpr]
+handle_type: TypeAlias = int
