@@ -2,77 +2,138 @@ from __future__ import annotations
 
 from textwrap import dedent
 
-from sealir import ase
-from sealir.lam import LamBuilder
+from sealir import ase, grammar
+from sealir.lam import (
+    App,
+    LamGrammar,
+    app_func,
+    beta_reduction,
+    format,
+    lam_func,
+    run_abstraction_pass,
+)
+
+
+class _Val(grammar.Rule):
+    pass
+
+
+class Num(_Val):
+    val: int
+
+
+class _BinOp(_Val):
+    lhs: ase.BaseExpr
+    rhs: ase.BaseExpr
+
+
+class Add(_BinOp): ...
+
+
+class Sub(_BinOp): ...
+
+
+class Mul(_BinOp): ...
+
+
+class Lt(_BinOp): ...
+
+
+class Loop(_Val):
+    body: ase.BaseExpr
+    args: tuple[ase.BaseExpr, ...]
+
+
+class If(_Val):
+    cond: ase.BaseExpr
+    then: ase.BaseExpr
+    args: tuple[ase.BaseExpr, ...]
+
+
+class Func(_Val):
+    body: ase.BaseExpr
+    name: str
+    args: tuple[ase.BaseExpr, ...]
+
+
+class Tuple(_Val):
+    args: tuple[ase.BaseExpr, ...]
+
+
+class TestLamGrammar(grammar.Grammar):
+    start = LamGrammar.start | _Val
 
 
 def test_lam():
-    lambar = LamBuilder()
+    with TestLamGrammar(ase.Tape()) as grm:
 
-    @lambar.lam_func
-    def lam1(a, b):
-        c = lambar.expr("add", a, b)
-        d = lambar.expr("sub", a, a)
-        return lambar.expr("tuple", c, d)
+        @lam_func(grm)
+        def lam1(a, b):
+            c = grm.write(Add(a, b))
+            d = grm.write(Sub(a, a))
+            return grm.write(Tuple((c, d)))
 
-    out = lambar.app(lam1, lambar.expr("num", 1), lambar.expr("num", 2))
+        out = app_func(grm, lam1, grm.write(Num(1)), grm.write(Num(2)))
+
     print(ase.pretty_str(out))
-    beta_out2 = lambar.beta_reduction(out)
+
+    with grm:
+        beta_out2 = beta_reduction(out)
+
     print(ase.pretty_str(beta_out2))
     assert (
         ase.pretty_str(beta_out2)
-        == "(Expr 'tuple' (Expr 'add' (Expr 'num' 1) (Expr 'num' 2)) (Expr 'sub' (Expr 'num' 1) (Expr 'num' 1)))"
+        == "(Tuple (Add (Num 1) (Num 2)) (Sub (Num 1) (Num 1)))"
     )
 
 
 def test_lam_loop():
-    lambar = LamBuilder()
+    with TestLamGrammar(ase.Tape()) as grm:
 
-    # Implements
-    #
-    # c =0
-    # for i in range(n):
-    #    c += i
-    # return c
+        # Implements
+        #
+        # c =0
+        # for i in range(n):
+        #    c += i
+        # return c
 
-    @lambar.lam_func
-    def loop_body(n, i, c):
-        # i < n
-        loop_cont = lambar.expr("lt", i, n)
-        # c += i
-        c = lambar.expr("add", c, i)
-        # i += 1
-        i = lambar.expr("add", i, lambar.expr("num", 1))
-        # return (loop_cont, n, i, c)
-        ret = lambar.expr("tuple", loop_cont, lambar.expr("tuple", n, i, c))
-        return ret
+        @lam_func(grm)
+        def loop_body(n, i, c):
+            # i < n
+            loop_cont = grm.write(Lt(i, n))
+            # c += i
+            c = grm.write(Add(c, i))
+            # i += 1
+            i = grm.write(Add(i, grm.write(Num(1))))
+            # return (loop_cont, n, i, c)
+            ret = grm.write(Tuple((loop_cont, grm.write(Tuple((n, i, c))))))
+            return ret
 
-    @lambar.lam_func
-    def if_body(n, i):
-        c = lambar.expr("num", 0)
-        return lambar.expr("scf.loop", loop_body, n, i, c)
+        @lam_func(grm)
+        def if_body(n, i):
+            c = grm.write(Num(0))
+            return grm.write(Loop(body=loop_body, args=(n, i, c)))
 
-    @lambar.lam_func
-    def func_body(n):
-        i = lambar.expr("num", 0)
-        lt = lambar.expr("lt", i, n)
-        ifthen = lambar.expr("scf.if", lt, if_body, n, i)
-        return ifthen
+        @lam_func(grm)
+        def func_body(n):
+            i = grm.write(Num(0))
+            lt = grm.write(Lt(i, n))
+            ifthen = grm.write(If(cond=lt, then=if_body, args=(n, i)))
+            return ifthen
 
-    toplevel = lambar.expr("func", func_body, "foo", 1)
+        toplevel = grm.write(Func(body=func_body, name="foo", args=(1,)))
 
     print("Format")
     print(ase.pretty_str(toplevel))
-    print(lambar.format(toplevel))
+    print(format(toplevel))
 
-    print(lambar._tape.dump())
+    print(grm._tape.dump())
 
 
 def test_lam_abstract():
     """Abstraction pass introduces `app (lam)` to ensure all variables are
     single use.
     """
-    lambar = LamBuilder()
 
     # Implements
     #
@@ -83,29 +144,31 @@ def test_lam_abstract():
     #    d = b * c
     #    return d
 
-    @lambar.lam_func
-    def func_body(x):
-        a = lambar.expr("mul", x, lambar.expr("num", 2))
-        b = lambar.expr("add", a, x)
-        c = lambar.expr("sub", a, lambar.expr("num", 1))
-        d = lambar.expr("mul", b, c)
-        return d
+    with TestLamGrammar(ase.Tape()) as grm:
 
-    @lambar.lam_func
-    def expected_func_body(x):
-        a = lambar.expr("mul", x, lambar.expr("num", 2))
-
-        @lambar.lam_func
-        def remaining(a):
-            b = lambar.expr("add", a, x)
-            c = lambar.expr("sub", a, lambar.expr("num", 1))
-            d = lambar.expr("mul", b, c)
+        @lam_func(grm)
+        def func_body(x):
+            a = grm.write(Mul(x, grm.write(Num(2))))
+            b = grm.write(Add(a, x))
+            c = grm.write(Sub(a, grm.write(Num(1))))
+            d = grm.write(Mul(b, c))
             return d
 
-        return lambar.app(remaining, a)
+        @lam_func(grm)
+        def expected_func_body(x):
+            a = grm.write(Mul(x, grm.write(Num(2))))
 
-    func_body = lambar.run_abstraction_pass(func_body)
-    print(lambar.format(func_body))
+            @lam_func(grm)
+            def remaining(a):
+                b = grm.write(Add(a, x))
+                c = grm.write(Sub(a, grm.write(Num(1))))
+                d = grm.write(Mul(b, c))
+                return d
+
+            return app_func(grm, remaining, a)
+
+        func_body = run_abstraction_pass(grm, func_body)
+    print(format(func_body))
     assert ase.pretty_str(expected_func_body) == ase.pretty_str(func_body)
     print(ase.pretty_str(func_body))
 
@@ -114,7 +177,6 @@ def test_lam_abstract_deeper():
     """Abstraction pass introduces `app (lam)` to ensure all variables are
     single use.
     """
-    lambar = LamBuilder()
 
     # Implements
     #
@@ -124,48 +186,50 @@ def test_lam_abstract_deeper():
     #    c = a - b
     #    d = b * c
     #    return d
+    with TestLamGrammar(ase.Tape()) as grm:
 
-    @lambar.lam_func
-    def func_body(x):
-        a = lambar.expr("mul", x, lambar.expr("num", 2))
-        b = lambar.expr("add", a, x)
-        c = lambar.expr("sub", a, b)
-        d = lambar.expr("mul", b, c)
-        return d
+        @lam_func(grm)
+        def func_body(x):
+            a = grm.write(Mul(x, grm.write(Num(2))))
+            b = grm.write(Add(a, x))
+            c = grm.write(Sub(a, b))
+            d = grm.write(Mul(b, c))
+            return d
 
-    @lambar.lam_func
-    def expected_func_body(x):
-        a = lambar.expr("mul", x, lambar.expr("num", 2))
+        @lam_func(grm)
+        def expected_func_body(x):
+            a = grm.write(Mul(x, grm.write(Num(2))))
 
-        @lambar.lam_func
-        def inner(a):
-            b = lambar.expr("add", a, x)
+            @lam_func(grm)
+            def inner(a):
+                b = grm.write(Add(a, x))
 
-            @lambar.lam_func
-            def remaining(b):
-                c = lambar.expr("sub", a, b)
-                d = lambar.expr("mul", b, c)
-                return d
+                @lam_func(grm)
+                def remaining(b):
+                    c = grm.write(Sub(a, b))
+                    d = grm.write(Mul(b, c))
+                    return d
 
-            return lambar.app(remaining, b)
+                return app_func(grm, remaining, b)
 
-        return lambar.app(inner, a)
+            return app_func(grm, inner, a)
 
-    func_body = lambar.run_abstraction_pass(func_body)
-    print(lambar.format(func_body))
+        func_body = run_abstraction_pass(grm, func_body)
+    print(format(func_body))
+    print(format(expected_func_body))
     assert ase.pretty_str(expected_func_body) == ase.pretty_str(func_body)
     print(ase.pretty_str(func_body))
 
 
 def test_lam_identity():
-    lambar = LamBuilder()
+    with TestLamGrammar(ase.Tape()) as grm:
 
-    @lambar.lam_func
-    def func_body(x):
-        return x
+        @lam_func(grm)
+        def func_body(x):
+            return x
 
     # This is a special case for the formatter to only contain a simple expr
-    out = lambar.format(func_body)
+    out = format(func_body)
     expected_str = dedent(
         """
         let $1 = λ {

@@ -30,6 +30,7 @@ from typing import (
     Callable,
     Iterator,
     LiteralString,
+    Self,
     Type,
     TypeAlias,
     TypeVar,
@@ -116,7 +117,7 @@ class Tape:
 
     def expr(self, head: str, *args: value_type) -> BaseExpr:
         """The main API for creating an `Expr`."""
-        return SimpleExpr.write(self, head, args)
+        return SimpleExpr._write(self, head, args)
 
     # Debug API
 
@@ -367,6 +368,24 @@ class BaseExpr(abc.ABC):
     @abc.abstractmethod
     def _get_downcast(self) -> Callable[[BaseExpr], BaseExpr]:
         pass
+
+    @classmethod
+    @abc.abstractmethod
+    def _wrap(cls, tape: Tape, handle: handle_type) -> Self:
+        pass
+
+    @classmethod
+    def _write(
+        cls, tape: Tape, head: str, args: tuple[value_type, ...]
+    ) -> BaseExpr:
+        handle = tape.write(head, args)
+        return cls._wrap(tape, handle)
+
+    def _replace(self, *args: value_type) -> Self:
+        if args == self._args:
+            return self
+        else:
+            return self._write(self._tape, self._head, args)
 
     # Comparison API
 
@@ -783,16 +802,13 @@ class SimpleExpr(BaseExpr):
     _handle: handle_type
     __match_args__ = "_head", "_args"
 
+    @classmethod
+    def _wrap(cls, tape: Tape, handle: handle_type) -> Self:
+        return cls(tape, handle)
+
     def __init__(self, tape: Tape, handle: handle_type) -> None:
         self._tape = tape
         self._handle = handle
-
-    @classmethod
-    def write(
-        cls, tape: Tape, head: str, args: tuple[value_type, ...]
-    ) -> SimpleExpr:
-        handle = tape.write(head, args)
-        return cls(tape, handle)
 
     @cached_property
     def _head(self) -> str:
@@ -928,7 +944,10 @@ class Record:
         return self.tape.read_args(self.handle)
 
     def to_expr(self) -> BaseExpr:
-        return self.downcast(SimpleExpr(self.tape, self.handle))
+        base = SimpleExpr(self.tape, self.handle)
+        if is_metadata(base):
+            return base
+        return self.downcast(base)
 
     def __repr__(self):
         return f"<Record {self.handle}:{self.end_handle} tape@{hex(id(self.tape))} >"

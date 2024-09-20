@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections import ChainMap
 from collections.abc import Mapping, MutableMapping
 from functools import cached_property
-from itertools import chain
+from itertools import chain, cycle
 from types import UnionType
 from typing import (
     Any,
     Callable,
+    Generic,
     NamedTuple,
     Self,
     Sequence,
@@ -17,13 +18,15 @@ from typing import (
     get_type_hints,
 )
 
-from sealir import ase
+from sealir import ase, rewriter
 
 Trule = TypeVar("Trule", bound="Rule")
+Tgrammar = TypeVar("Tgrammar", bound="Grammar")
+T = TypeVar("T")
 
 
 class Grammar:
-    start: Type[Rule]
+    start: type[Rule] | UnionType
 
     def __init__(self, tape: ase.Tape) -> None:
         self._tape = tape
@@ -40,17 +43,25 @@ class Grammar:
             newcls._rules = ChainMap(*(t._rules for t in cls.start.__args__))
             cls.start = newcls
 
-    def write(self, rule) -> ExprWithRule:
+    def write(self: Tgrammar, rule: Trule) -> ExprWithRule[Tgrammar, Trule]:
+        bounded = ExprWithRule._subclass(type(self), type(rule))
         if not isinstance(rule, self.start):
             raise ValueError(f"{type(rule)} is not a {self.start}")
         args = rule._get_sexpr_args()
         expr = self._tape.expr(rule._sexpr_head, *args)
-        return ExprWithRule(self, type(rule), expr)
+        return bounded._wrap(expr._tape, expr._handle)
 
-    def downcast(self, expr: ase.BaseExpr) -> ExprWithRule:
+    @classmethod
+    def downcast(
+        cls: type[Tgrammar], expr: ase.BaseExpr
+    ) -> ExprWithRule[Tgrammar, Trule]:
         head = expr._head
-        rulety = self.start._rules[head]
-        return ExprWithRule(self, rulety, expr)
+        try:
+            rulety = cls.start._rules[head]
+        except KeyError:
+            raise ValueError(f"{head!r} is not valid in the grammar")
+        else:
+            return ExprWithRule._subclass(cls, rulety)(expr)
 
     def __enter__(self) -> Self:
         self._tape.__enter__()
@@ -58,37 +69,6 @@ class Grammar:
 
     def __exit__(self, exc_val, exc_typ, exc_tb) -> None:
         self._tape.__exit__(exc_val, exc_typ, exc_tb)
-
-
-@dataclass_transform()
-def rule(clsdef: type) -> Type[Rule]:
-    fields: dict[str, Any] = {}
-
-    hints = get_type_hints(clsdef)
-    for k, v in hints.items():
-        if not k.startswith("_"):
-            fields[k] = v
-
-    bases = tuple(t for t in clsdef.__bases__ if t is not object)
-    if Rule not in bases:
-        bases += (Rule,)
-    for b in bases:
-        if issubclass(b, Rule):
-            for fd in b._fields:
-                assert fd.name not in fields
-                fields[fd.name] = fd.annotation
-
-    newcls = type(
-        clsdef.__name__,
-        bases,
-        {
-            "_fields": tuple(_Field(k, v) for k, v in fields.items()),
-            "__match_args__": tuple(fields.keys()),
-            "_sexpr_head": clsdef.__name__,
-            "_rules": {},
-        },
-    )
-    return newcls
 
 
 class _Field(NamedTuple):
@@ -121,10 +101,14 @@ class Rule(metaclass=_MetaRule):
     def __init__(self, *args, **kwargs):
         fields = dict(self._fields)
         peel_args = chain(
-            zip(self.__match_args__, args),
+            zip(chain(self.__match_args__, cycle([None])), args),
             kwargs.items(),
         )
         for k, v in peel_args:
+            if k is None:
+                raise TypeError("too many positional arguments")
+            if hasattr(self, k):
+                raise TypeError(f"duplicated keyword: {k}")
             setattr(self, k, v)
             fields.pop(k)
         if fields:
@@ -192,14 +176,30 @@ class _CombinedRule(Rule):
     _combined: tuple[type[Rule], ...]
 
 
-class ExprWithRule(ase.BaseExpr):
-    def __init__(
-        self, grammar: Grammar, rulety: Type[Rule], expr: ase.BaseExpr
-    ) -> None:
+class ExprWithRule(ase.BaseExpr, Generic[Tgrammar, Trule]):
+    _grammar: type[Grammar]
+    _rulety: type[Rule]
+
+    @classmethod
+    def _subclass(
+        cls, grammar: type[Tgrammar], rule: type[Trule]
+    ) -> type[ExprWithRule[Tgrammar, Trule]]:
+        assert issubclass(grammar, Grammar)
+        assert issubclass(rule, Rule)
+        return type(
+            cls.__name__, (ExprWithRule,), dict(_grammar=grammar, _rulety=rule)
+        )
+
+    @classmethod
+    def _wrap(cls, tape: ase.Tape, handle: ase.handle_type) -> Self:
+        return cls(ase.SimpleExpr._wrap(tape, handle))
+
+    def __init__(self, expr: ase.BaseExpr) -> None:
+        assert self._grammar
+        assert self._rulety
         self._tape = expr._tape
         self._handle = expr._handle
-        self._grammar = grammar
-        self._rulety = rulety
+        rulety = self._rulety
         self._slots = {k: i for i, k in enumerate(rulety.__match_args__)}
         self._expr = expr
         self.__match_args__ = rulety.__match_args__
@@ -245,6 +245,9 @@ class ExprWithRule(ase.BaseExpr):
     def _get_downcast(self) -> Callable[[ase.BaseExpr], ExprWithRule]:
         return self._grammar.downcast
 
+    def _replace(self, *args: ase.value_type) -> ExprWithRule[Tgrammar, Trule]:
+        return self._grammar.downcast(self._expr._replace(*args))
+
     def _bind(self, *args) -> Mapping[str, Any]:
         npos = len(self.__match_args__)
         pack_last = False
@@ -257,3 +260,30 @@ class ExprWithRule(ase.BaseExpr):
         if pack_last:
             out[self.__match_args__[-1]] = tuple(args[i:])
         return out
+
+
+class TreeRewriter(rewriter.TreeRewriter[T]):
+    grammar: Grammar | None = None
+
+    def __init__(self, grammar: Grammar | None = None):
+        super().__init__()
+        if grammar is not None:
+            self.grammar = grammar
+
+    def _default_rewrite_dispatcher(
+        self,
+        orig: ase.BaseExpr,
+        updated: bool,
+        args: tuple[T | ase.value_type],
+    ) -> T | ase.BaseExpr:
+
+        if self.grammar is None:
+            assert isinstance(orig, ExprWithRule), repr(orig)
+        else:
+            orig = self.grammar.downcast(orig)
+        fname = f"rewrite_{orig._head}"
+        fn = getattr(self, fname, None)
+        if fn is not None:
+            return fn(orig, **orig._bind(*args))
+        else:
+            return self.rewrite_generic(orig, args, updated)

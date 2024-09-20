@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import types
 from collections import Counter, defaultdict
-from typing import Annotated, Any, NamedTuple
+from typing import Any
 
 from sealir import ase, grammar
 from sealir.itertools import first
@@ -36,225 +36,180 @@ class LamGrammar(grammar.Grammar):
     start = _Value
 
 
-class LamBuilder:
-    """Helper for building lambda calculus expression"""
+def _intercept_cells(grm, fn):
+    if fn.__closure__ is None:
+        return fn
+    changed = False
+    new_closure = []
+    for i, cell in enumerate(fn.__closure__):
+        val = cell.cell_contents
+        if isinstance(val, ase.BaseExpr):
+            if val._head == "Arg":
+                # increase de Lruijn index
+                [idx] = val._args
+                new_closure.append(types.CellType(grm.write(Arg(idx + 1))))
+                changed = True
+            elif val._head != "Lam":
+                # cannot refer to Expr by freevars
+                raise ValueError(
+                    "cannot refer to non-argument Expr by freevars"
+                )
+        else:
+            new_closure.append(cell)
 
-    _tape: ase.Tape
+    if not changed:
+        return fn
 
-    def __init__(self, tape: ase.Tape | None = None):
-        self._tape = tape or ase.Tape()
-        self._grm = LamGrammar(self._tape)
+    return types.FunctionType(
+        fn.__code__,
+        fn.__globals__,
+        fn.__name__,
+        fn.__defaults__,
+        tuple(new_closure),
+    )
 
-    @property
-    def tape(self) -> ase.Tape:
-        return self._tape
 
-    def get_root(self) -> ase.BaseExpr:
-        return ase.SimpleExpr(self._tape, self._tape.last())
+def lam_func(grm: grammar.Grammar):
+    """Decorator to help build lambda expressions from a Python function.
+    Takes multiple arguments and uses De Bruijn index.
+    """
 
-    def expr(self, head: str, *args) -> ase.BaseExpr:
-        """Makes a user defined expression"""
-        with self._tape:
-            return self._grm.write(Expr(head=head, args=args))
-
-    def lam(self, body_expr: ase.BaseExpr) -> ase.BaseExpr:
-        """Makes a lambda abstraction"""
-        with self._tape:
-            return self._grm.write(Lam(body=body_expr))
-
-    def lam_func(self, fn):
-        """Decorator to help build lambda expressions from a Python function.
-        Takes multiple arguments and uses De Bruijn index.
-        """
+    def wrap(fn):
         argspec = inspect.getfullargspec(fn)
         argnames = argspec.args
         assert not argspec.varargs
         assert not argspec.kwonlyargs
 
-        with self._tape:
-            # use De Bruijn index starting from 0
-            # > lam (lam arg0 arg1)
-            #         ^---|     |
-            #    ^--------------|
-            args = [self.arg(i) for i in range(len(argnames))]
-            # intercept cell variables
-            fn = self._intercept_cells(fn)
-            # Reverse arguments so that arg0 refers to the innermost lambda.
-            # And, it is the rightmost argument in Python.
-            # That way, first `(app )` will replace the leftmost Python argument
-            expr = fn(*reversed(args))
-            for _ in args:
-                expr = self.lam(expr)
-            return expr
+        # use De Bruijn index starting from 0
+        # > lam (lam arg0 arg1)
+        #         ^---|     |
+        #    ^--------------|
+        args = [grm.write(Arg(i)) for i in range(len(argnames))]
+        # intercept cell variables
+        fn = _intercept_cells(grm, fn)
+        # Reverse arguments so that arg0 refers to the innermost lambda.
+        # And, it is the rightmost argument in Python.
+        # That way, first `(app )` will replace the leftmost Python argument
+        expr = fn(*reversed(args))
+        for _ in args:
+            expr = grm.write(Lam(expr))
+        return expr
 
-    # Helper API
+    return wrap
 
-    def unpack(
-        self, tup: ase.BaseExpr, nelem: int
-    ) -> tuple[ase.BaseExpr, ...]:
-        """Unpack a tuple with known size with `(tuple.getitem )`"""
-        return tuple(
-            map(lambda i: self.expr("tuple.getitem", tup, i), range(nelem))
-        )
 
-    def _intercept_cells(self, fn):
-        if fn.__closure__ is None:
-            return fn
-        changed = False
-        new_closure = []
-        for i, cell in enumerate(fn.__closure__):
-            val = cell.cell_contents
-            if isinstance(val, ase.BaseExpr):
-                if val._head == "Arg":
-                    # increase de Lruijn index
-                    [idx] = val._args
-                    new_closure.append(types.CellType(self.arg(idx + 1)))
-                    changed = True
-                elif val._head != "Lam":
-                    # cannot refer to Expr by freevars
-                    raise ValueError(
-                        "cannot refer to non-argument Expr by freevars"
-                    )
-            else:
-                new_closure.append(cell)
+def app_func(grm, lam, arg0, *more_args) -> ase.BaseExpr:
+    """Makes an apply expression."""
+    args = (arg0, *more_args)
 
-        if not changed:
-            return fn
+    stack = list(args)
+    out = lam
+    while stack:
+        arg = stack.pop()
+        out = grm.write(App(lam=out, arg=arg))
+    return out
 
-        return types.FunctionType(
-            fn.__code__,
-            fn.__globals__,
-            fn.__name__,
-            fn.__defaults__,
-            tuple(new_closure),
-        )
 
-    def arg(self, index: int) -> ase.BaseExpr:
-        with self._tape:
-            return self._grm.write(Arg(index=index))
+def format(expr: ase.BaseExpr) -> str:
+    """Multi-line formatting of the S-expression"""
+    return format_lambda(expr).get()
 
-    def app(self, lam, arg0, *more_args) -> ase.BaseExpr:
-        """Makes an apply expression."""
-        args = (arg0, *more_args)
-        with self._tape:
-            stack = list(args)
-            out = lam
-            while stack:
-                arg = stack.pop()
-                out = self._grm.write(App(lam=out, arg=arg))
-        return out
 
-    def beta_reduction(self, app_expr: ase.BaseExpr) -> ase.BaseExpr:
-        """Reduces a (App arg (Lam ...))"""
-        assert app_expr._head == "App"
+def beta_reduction(app_expr: ase.BaseExpr) -> ase.BaseExpr:
+    """Reduces a (App arg (Lam ...))"""
+    assert app_expr._head == "App"
 
-        target = app_expr
+    target = app_expr
 
-        app_exprs = []
-        while isinstance(app_expr, App):
-            app_exprs.append(app_expr)
-            app_expr = app_expr.lam
+    app_exprs = []
+    while isinstance(app_expr, App):
+        app_exprs.append(app_expr)
+        app_expr = app_expr.lam
 
-        napps = len(app_exprs)
+    napps = len(app_exprs)
 
-        arg2repl = {}
-        drops = set(app_exprs)
-        for parents, child in ase.walk_descendants(app_expr):
-            if child._head == "Arg":
-                lams = [x for x in parents if isinstance(x, Lam)]
-                if len(lams) <= napps:  # don't go deeper
-                    [debruijn] = child._args
-                    # in range?
-                    if isinstance(debruijn, int) and debruijn < len(lams):
-                        arg2repl[debruijn] = app_exprs[-debruijn - 1].arg
-                        drops.add(lams[-debruijn - 1])
+    arg2repl = {}
+    drops = set(app_exprs)
+    for parents, child in ase.walk_descendants(app_expr):
+        if isinstance(child, Arg):
+            lams = [x for x in parents if isinstance(x, Lam)]
+            if len(lams) <= napps:  # don't go deeper
+                debruijn = child.index
+                # in range?
+                if debruijn < len(lams):
+                    arg2repl[child] = app_exprs[-debruijn - 1].arg
+                    drops.add(lams[-debruijn - 1])
 
-        assert arg2repl
-        br = BetaReduction(drops, arg2repl)
-        with self._tape:
-            ase.apply_bottomup(target, br)
-        out = br.memo[target]
-        return out
+    assert arg2repl
+    br = BetaReduction(drops, arg2repl)
 
-    def format(self, expr: ase.BaseExpr) -> str:
-        """Multi-line formatting of the S-expression"""
-        return format_lambda(expr).get()
+    ase.apply_bottomup(target, br)
+    out = br.memo[target]
+    return out
 
-    def simplify(self) -> LamBuilder:
-        """Make a copy and remove dead node. Last node is assumed to be root."""
-        last = ase.SimpleExpr(self._tape, self._tape.last())
-        new_tree = ase.Tape()
-        ase.copy_tree_into(last, new_tree)
-        return LamBuilder(new_tree)
 
-    def render_dot(self, **kwargs):
-        return self._tape.render_dot(**kwargs)
+def run_abstraction_pass(grm: grammar.Grammar, root_expr: ase.BaseExpr):
+    """Convert expressions that would otherwise require a let-binding
+    to use lambda-abstraction with an application.
+    """
 
-    def run_abstraction_pass(self, root_expr: ase.BaseExpr):
-        """Convert expressions that would otherwise require a let-binding
-        to use lambda-abstraction with an application.
-        """
+    while True:
+        ctr: dict[ase.BaseExpr, int] = Counter()
+        seen = set()
 
-        while True:
-            ctr: dict[ase.BaseExpr, int] = Counter()
-            seen = set()
+        class Occurrences(ase.TreeVisitor):
+            # TODO: replace prettyprinter one with this
+            def visit(self, expr: ase.BaseExpr):
+                if expr not in seen:
+                    seen.add(expr)
+                    for arg in expr._args:
+                        if isinstance(arg, ase.BaseExpr) and not ase.is_simple(
+                            arg
+                        ):
+                            ctr.update([arg])
 
-            class Occurrences(ase.TreeVisitor):
-                # TODO: replace prettyprinter one with this
-                def visit(self, expr: ase.BaseExpr):
-                    if expr not in seen:
-                        seen.add(expr)
-                        for arg in expr._args:
-                            if isinstance(
-                                arg, ase.BaseExpr
-                            ) and not ase.is_simple(arg):
-                                ctr.update([arg])
+        ase.apply_topdown(root_expr, Occurrences())
 
-            ase.apply_topdown(root_expr, Occurrences())
+        multi_occurring = [
+            expr for expr, freq in reversed(ctr.items()) if freq > 1
+        ]
+        if not multi_occurring:
+            break
 
-            multi_occurring = [
-                expr for expr, freq in reversed(ctr.items()) if freq > 1
-            ]
-            if not multi_occurring:
-                break
+        repl = {}
+        # Handle the oldest (outermost) node first
+        expr = min(multi_occurring)
 
-            repl = {}
-            # Handle the oldest (outermost) node first
-            expr = min(multi_occurring)
+        # find parent lambda
+        def parent_containing_this(x: ase.BaseExpr):
+            return x._head == "Lam"
 
-            # find parent lambda
-            def parent_containing_this(x: ase.BaseExpr):
-                return x._head == "Lam"
+        host_lam = first(ase.search_ancestors(expr, parent_containing_this))
+        # find remaining expressions in the lambda
+        old_node, repl_node = replace_by_abstraction(grm, host_lam, expr)
+        repl[old_node] = repl_node
 
-            host_lam = first(
-                ase.search_ancestors(expr, parent_containing_this)
-            )
-            # find remaining expressions in the lambda
-            old_node, repl_node = replace_by_abstraction(self, host_lam, expr)
-            repl[old_node] = repl_node
+        # Rewrite the rest
+        class RewriteProgram(TreeRewriter):
+            def rewrite_generic(
+                self,
+                old: ase.BaseExpr,
+                args: tuple[Any, ...],
+                updated: bool,
+            ) -> Any | ase.BaseExpr:
+                if old in repl:
+                    return repl[old]
+                return super().rewrite_generic(old, args, updated)
 
-            # Rewrite the rest
-            class RewriteProgram(TreeRewriter):
-                def rewrite_generic(
-                    self,
-                    old: ase.BaseExpr,
-                    args: tuple[Any, ...],
-                    updated: bool,
-                ) -> Any | ase.BaseExpr:
-                    if old in repl:
-                        return repl[old]
-                    return super().rewrite_generic(old, args, updated)
+        rewriter = RewriteProgram()
+        ase.apply_bottomup(root_expr, rewriter)
+        root_expr = rewriter.memo[root_expr]
 
-            rewriter = RewriteProgram()
-            with self.tape:
-                ase.apply_bottomup(root_expr, rewriter)
-            root_expr = rewriter.memo[root_expr]
-
-        return root_expr
+    return root_expr
 
 
 def replace_by_abstraction(
-    lambar: LamBuilder, lamexpr: ase.BaseExpr, anchor: ase.BaseExpr
+    grm: grammar.Grammar, lamexpr: ase.BaseExpr, anchor: ase.BaseExpr
 ) -> tuple[ase.BaseExpr, ase.BaseExpr]:
     """
     Returns a `( old_node, (app (lam rewritten_old_node) anchor) )` tuple.
@@ -267,15 +222,13 @@ def replace_by_abstraction(
     # rewrite these children nodes into a new lambda abstraction
     # replacing the `anchor` node with an arg node.
     [old_node] = lamexpr._args
-    new_node = rewrite_into_abstraction(
-        lambar, old_node, anchor, lam_depth_map
-    )
-    repl = lambar.app(lambar.lam(new_node), anchor)
+    new_node = rewrite_into_abstraction(grm, old_node, anchor, lam_depth_map)
+    repl = grm.write(App(lam=grm.write(Lam(new_node)), arg=anchor))
     return old_node, repl
 
 
 def rewrite_into_abstraction(
-    lambar: LamBuilder,
+    grm: grammar.Grammar,
     root: ase.BaseExpr,
     anchor: ase.BaseExpr,
     lam_depth_map: dict[ase.BaseExpr, int],
@@ -286,26 +239,26 @@ def rewrite_into_abstraction(
     # replace remaining program as (app (lam body) expr)
     # in body, shift de bruijin index + 1 for those referring to
     # outer lambdas before introducing new (arg 0)
-    class RewriteAddArg(TreeRewriter):
+    class RewriteAddArg(grammar.TreeRewriter):
+
         def rewrite_Arg(self, orig: ase.BaseExpr, index: int):
             if orig not in lam_depth_map:
-                return self.PassThru
+                return orig._replace(index)
             depth_offset = lam_depth_map[orig] - lam_depth_map[anchor]
             if index - depth_offset < arg_index:
-                return self.PassThru
+                return orig._replace(index)
             else:
-                return lambar.arg(index + 1)
+                return orig._replace(index + 1)
 
         def rewrite_generic(
             self, orig: ase.BaseExpr, args: tuple[Any, ...], updated: bool
         ) -> Any | ase.BaseExpr:
             if orig == anchor:
-                return lambar.arg(arg_index)
+                return grm.write(Arg(arg_index))
             return super().rewrite_generic(orig, args, updated)
 
-    rewrite = RewriteAddArg()
-    with lambar.tape:
-        ase.apply_bottomup(root, rewrite)
+    rewrite = RewriteAddArg(grm)
+    ase.apply_bottomup(root, rewrite)
     out_expr = rewrite.memo[root]
     return out_expr
 
@@ -435,7 +388,7 @@ def format_lambda(expr: ase.BaseExpr):
     return scope.writer
 
 
-class BetaReduction(TreeRewriter[ase.BaseExpr]):
+class BetaReduction(grammar.TreeRewriter[ase.BaseExpr]):
     """A tree rewriter implementing beta-reduction logic"""
 
     def __init__(self, drops, repl):
@@ -443,20 +396,21 @@ class BetaReduction(TreeRewriter[ase.BaseExpr]):
         self._drops = drops
         self._repl = repl
 
-    def rewrite_generic(
-        self, old: ase.BaseExpr, args: tuple[Any, ...], updated: bool
-    ) -> ase.BaseExpr:
-        if isinstance(old, Arg):
-            # Replace argument
-            return self._repl.get(Arg(*args).index, old)
-        elif old in self._drops:
-            # Drop the lambda
-            match old:
-                case App():
-                    return App(*args).lam
-                case Lam():
-                    return Lam(*args).body
-                case _:
-                    raise TypeError(f"must be App | Lam; got: {old}")
+    def rewrite_Arg(self, orig: ase.BaseExpr, index: int) -> ase.BaseExpr:
+        return self._repl.get(orig, orig)
 
-        return super().rewrite_generic(old, args, updated)
+    def rewrite_App(
+        self, orig: ase.BaseExpr, lam: ase.BaseExpr, **kwargs
+    ) -> ase.BaseExpr:
+        if orig in self._drops:
+            return lam
+        else:
+            return self.passthru()
+
+    def rewrite_Lam(
+        self, orig: ase.BaseExpr, body: ase.BaseExpr
+    ) -> ase.BaseExpr:
+        if orig in self._drops:
+            return body
+        else:
+            return self.passthru()

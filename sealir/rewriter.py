@@ -2,19 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Generic, TypeVar, Union
 
-from sealir import ase, grammar
+from sealir import ase
 
 T = TypeVar("T")
 
 
-class _PassThru:
-    def __repr__(self) -> str:
-        return "<PassThru>"
-
-
 class TreeRewriter(Generic[T], ase.TreeVisitor):
-
-    PassThru = _PassThru()
 
     memo: dict[ase.BaseExpr, Union[T, ase.BaseExpr]]
 
@@ -24,18 +17,16 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         self.memo = {}
 
     def visit(self, expr: ase.BaseExpr) -> None:
-        tp = expr._tape
         if expr in self.memo:
             return
         res = self._dispatch(expr)
-        if res is self.PassThru:
-            res = expr
         self.memo[expr] = res
         # Logic for save history
         if self.flag_save_history:
             if res != expr and isinstance(res, ase.BaseExpr):
                 # Insert code that maps replacement back to old
                 cls = type(self)
+                tp = expr._tape
                 tp.expr(
                     ".md.rewrite",
                     f"{cls.__module__}.{cls.__qualname__}",
@@ -44,7 +35,6 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
                 )
 
     def _dispatch(self, orig: ase.BaseExpr) -> T | ase.BaseExpr:
-        head = orig._head
         args = orig._args
         updated = False
 
@@ -57,12 +47,18 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
                 return val
 
         args = tuple(_lookup(arg) for arg in args)
-        fname = f"rewrite_{head}"
-        fn = getattr(self, fname, None)
-        if fn is not None:
-            return fn(orig, *args)
+
+        if updated:
+            self._passthru_state = lambda: orig._replace(*args)
         else:
-            return self.rewrite_generic(orig, args, updated)
+            self._passthru_state = lambda: orig
+
+        res = self._default_rewrite_dispatcher(orig, updated, args)
+
+        return res
+
+    def passthru(self) -> ase.BaseExpr:
+        return self._passthru_state()
 
     def rewrite_generic(
         self, orig: ase.BaseExpr, args: tuple[Any, ...], updated: bool
@@ -71,23 +67,20 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         children are updated; otherwise, returns the original expression if
         its children are unmodified.
         """
-        tp = orig._tape
         if updated:
-            return tp.expr(orig._head, *args)
+            return orig._replace(*args)
         else:
             return orig
 
-
-class TreeRewriter2(TreeRewriter[T]):
-
-    def rewrite_generic(
-        self, orig: ase.BaseExpr, args: tuple[Any, ...], updated: bool
-    ) -> Union[T, ase.BaseExpr]:
-        tp = orig._tape
-        if updated:
-            if isinstance(orig, grammar.ExprWithRule):
-                return tp.expr(orig._head, **orig._bind(*args))
-            else:
-                return tp.expr(orig._head, *args)
+    def _default_rewrite_dispatcher(
+        self,
+        orig: ase.BaseExpr,
+        updated: bool,
+        args: tuple[T | ase.value_type],
+    ) -> T | ase.BaseExpr:
+        fname = f"rewrite_{orig._head}"
+        fn = getattr(self, fname, None)
+        if fn is not None:
+            return fn(orig, *args)
         else:
-            return orig
+            return self.rewrite_generic(orig, args, updated)
