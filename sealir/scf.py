@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import inspect
-from sealir import lam, grammar
+
+from sealir import grammar, lam
+
 
 def region(grm: grammar.Grammar):
     """Helper for defining regions that must be a 1-arity lambda."""

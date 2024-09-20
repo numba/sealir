@@ -10,9 +10,8 @@ from typing import Any, Iterator, no_type_check
 
 import pytest
 
-from sealir import ase, egg_utils, scf, grammar
+from sealir import ase, egg_utils, grammar, lam, scf
 from sealir.itertools import first
-from sealir import lam
 
 
 class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
@@ -150,8 +149,7 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
         return self.cmpop_equiv("lt", orig, (lhs, rhs))
 
     def rewrite_Tuple(self, orig: ase.BaseExpr, args):
-            return self.new_type("Tuple", *args)
-
+        return self.new_type("Tuple", *args)
 
     def rewrite_Unpack(self, orig: ase.BaseExpr, tup, idx: int):
         [orig_tup, orig_idx] = orig._args
@@ -165,9 +163,7 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
                 case _:
                     raise NotImplementedError(orig_idx)
         else:
-            self.new_equiv(
-                tv, self.new_type("TupleGetitem", tup, orig_idx)
-            )
+            self.new_equiv(tv, self.new_type("TupleGetitem", tup, orig_idx))
         return tv
 
     def rewrite_Loop(self, orig: ase.BaseExpr, body, arg):
@@ -200,7 +196,6 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
         # self.new_equiv(tv, self.new_type("Merge", cond, *branches_tvs))
         self.new_proof(tv, self.new_proof_of(cond))
         return tv
-
 
 
 def find_relevant_rules(root: ase.BaseExpr, equiv_list: list[ase.BaseExpr]):
@@ -800,7 +795,15 @@ def build_egglog_statements(equiv_list, node_dct):
 
 # @pytest.mark.xfail
 def test_typeinfer():
-    from .test_scf import Mul, Lt, IfElse, Int, Tuple, make_sum_reduce_loop, TestGrammar
+    from .test_scf import (
+        IfElse,
+        Int,
+        Lt,
+        Mul,
+        TestGrammar,
+        Tuple,
+        make_sum_reduce_loop,
+    )
 
     my_function = make_sum_reduce_loop
 
@@ -841,7 +844,11 @@ def test_typeinfer():
                 # (mul x (int 1))
 
             tup = grm.write(Tuple((x, y)))
-            n = grm.write(IfElse(cond=cond, arg=tup, then=true_branch, orelse=false_branch))
+            n = grm.write(
+                IfElse(
+                    cond=cond, arg=tup, then=true_branch, orelse=false_branch
+                )
+            )
             return n
 
         # root = lambar.app(func_body, lambar.expr("int", 1), lambar.expr("int", 2))

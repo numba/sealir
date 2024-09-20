@@ -116,12 +116,10 @@ def app_func(grm, lam, arg0, *more_args) -> ase.BaseExpr:
 
 
 def unpack(
-        grm: grammar.Grammar, tup: ase.BaseExpr, nelem: int
-    ) -> tuple[ase.BaseExpr, ...]:
-        """Unpack a tuple with known size with `(Unpack )`"""
-        return tuple(
-            map(lambda i: grm.write(Unpack(tup, i)), range(nelem))
-        )
+    grm: grammar.Grammar, tup: ase.BaseExpr, nelem: int
+) -> tuple[ase.BaseExpr, ...]:
+    """Unpack a tuple with known size with `(Unpack )`"""
+    return tuple(map(lambda i: grm.write(Unpack(tup, i)), range(nelem)))
 
 
 def format(expr: ase.BaseExpr) -> str:

@@ -1,4 +1,5 @@
-from sealir import ase, scf, lam, grammar
+from sealir import ase, grammar, lam, scf
+
 
 class _Val(grammar.Rule):
     pass
@@ -78,7 +79,9 @@ def make_sum_reduce_loop(grm: grammar.Grammar):
             return tup
 
         tup = grm.write(Tuple((i, n, c)))
-        out = grm.write(IfElse(cond=cond, arg=tup, then=loop_start, orelse=noop))
+        out = grm.write(
+            IfElse(cond=cond, arg=tup, then=loop_start, orelse=noop)
+        )
         c = grm.write(lam.Unpack(out, 2))
         return c
 
