@@ -10,15 +10,12 @@ from typing import Any, Iterator, no_type_check
 
 import pytest
 
-from sealir import ase, egg_utils, scf
+from sealir import ase, egg_utils, scf, grammar
 from sealir.itertools import first
-from sealir.lam import LamBuilder
-from sealir.rewriter import TreeRewriter
-
-from .test_scf import make_sum_reduce_loop
+from sealir import lam
 
 
-class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
+class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
     flag_save_history = False
     type_expr_tree: ase.Tape
 
@@ -64,8 +61,8 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
 
     def find_arg(self, orig_body: ase.BaseExpr) -> Iterator[ase.BaseExpr]:
         for parents, child in ase.walk_descendants(orig_body):
-            if child._head == "arg":
-                lam_depth = len([p for p in parents if p._head == "lam"])
+            if child._head == "Arg":
+                lam_depth = len([p for p in parents if p._head == "Lam"])
                 [argidx] = child._args
                 if argidx == lam_depth:
                     yield child
@@ -81,10 +78,10 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
     ):
         raise NotImplementedError(orig)
 
-    def rewrite_arg(self, orig: ase.BaseExpr, argindex: int):
+    def rewrite_Arg(self, orig: ase.BaseExpr, index: int):
         return self.new_typevar(orig)
 
-    def rewrite_lam(self, orig: ase.BaseExpr, body: ase.BaseExpr):
+    def rewrite_Lam(self, orig: ase.BaseExpr, body: ase.BaseExpr):
         [orig_body] = orig._args
         assert isinstance(orig_body, ase.BaseExpr)
         tv = self.new_typevar(orig)
@@ -92,119 +89,118 @@ class MakeTypeInferRules(TreeRewriter[ase.BaseExpr]):
         self.new_equiv(tv, self.new_type("Lam", body, self.memo[arg_node]))
         return tv
 
-    def rewrite_app(
+    def rewrite_App(
         self, orig: ase.BaseExpr, lam: ase.BaseExpr, arg: ase.BaseExpr
     ):
         tv = self.new_typevar(orig)
         self.new_equiv(tv, self.new_type("App", lam, arg))
         return tv
 
-    def rewrite_expr(self, orig: ase.BaseExpr, opname: str, *args):
+    def binop_equiv(self, opname, orig, args):
+        lproto = f"HasL{opname.capitalize()}"
+        rproto = f"HasR{opname.capitalize()}"
+        lhs, rhs = args
+        tv = self.new_typevar(orig)
+        fn = self.new_type("Func", opname, lhs, rhs)
+        self.new_equiv(tv, self.new_result_of(fn))
 
-        def binop_equiv(opname):
-            lproto = f"HasL{opname.capitalize()}"
-            rproto = f"HasR{opname.capitalize()}"
-            lhs, rhs = args
-            tv = self.new_typevar(orig)
-            fn = self.new_type("Func", opname, lhs, rhs)
-            self.new_equiv(tv, self.new_result_of(fn))
+        # Traits
+        Isa = self.new_isa
+        self.new_proof(
+            tv,
+            self.new_or(
+                Isa(lhs, self.new_trait(lproto, rhs)),
+                Isa(rhs, self.new_trait(rproto, lhs)),
+            ),
+        )
+        return tv
 
-            # Traits
-            Isa = self.new_isa
-            self.new_proof(
-                tv,
-                self.new_or(
-                    Isa(lhs, self.new_trait(lproto, rhs)),
-                    Isa(rhs, self.new_trait(rproto, lhs)),
-                ),
+    def cmpop_equiv(self, opname, orig, args):
+        lproto = f"HasL{opname.capitalize()}"
+        rproto = f"HasR{opname.capitalize()}"
+        lhs, rhs = args
+        tv = self.new_typevar(orig)
+        fn = self.new_type("Func", opname, lhs, rhs)
+        self.new_equiv(tv, self.new_result_of(fn))
+        self.new_equiv(tv, self.new_type("Bool"))
+
+        # Traits
+        Isa = self.new_isa
+        self.new_proof(
+            tv,
+            self.new_or(
+                Isa(lhs, self.new_trait(lproto, rhs)),
+                Isa(rhs, self.new_trait(rproto, lhs)),
+            ),
+        )
+        return tv
+
+    def rewrite_Int(self, orig: ase.BaseExpr, val: int):
+        tv = self.new_typevar(orig)
+        self.new_equiv(tv, self.new_type("Int"))
+        return tv
+
+    def rewrite_Add(self, orig: ase.BaseExpr, lhs, rhs):
+        return self.binop_equiv("add", orig, (lhs, rhs))
+
+    def rewrite_Mul(self, orig: ase.BaseExpr, lhs, rhs):
+        return self.binop_equiv("mul", orig, (lhs, rhs))
+
+    def rewrite_Lt(self, orig: ase.BaseExpr, lhs, rhs):
+        return self.cmpop_equiv("lt", orig, (lhs, rhs))
+
+    def rewrite_Tuple(self, orig: ase.BaseExpr, args):
+            return self.new_type("Tuple", *args)
+
+
+    def rewrite_Unpack(self, orig: ase.BaseExpr, tup, idx: int):
+        [orig_tup, orig_idx] = orig._args
+        tv = self.new_typevar(orig)
+        if not isinstance(orig_idx, int):
+            match orig_idx._args:
+                case ("num", constant):
+                    if idx._head == "typevar":
+                        orig_idx = constant
+                        self.new_equiv(idx, self.new_type("Int"))
+                case _:
+                    raise NotImplementedError(orig_idx)
+        else:
+            self.new_equiv(
+                tv, self.new_type("TupleGetitem", tup, orig_idx)
             )
-            return tv
+        return tv
 
-        def cmpop_equiv(opname):
-            lproto = f"HasL{opname.capitalize()}"
-            rproto = f"HasR{opname.capitalize()}"
-            lhs, rhs = args
-            tv = self.new_typevar(orig)
-            fn = self.new_type("Func", opname, lhs, rhs)
-            self.new_equiv(tv, self.new_result_of(fn))
-            self.new_equiv(tv, self.new_type("Bool"))
+    def rewrite_Loop(self, orig: ase.BaseExpr, body, arg):
+        [loop_body, loop_arg] = body, arg
+        [orig_body, _] = orig._args
+        tv = self.new_typevar(orig)
+        self.new_equiv(tv, self.new_type("App", loop_body, loop_arg))
+        self.apply_arg_rules(orig_body, loop_arg)
+        return tv
 
-            # Traits
-            Isa = self.new_isa
-            self.new_proof(
-                tv,
-                self.new_or(
-                    Isa(lhs, self.new_trait(lproto, rhs)),
-                    Isa(rhs, self.new_trait(rproto, lhs)),
-                ),
-            )
-            return tv
+    def rewrite_IfElse(self, orig: ase.BaseExpr, cond, arg, then, orelse):
+        bodies = then, orelse
+        self.new_equiv(cond, self.new_type("Bool"))
+        branches_tvs = []
+        for body in bodies:
+            branch_tv = self.new_typevar(body)
+            branches_tvs.append(branch_tv)
+            self.new_equiv(branch_tv, self.new_type("App", body, arg))
+            self.apply_arg_rules(body, arg)
 
-        match opname:
-            case "int":
-                tv = self.new_typevar(orig)
-                self.new_equiv(tv, self.new_type("Int"))
-                return tv
-            case "float":
-                tv = self.new_typevar(orig)
-                self.new_equiv(tv, self.new_type("Float"))
-                return tv
-            case "add":
-                return binop_equiv("add")
-            case "mul":
-                return binop_equiv("mul")
-            case "lt":
-                return cmpop_equiv("lt")
-            case "tuple":
-                return self.new_type("Tuple", *args)
-            case "tuple.getitem":
-                [tup, idx] = args
-                [_, orig_tup, orig_idx] = orig._args
-                tv = self.new_typevar(orig)
-                if not isinstance(orig_idx, int):
-                    match orig_idx._args:
-                        case ("num", constant):
-                            if idx._head == "typevar":
-                                orig_idx = constant
-                                self.new_equiv(idx, self.new_type("Int"))
-                        case _:
-                            raise NotImplementedError(orig_idx)
-                else:
-                    self.new_equiv(
-                        tv, self.new_type("TupleGetitem", tup, orig_idx)
-                    )
-                return tv
-            case "scf.dowhile":
-                [loop_body, loop_arg] = args
-                [_, orig_body, _] = orig._args
-                tv = self.new_typevar(orig)
-                self.new_equiv(tv, self.new_type("App", loop_body, loop_arg))
-                self.apply_arg_rules(orig_body, loop_arg)
-                return tv
-            case "scf.switch":
-                [cond, arg, *bodies] = args
-                self.new_equiv(cond, self.new_type("Bool"))
-                branches_tvs = []
-                for body in bodies:
-                    branch_tv = self.new_typevar(body)
-                    branches_tvs.append(branch_tv)
-                    self.new_equiv(branch_tv, self.new_type("App", body, arg))
-                    self.apply_arg_rules(body, arg)
+        tv = self.new_typevar(orig)
+        self.new_equiv(tv, *branches_tvs)
+        # TODO:
+        #                 raise AssertionError(
+        #                     """
+        # Solve the merge type.
+        # Currently it doesn't propagate
+        # """
+        #                 )
+        # self.new_equiv(tv, self.new_type("Merge", cond, *branches_tvs))
+        self.new_proof(tv, self.new_proof_of(cond))
+        return tv
 
-                tv = self.new_typevar(orig)
-                self.new_equiv(tv, *branches_tvs)
-                # TODO:
-                #                 raise AssertionError(
-                #                     """
-                # Solve the merge type.
-                # Currently it doesn't propagate
-                # """
-                #                 )
-                # self.new_equiv(tv, self.new_type("Merge", cond, *branches_tvs))
-                self.new_proof(tv, self.new_proof_of(cond))
-                return tv
-            case _:
-                raise NotImplementedError(opname)
 
 
 def find_relevant_rules(root: ase.BaseExpr, equiv_list: list[ase.BaseExpr]):
@@ -273,7 +269,7 @@ def replace_equivalent(equiv_list: list[ase.BaseExpr]):
         print("equiv", ase.pretty_str(k), ase.pretty_str(v))
 
     # rewrite to simplify
-    class Replace(TreeRewriter):
+    class Replace(grammar.TreeRewriter):
         pass
         # def rewrite_equiv(self, orig, *nodes):
         #     repl = tuple(repl_map.get(node, node) for node in nodes)
@@ -804,22 +800,24 @@ def build_egglog_statements(equiv_list, node_dct):
 
 # @pytest.mark.xfail
 def test_typeinfer():
+    from .test_scf import Mul, Lt, IfElse, Int, Tuple, make_sum_reduce_loop, TestGrammar
+
     my_function = make_sum_reduce_loop
 
-    def my_function(lambar):
-        @lambar.lam_func
+    def my_function(grm):
+        @lam.lam_func(grm)
         def func_body(x, y):
-            n = lambar.expr("mul", x, y)
+            n = grm.write(Mul(x, y))
             return n
 
         # root = lambar.app(func_body, lambar.expr("int", 1), lambar.expr("int", 2))
         # root = lambar.app(func_body, lambar.expr("int", 1))
         root = func_body
-        root = lambar.run_abstraction_pass(root)
+        root = lam.run_abstraction_pass(grm, root)
         return root
 
-    def my_function(lambar):
-        @lambar.lam_func
+    def my_function(grm):
+        @lam.lam_func(grm)
         def func_body(x, y):
             """
             Same as
@@ -831,34 +829,33 @@ def test_typeinfer():
                     out = x * 1
                 return out
             """
-            cond = lambar.expr("lt", x, y)  # (lt x y)
+            cond = grm.write(Lt(x, y))  # (lt x y)
 
-            @scf.region(lambar)
+            @scf.region(grm)
             def true_branch(x, y):
-                return lambar.expr("mul", x, y)  # (mul x y)
+                return grm.write(Mul(x, y))  # (mul x y)
 
-            @scf.region(lambar)
+            @scf.region(grm)
             def false_branch(x, y):
-                return lambar.expr(
-                    "mul", x, lambar.expr("int", 1)
-                )  # (mul x (int 1))
+                return grm.write(Mul(x, grm.write(Int(1))))
+                # (mul x (int 1))
 
-            tup = lambar.expr("tuple", x, y)
-            n = lambar.expr("scf.switch", cond, tup, true_branch, false_branch)
+            tup = grm.write(Tuple((x, y)))
+            n = grm.write(IfElse(cond=cond, arg=tup, then=true_branch, orelse=false_branch))
             return n
 
         # root = lambar.app(func_body, lambar.expr("int", 1), lambar.expr("int", 2))
         # root = lambar.app(func_body, lambar.expr("int", 1))
         root = func_body
-        root = lambar.run_abstraction_pass(root)
+        root = lam.run_abstraction_pass(grm, root)
         return root
 
-    lambar = LamBuilder()
-    my_function(lambar)
-    lambar = lambar.simplify()
-    func_body = lambar.get_root()
+    with TestGrammar(ase.Tape()) as grm:
+        my_function(grm)
+    grm = lam.simplify(grm)
+    func_body = grm.downcast(ase.SimpleExpr(grm._tape, grm._tape.last()))
 
-    print(lambar.format(func_body))
+    print(lam.format(func_body))
 
     type_expr_tree = ase.Tape()
     typeinfer = MakeTypeInferRules(type_expr_tree)

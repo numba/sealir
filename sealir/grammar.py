@@ -255,8 +255,10 @@ class ExprWithRule(ase.BaseExpr, Generic[Tgrammar, Trule]):
             npos -= 1
             pack_last = True
         out = {}
+        i = 0
         for i in range(npos):
             out[self.__match_args__[i]] = args[i]
+
         if pack_last:
             out[self.__match_args__[-1]] = tuple(args[i:])
         return out

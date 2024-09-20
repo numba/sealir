@@ -32,6 +32,11 @@ class App(_Value):
     lam: ase.BaseExpr
 
 
+class Unpack(_Value):
+    tup: ase.BaseExpr
+    idx: int
+
+
 class LamGrammar(grammar.Grammar):
     start = _Value
 
@@ -110,9 +115,26 @@ def app_func(grm, lam, arg0, *more_args) -> ase.BaseExpr:
     return out
 
 
+def unpack(
+        grm: grammar.Grammar, tup: ase.BaseExpr, nelem: int
+    ) -> tuple[ase.BaseExpr, ...]:
+        """Unpack a tuple with known size with `(Unpack )`"""
+        return tuple(
+            map(lambda i: grm.write(Unpack(tup, i)), range(nelem))
+        )
+
+
 def format(expr: ase.BaseExpr) -> str:
     """Multi-line formatting of the S-expression"""
     return format_lambda(expr).get()
+
+
+def simplify(grm: grammar.Grammar) -> grammar.Grammar:
+    """Make a copy and remove dead node. Last node is assumed to be root."""
+    last = ase.SimpleExpr(grm._tape, grm._tape.last())
+    new_tree = ase.Tape()
+    ase.copy_tree_into(last, new_tree)
+    return type(grm)(new_tree)
 
 
 def beta_reduction(app_expr: ase.BaseExpr) -> ase.BaseExpr:
