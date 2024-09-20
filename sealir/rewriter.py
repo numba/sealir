@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Generic, TypeVar, Union
 
-from sealir import ase
+from sealir import ase, grammar
 
 T = TypeVar("T")
 
@@ -43,7 +43,7 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
                     expr,
                 )
 
-    def _dispatch(self, orig: ase.BaseExpr) -> Union[T, ase.BaseExpr]:
+    def _dispatch(self, orig: ase.BaseExpr) -> T | ase.BaseExpr:
         head = orig._head
         args = orig._args
         updated = False
@@ -66,7 +66,7 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
 
     def rewrite_generic(
         self, orig: ase.BaseExpr, args: tuple[Any, ...], updated: bool
-    ) -> Union[T, ase.BaseExpr]:
+    ) -> T | ase.BaseExpr:
         """Default implementation will automatically create a new node if
         children are updated; otherwise, returns the original expression if
         its children are unmodified.
@@ -74,5 +74,20 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         tp = orig._tape
         if updated:
             return tp.expr(orig._head, *args)
+        else:
+            return orig
+
+
+class TreeRewriter2(TreeRewriter[T]):
+
+    def rewrite_generic(
+        self, orig: ase.BaseExpr, args: tuple[Any, ...], updated: bool
+    ) -> Union[T, ase.BaseExpr]:
+        tp = orig._tape
+        if updated:
+            if isinstance(orig, grammar.ExprWithRule):
+                return tp.expr(orig._head, **orig._bind(*args))
+            else:
+                return tp.expr(orig._head, *args)
         else:
             return orig

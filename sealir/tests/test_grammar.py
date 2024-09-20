@@ -1,6 +1,7 @@
 from collections.abc import Generator
 
 from sealir import ase, grammar
+from sealir.rewriter import TreeRewriter2
 
 
 class Val(grammar.Rule):
@@ -57,24 +58,18 @@ def test_calculator() -> None:
 
     assert c.lhs.value == a.value
 
-    class Calc(ase.TreeVisitor):
-        def __init__(self):
-            self.memo = {}
+    class Calc(TreeRewriter2[int]):
+        def rewrite_Num(self, orig: ase.BaseExpr, value: int) -> int:
+            return value
 
-        def visit(self, expr: ase.BaseExpr):
-            memo = self.memo
-            match expr:
-                case Num(value=val):
-                    result = val
-                case Add(lhs=lhs, rhs=rhs):
-                    result = memo[lhs] + memo[rhs]
-                case Sub(lhs=lhs, rhs=rhs):
-                    result = memo[lhs] - memo[rhs]
-                case Mul(lhs=lhs, rhs=rhs):
-                    result = memo[lhs] * memo[rhs]
-                case _:
-                    raise AssertionError("unknown op")
-            memo[expr] = result
+        def rewrite_Add(self, orig: ase.BaseExpr, lhs: int, rhs: int) -> int:
+            return lhs + rhs
+
+        def rewrite_Sub(self, orig: ase.BaseExpr, lhs: int, rhs: int) -> int:
+            return lhs - rhs
+
+        def rewrite_Mul(self, orig: ase.BaseExpr, lhs: int, rhs: int) -> int:
+            return lhs * rhs
 
     calc = Calc()
     ase.apply_bottomup(e, calc)

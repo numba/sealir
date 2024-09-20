@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import ChainMap
-from collections.abc import MutableMapping
+from collections.abc import Mapping, MutableMapping
 from functools import cached_property
 from itertools import chain
 from types import UnionType
@@ -156,6 +156,7 @@ class Rule(metaclass=_MetaRule):
             cls._rules = {}
         # insert this class to _rules
         cls._rules[cls._sexpr_head] = cls
+        cls._verify()
 
     def __repr__(self):
         name = self._sexpr_head
@@ -176,6 +177,15 @@ class Rule(metaclass=_MetaRule):
             else:
                 out.append(val)
         return out
+
+    @classmethod
+    def _verify(cls):
+        for fd in cls._fields[:-1]:
+            if fd.is_vararg():
+                raise TypeError(
+                    f"Field {fd.name} must not be vararg. "
+                    "Only the last field can be vararg."
+                )
 
 
 class _CombinedRule(Rule):
@@ -234,3 +244,16 @@ class ExprWithRule(ase.BaseExpr):
 
     def _get_downcast(self) -> Callable[[ase.BaseExpr], ExprWithRule]:
         return self._grammar.downcast
+
+    def _bind(self, *args) -> Mapping[str, Any]:
+        npos = len(self.__match_args__)
+        pack_last = False
+        if self._rulety._fields[-1].is_vararg():
+            npos -= 1
+            pack_last = True
+        out = {}
+        for i in range(npos):
+            out[self.__match_args__[i]] = args[i]
+        if pack_last:
+            out[self.__match_args__[-1]] = tuple(args[i:])
+        return out
