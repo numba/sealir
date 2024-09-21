@@ -60,12 +60,12 @@ class Tuple(_Val):
     args: tuple[ase.BaseExpr, ...]
 
 
-class TestLamGrammar(grammar.Grammar):
+class UsecaseLamGrammar(grammar.Grammar):
     start = LamGrammar.start | _Val
 
 
 def test_lam():
-    with TestLamGrammar(ase.Tape()) as grm:
+    with UsecaseLamGrammar(ase.Tape()) as grm:
 
         @lam_func(grm)
         def lam1(a, b):
@@ -88,7 +88,7 @@ def test_lam():
 
 
 def test_lam_loop():
-    with TestLamGrammar(ase.Tape()) as grm:
+    with UsecaseLamGrammar(ase.Tape()) as grm:
 
         # Implements
         #
@@ -144,7 +144,7 @@ def test_lam_abstract():
     #    d = b * c
     #    return d
 
-    with TestLamGrammar(ase.Tape()) as grm:
+    with UsecaseLamGrammar(ase.Tape()) as grm:
 
         @lam_func(grm)
         def func_body(x):
@@ -186,7 +186,7 @@ def test_lam_abstract_deeper():
     #    c = a - b
     #    d = b * c
     #    return d
-    with TestLamGrammar(ase.Tape()) as grm:
+    with UsecaseLamGrammar(ase.Tape()) as grm:
 
         @lam_func(grm)
         def func_body(x):
@@ -222,7 +222,7 @@ def test_lam_abstract_deeper():
 
 
 def test_lam_identity():
-    with TestLamGrammar(ase.Tape()) as grm:
+    with UsecaseLamGrammar(ase.Tape()) as grm:
 
         @lam_func(grm)
         def func_body(x):

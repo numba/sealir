@@ -394,68 +394,91 @@ def find_variable_info(expr: SExpr):
     )
 
 
-
 class _Root(grammar.Rule):
     pass
+
 
 class Py_Return(_Root):
     retval: ase.BaseExpr
 
+
 class Py_Args(_Root):
     args: tuple[ase.BaseExpr, ...]
 
+
 class Py_Undef(_Root):
     pass
+
+
 class Py_None(_Root):
     pass
+
+
 class Py_Pass(_Root):
     pass
+
 
 class Py_Tuple(_Root):
     elts: tuple[ase.BaseExpr, ...]
 
+
 class Py_List(_Root):
     elts: tuple[ase.BaseExpr, ...]
+
+
 class Py_GlobalLoad(_Root):
     name: str
+
+
 class Py_Int(_Root):
     value: int
+
+
 class Py_Complex(_Root):
     real: float
     imag: float
 
+
 class Py_Str(_Root):
     value: str
+
 
 class Py_If(_Root):
     test: ase.BaseExpr
     then: ase.BaseExpr
     orelse: ase.BaseExpr
 
+
 class Py_While(_Root):
     test: ase.BaseExpr
     body: ase.BaseExpr
+
 
 class Py_UnaryOp(_Root):
     opname: str
     iostate: ase.BaseExpr
     arg: ase.BaseExpr
 
+
 class Py_BinOp(_Root):
     opname: str
     iostate: ase.BaseExpr
     lhs: ase.BaseExpr
     rhs: ase.BaseExpr
+
+
 class Py_InplaceBinOp(_Root):
     opname: str
     iostate: ase.BaseExpr
     lhs: ase.BaseExpr
     rhs: ase.BaseExpr
 
+
 class Py_Call(_Root):
     iostate: ase.BaseExpr
     callee: ase.BaseExpr
     args: tuple[ase.BaseExpr, ...]
+
 
 class Py_GetAttr(_Root):
     attr: str
@@ -467,6 +490,8 @@ class Py_GetItem(_Root):
     iostate: ase.BaseExpr
     value: ase.BaseExpr
     slice: ase.BaseExpr
+
+
 class Py_Compare(_Root):
     opname: str
     iostate: ase.BaseExpr
@@ -479,11 +504,14 @@ class Py_Func(_Root):
     args: ase.BaseExpr
     body: ase.BaseExpr
 
+
 class VarLoad(_Root):
     name: str
 
+
 class VarStore(_Root):
     name: str
+
 
 class Assign(_Root):
     value: ase.BaseExpr
@@ -492,6 +520,7 @@ class Assign(_Root):
 
 class Scfg_Pass(_Root):
     pass
+
 
 class Scfg_While(_Root):
     test: ase.BaseExpr
@@ -502,6 +531,7 @@ class Scfg_If(_Root):
     test: ase.BaseExpr
     then: ase.BaseExpr
     orelse: ase.BaseExpr
+
 
 class Let(_Root):
     name: str
@@ -517,6 +547,7 @@ class Return(_Root):
 class BindArg(_Root):
     idx: int
 
+
 class Grammar(grammar.Grammar):
     start = lam.LamGrammar.start | _Root
 
@@ -527,7 +558,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
     def get_block(
         expr: SExpr,
     ) -> SExpr:
-        return next(ase.search_parents(expr, lambda x: x._head == "PyAst_block"))
+        return next(
+            ase.search_parents(expr, lambda x: x._head == "PyAst_block")
+        )
 
     def uses_io(val: SExpr):
         return any(
@@ -578,9 +611,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
         ):
             match expr:
                 case Let(
-                        str(varname),
-                        ase.BaseExpr() as value,
-                        ase.BaseExpr() as inner,
+                    str(varname),
+                    ase.BaseExpr() as value,
+                    ase.BaseExpr() as inner,
                 ):
                     return (yield inner) | {varname}
                 case _:
@@ -619,9 +652,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
         def lookup_algo(expr: ase.SimpleExpr, state: ase.TraverseState):
             match expr:
                 case Let(
-                        str(varname),
-                        ase.BaseExpr() as value,
-                        ase.BaseExpr() as body,
+                    str(varname),
+                    ase.BaseExpr() as value,
+                    ase.BaseExpr() as body,
                 ):
                     yield value
                     defined.add(varname)
@@ -647,7 +680,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
         def gen(last: SExpr):
             for k, v in zip(argnames, args, strict=True):
                 for unpacked, target in reversed(list(unpack_assign(v, [k]))):
-                    last = grm.write(Let(name=target, value=unpacked, body=last))
+                    last = grm.write(
+                        Let(name=target, value=unpacked, body=last)
+                    )
             return last
 
         yield argloads, gen
@@ -749,7 +784,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
             self, orig: ase.SimpleExpr, val: SExpr, *rest: SExpr
         ) -> SExpr:
             [*targets, loc] = rest
-            return grm.write(Assign(value=val, targets=tuple(t._args[0] for t in targets)))
+            return grm.write(
+                Assign(value=val, targets=tuple(t._args[0] for t in targets))
+            )
 
         def rewrite_PyAst_AugAssign(
             self,
@@ -766,7 +803,7 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                     opname,
                     self.get_io(),
                     grm.write(VarLoad(lhs_name)),
-                    grm.write(VarLoad(rhs_name))
+                    grm.write(VarLoad(rhs_name)),
                 )
             )
             for val, name in reversed(
@@ -790,7 +827,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
         ) -> SExpr:
             with handle_chained_expr(func, *posargs) as (args, finish):
                 [func, *args] = args
-                last = finish(grm.write(Py_Call(self.get_io(), func, tuple(args))))
+                last = finish(
+                    grm.write(Py_Call(self.get_io(), func, tuple(args)))
+                )
                 return last
 
         def rewrite_PyAst_Attribute(
@@ -811,7 +850,13 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
             loc: SExpr,
         ) -> SExpr:
             with handle_chained_expr(value, slice) as ((value, slice), finish):
-                return finish(grm.write(Py_GetItem(iostate=self.get_io(), value=value, slice=slice)))
+                return finish(
+                    grm.write(
+                        Py_GetItem(
+                            iostate=self.get_io(), value=value, slice=slice
+                        )
+                    )
+                )
 
         def rewrite_PyAst_Compare(
             self,
@@ -858,7 +903,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                                 (cond, _),
                             ] = unpack_tuple(test, [".cond"], force_io=True)
                             stmt = grm.write(
-                                Scfg_If(test=cond, then=blk_true, orelse=blk_false)
+                                Scfg_If(
+                                    test=cond, then=blk_true, orelse=blk_false
+                                )
                             )
                             stmt = grm.write(Let(iovar, io, stmt))
                             stmt = grm.write(
@@ -907,7 +954,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                                 return grm.write(Py_Undef())
                             return grm.write(VarLoad(k))
 
-                        packed = grm.write(lam.Pack(elts=tuple(map(prep_pack, output_vars))))
+                        packed = grm.write(
+                            lam.Pack(elts=tuple(map(prep_pack, output_vars)))
+                        )
                         stmt = grm.write(Let(pack_name, packed, stmt))
 
                         iterable = unpack_tuple(stmt, output_vars)
@@ -922,7 +971,8 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                                 (io, iovar),
                                 (value, valuevar),
                             ]:
-                                stmt = grm.write(Return(
+                                stmt = grm.write(
+                                    Return(
                                         grm.write(VarLoad(iovar)),
                                         grm.write(VarLoad(valuevar)),
                                     )
@@ -1011,7 +1061,6 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
         def get_io(self) -> SExpr:
             return grm.write(VarLoad(".io"))
 
-
     rewriter = Convert2RVSDG()
     with prgm._tape:
         ase.apply_bottomup(prgm, rewriter)
@@ -1032,8 +1081,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                     defn: ase.BaseExpr | None = None
                     for p in reversed(parents):
                         match p:
-                            case Let(name=str(x),
-                                     value=ase.BaseExpr() as defn) if x == testname:
+                            case Let(
+                                name=str(x), value=ase.BaseExpr() as defn
+                            ) if x == testname:
                                 break
 
                     match defn:
@@ -1363,9 +1413,9 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
             case BindArg():
                 return ctx.value_map[expr]
             case Scfg_If(
-                    test=cond,
-                    then=br_true,
-                    orelse=br_false,
+                test=cond,
+                then=br_true,
+                orelse=br_false,
             ):
                 condval = yield cond
                 if condval:
@@ -1386,7 +1436,7 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
                 return loop_end_vars
             case Return(iostate=iostate, retval=retval):
                 ioval = ensure_io((yield iostate))
-                retval = (yield retval)
+                retval = yield retval
                 return ioval, retval
             case Py_Pass():
                 return
@@ -1411,17 +1461,17 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
             case Py_Str(str(text)):
                 return text
             case Py_GetAttr(
-                    attr=str(attrname),
-                    iostate=iostate,
-                    value=value,
+                attr=str(attrname),
+                iostate=iostate,
+                value=value,
             ):
                 ioval = ensure_io((yield iostate))
                 retval = getattr((yield value), attrname)
                 return ioval, retval
             case Py_GetItem(
-                    iostate=iostate,
-                    value=value,
-                    slice=index,
+                iostate=iostate,
+                value=value,
+                slice=index,
             ):
                 ioval = ensure_io((yield iostate))
                 base_val = yield value
@@ -1429,9 +1479,9 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
                 retval = base_val[index_val]
                 return ioval, retval
             case Py_UnaryOp(
-                    opname=str(opname),
-                    iostate=iostate,
-                    arg=val,
+                opname=str(opname),
+                iostate=iostate,
+                arg=val,
             ):
                 ioval = yield iostate
                 match opname:
@@ -1441,10 +1491,10 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
                         raise NotImplementedError(opname)
                 return ioval, retval
             case Py_BinOp(
-                    opname=str(op),
-                    iostate=iostate,
-                    lhs=lhs,
-                    rhs=rhs,
+                opname=str(op),
+                iostate=iostate,
+                lhs=lhs,
+                rhs=rhs,
             ):
                 ioval = ensure_io((yield iostate))
                 lhsval = yield lhs
@@ -1464,10 +1514,10 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
                         raise NotImplementedError(op)
                 return ioval, retval
             case Py_InplaceBinOp(
-                    opname=str(op),
-                    iostate=iostate,
-                    lhs=lhs,
-                    rhs=rhs,
+                opname=str(op),
+                iostate=iostate,
+                lhs=lhs,
+                rhs=rhs,
             ):
                 ioval = ensure_io((yield iostate))
                 lhsval = yield lhs
@@ -1482,10 +1532,10 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
                 retval = ioval, lhsval
                 return retval
             case Py_Compare(
-                    opname=str(op),
-                    iostate=iostate,
-                    lhs=lhs,
-                    rhs=rhs,
+                opname=str(op),
+                iostate=iostate,
+                lhs=lhs,
+                rhs=rhs,
             ):
                 ioval = ensure_io((yield iostate))
                 lhsval = yield lhs
@@ -1503,9 +1553,9 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
                         raise NotImplementedError(op)
                 return ioval, res
             case Py_Call(
-                    iostate=iostate,
-                    callee=callee,
-                    args=args,
+                iostate=iostate,
+                callee=callee,
+                args=args,
             ):
                 ioval = ensure_io((yield iostate))
                 callee = yield callee

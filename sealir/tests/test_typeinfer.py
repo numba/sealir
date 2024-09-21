@@ -800,8 +800,8 @@ def test_typeinfer():
         Int,
         Lt,
         Mul,
-        TestGrammar,
         Tuple,
+        UsecaseGrammar,
         make_sum_reduce_loop,
     )
 
@@ -857,7 +857,7 @@ def test_typeinfer():
         root = lam.run_abstraction_pass(grm, root)
         return root
 
-    with TestGrammar(ase.Tape()) as grm:
+    with UsecaseGrammar(ase.Tape()) as grm:
         my_function(grm)
     grm = lam.simplify(grm)
     func_body = grm.downcast(ase.SimpleExpr(grm._tape, grm._tape.last()))

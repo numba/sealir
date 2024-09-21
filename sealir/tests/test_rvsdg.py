@@ -6,9 +6,9 @@ from sealir import ase, lam
 from sealir.rvsdg import (
     EvalCtx,
     EvalLamState,
+    Grammar,
     lambda_evaluation,
     restructure_source,
-    Grammar,
 )
 
 
@@ -341,7 +341,6 @@ def run(func, args, *, localscope=None):
     # Prepare run
     grm = Grammar(lam_node._tape)
 
-
     if localscope is None:
         ctx = EvalCtx.from_arguments(*args)
     else:
@@ -350,8 +349,8 @@ def run(func, args, *, localscope=None):
     with grm:
         app_root = lam.app_func(grm, lam_node, *ctx.make_arg_node(grm))
 
-    out = ase.pretty_str(app_root)
-    print(out)
+    # out = ase.pretty_str(app_root)
+    # print(out)
 
     # import cProfile
     # prof = cProfile.Profile()

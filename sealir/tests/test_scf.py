@@ -48,7 +48,7 @@ class Tuple(_Val):
     args: tuple[ase.BaseExpr, ...]
 
 
-class TestGrammar(grammar.Grammar):
+class UsecaseGrammar(grammar.Grammar):
     start = lam.LamGrammar.start | _Val
 
 
@@ -90,7 +90,7 @@ def make_sum_reduce_loop(grm: grammar.Grammar):
 
 
 def test_scf_sum_reduce_loop():
-    with TestGrammar(ase.Tape()) as grm:
+    with UsecaseGrammar(ase.Tape()) as grm:
         func_body = make_sum_reduce_loop(grm)
     print(lam.format(func_body))
     print(ase.pretty_str(func_body))

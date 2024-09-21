@@ -36,6 +36,7 @@ class Unpack(_Value):
     idx: int
     tup: ase.BaseExpr
 
+
 class Pack(_Value):
     elts: tuple[ase.BaseExpr, ...]
 
@@ -122,7 +123,9 @@ def unpack(
     grm: grammar.Grammar, tup: ase.BaseExpr, nelem: int
 ) -> tuple[ase.BaseExpr, ...]:
     """Unpack a tuple with known size with `(Unpack )`"""
-    return tuple(map(lambda i: grm.write(Unpack(tup=tup, idx=i)), range(nelem)))
+    return tuple(
+        map(lambda i: grm.write(Unpack(tup=tup, idx=i)), range(nelem))
+    )
 
 
 def format(expr: ase.BaseExpr) -> str:
