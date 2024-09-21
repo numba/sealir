@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import ChainMap
 from collections.abc import Mapping, MutableMapping
-from functools import cached_property
+from functools import cached_property, lru_cache
 from itertools import chain, cycle
 from types import UnionType
 from typing import (
@@ -52,6 +52,7 @@ class Grammar:
         return bounded._wrap(expr._tape, expr._handle)
 
     @classmethod
+    @lru_cache(maxsize=4096)
     def downcast(
         cls: type[Tgrammar], expr: ase.BaseExpr
     ) -> ExprWithRule[Tgrammar, Trule]:
