@@ -152,8 +152,8 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
         return self.new_type("Tuple", *args)
 
     def rewrite_Unpack(self, orig: ase.BaseExpr, tup, idx: int):
-        [orig_tup, orig_idx] = orig._args
         tv = self.new_typevar(orig)
+        orig_idx = orig.idx
         if not isinstance(orig_idx, int):
             match orig_idx._args:
                 case ("num", constant):

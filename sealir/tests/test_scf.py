@@ -82,7 +82,7 @@ def make_sum_reduce_loop(grm: grammar.Grammar):
         out = grm.write(
             IfElse(cond=cond, arg=tup, then=loop_start, orelse=noop)
         )
-        c = grm.write(lam.Unpack(out, 2))
+        c = grm.write(lam.Unpack(tup=out, idx=2))
         return c
 
     func_body = lam.run_abstraction_pass(grm, func_body)

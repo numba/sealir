@@ -2,13 +2,13 @@ from collections import ChainMap
 
 import pytest
 
-from sealir import ase
-from sealir.lam import LamBuilder
+from sealir import ase, lam
 from sealir.rvsdg import (
     EvalCtx,
     EvalLamState,
     lambda_evaluation,
     restructure_source,
+    Grammar,
 )
 
 
@@ -336,21 +336,22 @@ def test_f_o_r_t_r_a_n():
 def run(func, args, *, localscope=None):
     expected = func(*args)
 
-    lam = restructure_source(func)
+    lam_node = restructure_source(func)
 
     # Prepare run
-    lb = LamBuilder(lam._tape)
+    grm = Grammar(lam_node._tape)
+
 
     if localscope is None:
         ctx = EvalCtx.from_arguments(*args)
     else:
         ctx = EvalCtx.from_arguments_and_locals(args, localscope)
 
-    with lam._tape as tp:
-        app_root = lb.app(lam, *ctx.make_arg_node(tp))
+    with grm:
+        app_root = lam.app_func(grm, lam_node, *ctx.make_arg_node(grm))
 
-    # out = lb.format(app_root)
-    # print(out)
+    out = ase.pretty_str(app_root)
+    print(out)
 
     # import cProfile
     # prof = cProfile.Profile()
