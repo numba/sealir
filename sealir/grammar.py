@@ -100,6 +100,15 @@ class _MetaRule(type):
 class Rule(metaclass=_MetaRule):
 
     def __init__(self, *args, **kwargs):
+        if args:
+            if len(self._fields) > 1:
+                # NOTE: this restriction is to avoid silent error when fields
+                #       are changed (esp. ordering of fields)
+                raise TypeError(
+                    "only Rule of a single field can use "
+                    "positional argument"
+                )
+
         fields = dict(self._fields)
         peel_args = chain(
             zip(chain(self.__match_args__, cycle([None])), args),

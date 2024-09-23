@@ -185,7 +185,7 @@ def test_three_grammar():
 
     with ThreeGrammar(ase.Tape()) as grm:
         n1 = grm.write(Num(123))
-        g1 = grm.write(Grouped("a", vargs=(n1,)))
+        g1 = grm.write(Grouped(head="a", vargs=(n1,)))
         a1 = grm.write(Another(value=g1))
 
     assert ThreeGrammar.start._combined == (_VarargVal, Val, Another)

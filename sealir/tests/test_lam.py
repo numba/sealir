@@ -69,8 +69,8 @@ def test_lam():
 
         @lam_func(grm)
         def lam1(a, b):
-            c = grm.write(Add(a, b))
-            d = grm.write(Sub(a, a))
+            c = grm.write(Add(lhs=a, rhs=b))
+            d = grm.write(Sub(lhs=a, rhs=a))
             return grm.write(Tuple((c, d)))
 
         out = app_func(grm, lam1, grm.write(Num(1)), grm.write(Num(2)))
@@ -100,11 +100,11 @@ def test_lam_loop():
         @lam_func(grm)
         def loop_body(n, i, c):
             # i < n
-            loop_cont = grm.write(Lt(i, n))
+            loop_cont = grm.write(Lt(lhs=i, rhs=n))
             # c += i
-            c = grm.write(Add(c, i))
+            c = grm.write(Add(lhs=c, rhs=i))
             # i += 1
-            i = grm.write(Add(i, grm.write(Num(1))))
+            i = grm.write(Add(lhs=i, rhs=grm.write(Num(1))))
             # return (loop_cont, n, i, c)
             ret = grm.write(Tuple((loop_cont, grm.write(Tuple((n, i, c))))))
             return ret
@@ -117,7 +117,7 @@ def test_lam_loop():
         @lam_func(grm)
         def func_body(n):
             i = grm.write(Num(0))
-            lt = grm.write(Lt(i, n))
+            lt = grm.write(Lt(lhs=i, rhs=n))
             ifthen = grm.write(If(cond=lt, then=if_body, args=(n, i)))
             return ifthen
 
@@ -148,21 +148,21 @@ def test_lam_abstract():
 
         @lam_func(grm)
         def func_body(x):
-            a = grm.write(Mul(x, grm.write(Num(2))))
-            b = grm.write(Add(a, x))
-            c = grm.write(Sub(a, grm.write(Num(1))))
-            d = grm.write(Mul(b, c))
+            a = grm.write(Mul(lhs=x, rhs=grm.write(Num(2))))
+            b = grm.write(Add(lhs=a, rhs=x))
+            c = grm.write(Sub(lhs=a, rhs=grm.write(Num(1))))
+            d = grm.write(Mul(lhs=b, rhs=c))
             return d
 
         @lam_func(grm)
         def expected_func_body(x):
-            a = grm.write(Mul(x, grm.write(Num(2))))
+            a = grm.write(Mul(lhs=x, rhs=grm.write(Num(2))))
 
             @lam_func(grm)
             def remaining(a):
-                b = grm.write(Add(a, x))
-                c = grm.write(Sub(a, grm.write(Num(1))))
-                d = grm.write(Mul(b, c))
+                b = grm.write(Add(lhs=a, rhs=x))
+                c = grm.write(Sub(lhs=a, rhs=grm.write(Num(1))))
+                d = grm.write(Mul(lhs=b, rhs=c))
                 return d
 
             return app_func(grm, remaining, a)
@@ -190,24 +190,24 @@ def test_lam_abstract_deeper():
 
         @lam_func(grm)
         def func_body(x):
-            a = grm.write(Mul(x, grm.write(Num(2))))
-            b = grm.write(Add(a, x))
-            c = grm.write(Sub(a, b))
-            d = grm.write(Mul(b, c))
+            a = grm.write(Mul(lhs=x, rhs=grm.write(Num(2))))
+            b = grm.write(Add(lhs=a, rhs=x))
+            c = grm.write(Sub(lhs=a, rhs=b))
+            d = grm.write(Mul(lhs=b, rhs=c))
             return d
 
         @lam_func(grm)
         def expected_func_body(x):
-            a = grm.write(Mul(x, grm.write(Num(2))))
+            a = grm.write(Mul(lhs=x, rhs=grm.write(Num(2))))
 
             @lam_func(grm)
             def inner(a):
-                b = grm.write(Add(a, x))
+                b = grm.write(Add(lhs=a, rhs=x))
 
                 @lam_func(grm)
                 def remaining(b):
-                    c = grm.write(Sub(a, b))
-                    d = grm.write(Mul(b, c))
+                    c = grm.write(Sub(lhs=a, rhs=b))
+                    d = grm.write(Mul(lhs=b, rhs=c))
                     return d
 
                 return app_func(grm, remaining, b)

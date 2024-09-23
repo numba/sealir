@@ -832,15 +832,15 @@ def test_typeinfer():
                     out = x * 1
                 return out
             """
-            cond = grm.write(Lt(x, y))  # (lt x y)
+            cond = grm.write(Lt(lhs=x, rhs=y))  # (lt x y)
 
             @scf.region(grm)
             def true_branch(x, y):
-                return grm.write(Mul(x, y))  # (mul x y)
+                return grm.write(Mul(lhs=x, rhs=y))  # (mul x y)
 
             @scf.region(grm)
             def false_branch(x, y):
-                return grm.write(Mul(x, grm.write(Int(1))))
+                return grm.write(Mul(lhs=x, rhs=grm.write(Int(1))))
                 # (mul x (int 1))
 
             tup = grm.write(Tuple((x, y)))

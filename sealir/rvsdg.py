@@ -755,10 +755,10 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_Constant_complex(
             self, orig: ase.SimpleExpr, real: float, imag: float, loc: SExpr
         ) -> SExpr:
-            return grm.write(Py_Complex(real, imag))
+            return grm.write(Py_Complex(real=real, imag=imag))
 
         def rewrite_PyAst_Constant_str(
-            self, orig: ase.SimpleExpr, val: int, loc: SExpr
+            self, orig: ase.SimpleExpr, val: str, loc: SExpr
         ) -> SExpr:
             return grm.write(Py_Str(val))
 
@@ -799,17 +799,17 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
             rhs_name = f".rhs.{orig._handle}"
             last = grm.write(
                 Py_InplaceBinOp(
-                    opname,
-                    self.get_io(),
-                    grm.write(VarLoad(lhs_name)),
-                    grm.write(VarLoad(rhs_name)),
+                    opname=opname,
+                    iostate=self.get_io(),
+                    lhs=grm.write(VarLoad(lhs_name)),
+                    rhs=grm.write(VarLoad(rhs_name)),
                 )
             )
             for val, name in reversed(
                 list(unpack_assign(right, targets=[rhs_name]))
             ):
-                last = grm.write(Let(name, val, last))
-            out = grm.write(Assign(last, targets=(lhs_name,)))
+                last = grm.write(Let(name=name, value=val, body=last))
+            out = grm.write(Assign(value=last, targets=(lhs_name,)))
             return out
 
         def rewrite_PyAst_callargs_pos(
@@ -827,7 +827,13 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
             with handle_chained_expr(func, *posargs) as (args, finish):
                 [func, *args] = args
                 last = finish(
-                    grm.write(Py_Call(self.get_io(), func, tuple(args)))
+                    grm.write(
+                        Py_Call(
+                            iostate=self.get_io(),
+                            callee=func,
+                            args=tuple(args),
+                        )
+                    )
                 )
                 return last
 
@@ -839,7 +845,11 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
             loc: SExpr,
         ) -> SExpr:
             with handle_chained_expr(value) as ((arg,), finish):
-                return finish(grm.write(Py_GetAttr(attr, self.get_io(), arg)))
+                return finish(
+                    grm.write(
+                        Py_GetAttr(attr=attr, iostate=self.get_io(), value=arg)
+                    )
+                )
 
         def rewrite_PyAst_Subscript(
             self,
@@ -865,9 +875,16 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
             right: SExpr,
             loc: SExpr,
         ) -> SExpr:
-            with handle_chained_expr(left, right) as (args, finish):
+            with handle_chained_expr(left, right) as ((lhs, rhs), finish):
                 return finish(
-                    grm.write(Py_Compare(opname, self.get_io(), *args))
+                    grm.write(
+                        Py_Compare(
+                            opname=opname,
+                            iostate=self.get_io(),
+                            lhs=lhs,
+                            rhs=rhs,
+                        )
+                    )
                 )
 
         def rewrite_PyAst_block(
@@ -879,7 +896,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                     case Assign(value=val, targets=targets):
                         iterable = unpack_assign(val, targets)
                         for unpacked, target in reversed(list(iterable)):
-                            last = grm.write(Let(target, unpacked, last))
+                            last = grm.write(
+                                Let(name=target, value=unpacked, body=last)
+                            )
 
                     case Py_If(test=test, then=blk_true, orelse=blk_false):
                         # look up variable in each block to find variable
@@ -901,16 +920,24 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                                     test=cond, then=blk_true, orelse=blk_false
                                 )
                             )
-                            stmt = grm.write(Let(iovar, io, stmt))
                             stmt = grm.write(
-                                Let(unpack_name, unpack_cond, stmt)
+                                Let(name=iovar, value=io, body=stmt)
+                            )
+                            stmt = grm.write(
+                                Let(
+                                    name=unpack_name,
+                                    value=unpack_cond,
+                                    body=stmt,
+                                )
                             )
                         else:
                             raise NotImplementedError
 
                         iterable = unpack_tuple(stmt, defs, force_io=True)
                         for unpacked, target in reversed(list(iterable)):
-                            last = grm.write(Let(target, unpacked, last))
+                            last = grm.write(
+                                Let(name=target, value=unpacked, body=last)
+                            )
 
                     case Py_While(
                         test=VarLoad() as test,
@@ -935,7 +962,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                                 )
                             )
                         ):
-                            loopblk = grm.write(Let(target, unpacked, loopblk))
+                            loopblk = grm.write(
+                                Let(name=target, value=unpacked, body=loopblk)
+                            )
                         stmt = grm.write(Scfg_While(test=test, body=loopblk))
 
                         def prep_pack(k):
@@ -946,11 +975,15 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                         packed = grm.write(
                             lam.Pack(elts=tuple(map(prep_pack, output_vars)))
                         )
-                        stmt = grm.write(Let(pack_name, packed, stmt))
+                        stmt = grm.write(
+                            Let(name=pack_name, value=packed, body=stmt)
+                        )
 
                         iterable = unpack_tuple(stmt, output_vars)
                         for unpacked, target in reversed(list(iterable)):
-                            last = grm.write(Let(target, unpacked, last))
+                            last = grm.write(
+                                Let(name=target, value=unpacked, body=last)
+                            )
 
                     case Py_Return(retval=retval):
                         output = list(unpack_tuple(retval, [".retval"]))
@@ -962,18 +995,28 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                             ]:
                                 stmt = grm.write(
                                     Return(
-                                        grm.write(VarLoad(iovar)),
-                                        grm.write(VarLoad(valuevar)),
+                                        iostate=grm.write(VarLoad(iovar)),
+                                        retval=grm.write(VarLoad(valuevar)),
                                     )
                                 )
-                                stmt = grm.write(Let(valuevar, value, stmt))
-                                stmt = grm.write(Let(iovar, io, stmt))
                                 stmt = grm.write(
-                                    Let(unpack_name, unpack_cond, stmt)
+                                    Let(name=valuevar, value=value, body=stmt)
+                                )
+                                stmt = grm.write(
+                                    Let(name=iovar, value=io, body=stmt)
+                                )
+                                stmt = grm.write(
+                                    Let(
+                                        name=unpack_name,
+                                        value=unpack_cond,
+                                        body=stmt,
+                                    )
                                 )
                                 last = stmt
                             case [(value, valuevar)]:
-                                stmt = grm.write(Return(self.get_io(), value))
+                                stmt = grm.write(
+                                    Return(iostate=self.get_io(), retval=value)
+                                )
                                 last = stmt
                             case _:
                                 assert False
@@ -1009,9 +1052,13 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
         def rewrite_PyAst_UnaryOp(
             self, orig: ase.SimpleExpr, opname: str, val: SExpr, loc: SExpr
         ) -> SExpr:
-            with handle_chained_expr(val) as (args, finish):
+            with handle_chained_expr(val) as ((val,), finish):
                 return finish(
-                    grm.write(Py_UnaryOp(opname, self.get_io(), *args))
+                    grm.write(
+                        Py_UnaryOp(
+                            opname=opname, iostate=self.get_io(), arg=val
+                        )
+                    )
                 )
 
         def rewrite_PyAst_BinOp(
@@ -1022,9 +1069,16 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
             rhs: SExpr,
             loc: SExpr,
         ) -> SExpr:
-            with handle_chained_expr(lhs, rhs) as (args, finish):
+            with handle_chained_expr(lhs, rhs) as ((lhs, rhs), finish):
                 return finish(
-                    grm.write(Py_BinOp(opname, self.get_io(), *args))
+                    grm.write(
+                        Py_BinOp(
+                            opname=opname,
+                            iostate=self.get_io(),
+                            lhs=lhs,
+                            rhs=rhs,
+                        )
+                    )
                 )
 
         def rewrite_PyAst_Return(
@@ -1447,7 +1501,7 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
                 return None
             case Py_Int(int(ival)):
                 return ival
-            case Py_Complex(float(freal), float(fimag)):
+            case Py_Complex(real=float(freal), imag=float(fimag)):
                 return complex(freal, fimag)
             case Py_Str(str(text)):
                 return text

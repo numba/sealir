@@ -55,8 +55,8 @@ class UsecaseGrammar(grammar.Grammar):
 def make_sum_reduce_loop(grm: grammar.Grammar):
     @lam.lam_func(grm)
     def func_body(i, x, y):
-        n = grm.write(Mul(x, y))
-        cond = grm.write(Lt(i, n))
+        n = grm.write(Mul(lhs=x, rhs=y))
+        cond = grm.write(Lt(lhs=i, rhs=n))
         c = grm.write(Int(0))
 
         @scf.region(grm)
@@ -64,10 +64,10 @@ def make_sum_reduce_loop(grm: grammar.Grammar):
 
             @scf.region(grm)
             def loop_body(i, n, c):
-                c = grm.write(Add(i, c))
-                i = grm.write(Add(i, grm.write(Int(1))))
+                c = grm.write(Add(lhs=i, rhs=c))
+                i = grm.write(Add(lhs=i, rhs=grm.write(Int(1))))
                 datatup = grm.write(Tuple((i, n, c)))
-                cond = grm.write(Lt(i, n))
+                cond = grm.write(Lt(lhs=i, rhs=n))
                 tup = grm.write(Tuple((cond, datatup)))
                 return tup
 
