@@ -12,8 +12,8 @@ class Num(Val):
 
 
 class BinOp(Val):
-    lhs: ase.BaseExpr
-    rhs: ase.BaseExpr
+    lhs: ase.SExpr
+    rhs: ase.SExpr
 
 
 class Add(BinOp): ...
@@ -58,21 +58,21 @@ def test_calculator() -> None:
     assert c.lhs.value == a.value
 
     class Calc(grammar.TreeRewriter[int]):
-        def rewrite_Num(self, orig: grammar.ExprWithRule, value: int) -> int:
+        def rewrite_Num(self, orig: grammar.NamedSExpr, value: int) -> int:
             return value
 
         def rewrite_Add(
-            self, orig: grammar.ExprWithRule, lhs: int, rhs: int
+            self, orig: grammar.NamedSExpr, lhs: int, rhs: int
         ) -> int:
             return lhs + rhs
 
         def rewrite_Sub(
-            self, orig: grammar.ExprWithRule, lhs: int, rhs: int
+            self, orig: grammar.NamedSExpr, lhs: int, rhs: int
         ) -> int:
             return lhs - rhs
 
         def rewrite_Mul(
-            self, orig: grammar.ExprWithRule, lhs: int, rhs: int
+            self, orig: grammar.NamedSExpr, lhs: int, rhs: int
         ) -> int:
             return lhs * rhs
 
@@ -101,8 +101,8 @@ def test_calculator_traverse():
         e = grm.write(Mul(lhs=b, rhs=d))
 
     def calc(
-        sexpr: ase.BaseExpr, state: ase.TraverseState
-    ) -> Generator[ase.BaseExpr, int, int]:
+        sexpr: ase.SExpr, state: ase.TraverseState
+    ) -> Generator[ase.SExpr, int, int]:
         match sexpr:
             case Num(value=int(value)):
                 return value
@@ -139,7 +139,7 @@ class Grouped(_VarargVal):  # new root
 
 
 class Tuple(_VarargVal):
-    args: tuple[ase.BaseExpr, ...]
+    args: tuple[ase.SExpr, ...]
 
 
 def test_vararg():
@@ -178,7 +178,7 @@ def test_vararg():
 def test_three_grammar():
 
     class Another(grammar.Rule):  # new root
-        value: ase.BaseExpr
+        value: ase.SExpr
 
     class ThreeGrammar(grammar.Grammar):
         start = _VarargVal | Val | Another

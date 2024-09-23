@@ -107,7 +107,7 @@ class Tape:
             raise MalformedContextError("malformed stack: top is not self")
         self._open_counter -= 1
 
-    def iter_expr(self) -> Iterator[BaseExpr]:
+    def iter_expr(self) -> Iterator[SExpr]:
         crawler = TapeCrawler(self, self._downcast)
         crawler.move_to_first_record()
         for rec in crawler.walk():
@@ -115,9 +115,9 @@ class Tape:
 
     # Write API
 
-    def expr(self, head: str, *args: value_type) -> BaseExpr:
+    def expr(self, head: str, *args: value_type) -> SExpr:
         """The main API for creating an `Expr`."""
-        return SimpleExpr._write(self, head, args)
+        return BasicSExpr._write(self, head, args)
 
     # Debug API
 
@@ -142,7 +142,7 @@ class Tape:
         crawler.step()
 
         def fixup(x):
-            if isinstance(x, BaseExpr):
+            if isinstance(x, SExpr):
                 return f"<{x._handle}>"
             else:
                 return repr(x)
@@ -156,7 +156,7 @@ class Tape:
     @graphviz_function
     def render_dot(self, *, gv, show_metadata: bool = False):
         def make_label(i, x):
-            if isinstance(x, BaseExpr):
+            if isinstance(x, SExpr):
                 return f"<{i}> [{x._handle}]"
             else:
                 return html.escape(f"{x!r} :{type(x).__name__}")
@@ -217,7 +217,7 @@ class Tape:
                 **node_kwargs,
             )
             for i, arg in enumerate(args):
-                if isinstance(arg, BaseExpr):
+                if isinstance(arg, SExpr):
                     args = (f"{nodename}:{i}", f"node{arg._handle}")
                     kwargs = {**edge_kwargs}
                     edges.append((args, kwargs))
@@ -290,7 +290,7 @@ class Tape:
         if handle <= 0:
             return self._read_token(handle)
         elif handle < HandleSentry.BEGIN:
-            return SimpleExpr(self, handle)
+            return BasicSExpr(self, handle)
         else:
             raise MalformedContextError
 
@@ -304,7 +304,7 @@ class Tape:
         handle = self.write_begin()
         self.write_token(head)
         for a in args:
-            if isinstance(a, BaseExpr):
+            if isinstance(a, SExpr):
                 if a._tape is not self:
                     raise ValueError(
                         f"invalid to assign Expr({repr(a)}) to a different tape"
@@ -348,10 +348,10 @@ class Tape:
 
 @dataclass(frozen=True, kw_only=True)
 class TraverseState:
-    parents: list[BaseExpr] = field(default_factory=list)
+    parents: list[SExpr] = field(default_factory=list)
 
 
-class BaseExpr(abc.ABC):
+class SExpr(abc.ABC):
     _tape: Tape
     _handle: handle_type
 
@@ -366,7 +366,7 @@ class BaseExpr(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def _get_downcast(self) -> Callable[[BaseExpr], BaseExpr]:
+    def _get_downcast(self) -> Callable[[SExpr], SExpr]:
         pass
 
     @classmethod
@@ -377,7 +377,7 @@ class BaseExpr(abc.ABC):
     @classmethod
     def _write(
         cls, tape: Tape, head: str, args: tuple[value_type, ...]
-    ) -> BaseExpr:
+    ) -> SExpr:
         handle = tape.write(head, args)
         return cls._wrap(tape, handle)
 
@@ -390,13 +390,13 @@ class BaseExpr(abc.ABC):
     # Comparison API
 
     def __lt__(self, other) -> bool:
-        if isinstance(other, BaseExpr):
+        if isinstance(other, SExpr):
             return self._handle < other._handle
         else:
             return NotImplemented
 
     def __eq__(self, value) -> bool:
-        if isinstance(value, BaseExpr):
+        if isinstance(value, SExpr):
             return self._tape == value._tape and self._handle == value._handle
         else:
             return NotImplemented
@@ -415,28 +415,28 @@ class BaseExpr(abc.ABC):
 metadata_prefix = "."
 
 
-def pretty_str(expr: BaseExpr) -> str:
+def pretty_str(expr: SExpr) -> str:
     from .prettyprinter import pretty_print
 
     return pretty_print(expr)
 
 
-def is_metadata(sexpr: BaseExpr) -> bool:
+def is_metadata(sexpr: SExpr) -> bool:
     return sexpr._head.startswith(metadata_prefix)
 
 
-def is_simple(sexpr: BaseExpr) -> bool:
+def is_simple(sexpr: SExpr) -> bool:
     """
     Checks if the expression is a simple expression,
     where all arguments are not `Expr` objects.
     """
-    return all(not isinstance(a, BaseExpr) for a in sexpr._args)
+    return all(not isinstance(a, SExpr) for a in sexpr._args)
 
 
 # Search API
 
 
-def walk_parents(self: BaseExpr) -> Iterator[BaseExpr]:
+def walk_parents(self: SExpr) -> Iterator[SExpr]:
     """A Iterator that yields Expr that immediately contains this
     object.
     Returned values follow the order of occurrence.
@@ -450,16 +450,16 @@ def walk_parents(self: BaseExpr) -> Iterator[BaseExpr]:
 
 
 def search_parents(
-    self: BaseExpr, pred: Callable[[BaseExpr], bool]
-) -> Iterator[BaseExpr]:
+    self: SExpr, pred: Callable[[SExpr], bool]
+) -> Iterator[SExpr]:
     for p in walk_parents(self):
         if pred(p):
             yield p
 
 
 def search_ancestors(
-    self: BaseExpr, pred: Callable[[BaseExpr], bool]
-) -> Iterator[BaseExpr]:
+    self: SExpr, pred: Callable[[SExpr], bool]
+) -> Iterator[SExpr]:
     """
     Recursive breath-first search for parent expressions that match the
     given predicate.
@@ -483,8 +483,8 @@ def search_ancestors(
 
 
 def walk_descendants(
-    self: BaseExpr,
-) -> Iterator[tuple[tuple[BaseExpr, ...], BaseExpr]]:
+    self: SExpr,
+) -> Iterator[tuple[tuple[SExpr, ...], SExpr]]:
     """Walk descendants of this Expr node.
     Breath-first order. Left to right.
     """
@@ -497,8 +497,8 @@ def walk_descendants(
 
 
 def walk_descendants_depth_first_no_repeat(
-    self: BaseExpr,
-) -> Iterator[tuple[tuple[BaseExpr, ...], BaseExpr]]:
+    self: SExpr,
+) -> Iterator[tuple[tuple[SExpr, ...], SExpr]]:
     """Walk descendants of this Expr node.
     Depth-first order. Left to right. Avoid duplication.
     """
@@ -510,13 +510,13 @@ def walk_descendants_depth_first_no_repeat(
             visited.add(node)
             yield parents, node
             for arg in reversed(node._args):
-                if isinstance(arg, BaseExpr):
+                if isinstance(arg, SExpr):
                     stack.append((arg, (*parents, node)))
 
 
 def walk_descendants_depth_first(
-    self: BaseExpr,
-) -> Iterator[tuple[tuple[BaseExpr, ...], BaseExpr]]:
+    self: SExpr,
+) -> Iterator[tuple[tuple[SExpr, ...], SExpr]]:
     """Walk descendants of this Expr node.
     Depth-first order. Left to right.
     """
@@ -525,23 +525,23 @@ def walk_descendants_depth_first(
         node, parents = stack.pop()
         yield parents, node
         for arg in reversed(node._args):
-            if isinstance(arg, BaseExpr):
+            if isinstance(arg, SExpr):
                 stack.append((arg, (*parents, node)))
 
 
 def search_descendants(
-    self: BaseExpr, pred: Callable[[BaseExpr], bool]
-) -> Iterator[tuple[tuple[BaseExpr, ...], BaseExpr]]:
+    self: SExpr, pred: Callable[[SExpr], bool]
+) -> Iterator[tuple[tuple[SExpr, ...], SExpr]]:
     for parents, cur in walk_descendants(self):
         if pred(cur):
             yield parents, cur
 
 
 def traverse(
-    self: BaseExpr,
-    corofunc: Callable[[BaseExpr, TraverseState], Coroutine[BaseExpr, T, T]],
+    self: SExpr,
+    corofunc: Callable[[SExpr, TraverseState], Coroutine[SExpr, T, T]],
     state: TraverseState | None = None,
-) -> dict[BaseExpr, T]:
+) -> dict[SExpr, T]:
     """Traverses the expression tree rooted at the current node, applying
     the provided coroutine function to each node in a depth-first order.
     The traversal is memoized, so that if a node is encountered more than
@@ -549,7 +549,7 @@ def traverse(
     a dictionary mapping each visited node to the value returned by the
     coroutine function for that node.
     """
-    stack: list[tuple[Coroutine[BaseExpr, T, T], BaseExpr, BaseExpr]]
+    stack: list[tuple[Coroutine[SExpr, T, T], SExpr, SExpr]]
     stack = []
     memo = {}
     cur_node = self
@@ -585,11 +585,11 @@ def traverse(
     return memo
 
 
-def reachable_set(self: BaseExpr) -> set[BaseExpr]:
+def reachable_set(self: SExpr) -> set[SExpr]:
     return {node for _, node in walk_descendants_depth_first_no_repeat(self)}
 
 
-def contains(self: BaseExpr, test: BaseExpr) -> bool:
+def contains(self: SExpr, test: SExpr) -> bool:
     """Is `test` part of this expression tree."""
     for _, child in walk_descendants(self):
         if child == test:
@@ -601,10 +601,10 @@ def contains(self: BaseExpr, test: BaseExpr) -> bool:
 
 
 def apply_bottomup(
-    self: BaseExpr,
+    self: SExpr,
     visitor: TreeVisitor,
     *,
-    reachable: set[BaseExpr] | None | LiteralString = "compute",
+    reachable: set[SExpr] | None | LiteralString = "compute",
 ) -> None:
     """
     Apply the TreeVisitor to every sexpr bottom up. When a sexpr is visited,
@@ -642,7 +642,7 @@ def apply_bottomup(
                     visitor.visit(ex)
 
 
-def apply_topdown(self: BaseExpr, visitor: TreeVisitor) -> None:
+def apply_topdown(self: SExpr, visitor: TreeVisitor) -> None:
     """
     Apply the TreeVisitor to every sexpr under `self` subtree.
     """
@@ -654,7 +654,7 @@ def apply_topdown(self: BaseExpr, visitor: TreeVisitor) -> None:
 # Conversion API
 
 
-def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
+def as_tuple(self: SExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
     """
     Converts an Expr object to a tuple, with a specified depth limit.
 
@@ -668,7 +668,7 @@ def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
 
     pending = []
 
-    occurrences: Counter[BaseExpr] = Counter()
+    occurrences: Counter[SExpr] = Counter()
     for parents, cur in walk_descendants_depth_first_no_repeat(self):
         if len(parents) >= depth:
             break
@@ -676,11 +676,11 @@ def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
             pending.append(cur)
 
     class CountOccurrences(TreeVisitor):
-        def visit(self, node: BaseExpr):
+        def visit(self, node: SExpr):
             if not is_metadata(node):
                 occurrences.update([cur])
                 occurrences.update(
-                    (x for x in node._args if isinstance(x, BaseExpr))
+                    (x for x in node._args if isinstance(x, SExpr))
                 )
 
     apply_bottomup(self, CountOccurrences())
@@ -688,7 +688,7 @@ def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
     dupset = {x for x, ct in occurrences.items() if ct > 1}
     working_set = set(pending)
 
-    def multi_parents(expr: BaseExpr) -> bool:
+    def multi_parents(expr: SExpr) -> bool:
         it = search_parents(expr, lambda x: x in working_set)
         try:
             next(it)
@@ -698,7 +698,7 @@ def as_tuple(self: BaseExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
         else:
             return True
 
-    memo: dict[BaseExpr, tuple] = {}
+    memo: dict[SExpr, tuple] = {}
 
     for cur in reversed(pending):
         args = []
@@ -730,15 +730,15 @@ def as_dict(self) -> dict[str, dict]:
     Expr objects) differently, by directly including the argument values in
     the dictionary.
     """
-    memo: dict[BaseExpr, dict[str, dict]] = {}
+    memo: dict[SExpr, dict[str, dict]] = {}
     seen_once = set()
 
     class AsDict(TreeVisitor):
-        def visit(self, expr: BaseExpr) -> None:
+        def visit(self, expr: SExpr) -> None:
             parts: list[dict | token_type] = []
             for arg in expr._args:
                 match arg:
-                    case BaseExpr():
+                    case SExpr():
                         if arg in seen_once:
                             # This handles duplicated references
                             parts.append(
@@ -761,7 +761,7 @@ def as_dict(self) -> dict[str, dict]:
 # Copy API
 
 
-def copy_tree_into(self: BaseExpr, tape: Tape) -> BaseExpr:
+def copy_tree_into(self: SExpr, tape: Tape) -> SExpr:
     """Copy all the expression tree starting with this node into the given
     tape.
     Returns a fresh Expr in the new tape.
@@ -780,7 +780,7 @@ def copy_tree_into(self: BaseExpr, tape: Tape) -> BaseExpr:
         tape.write_token(head)
 
         for arg in args:
-            if isinstance(arg, BaseExpr):
+            if isinstance(arg, SExpr):
                 tape.write_ref(mapping[arg._handle])
             else:
                 tape.write_token(arg)
@@ -788,11 +788,11 @@ def copy_tree_into(self: BaseExpr, tape: Tape) -> BaseExpr:
         tape.write_end()
 
     out = tape.read_value(mapping[self._handle])
-    assert isinstance(out, BaseExpr)
+    assert isinstance(out, SExpr)
     return out
 
 
-class SimpleExpr(BaseExpr):
+class BasicSExpr(SExpr):
     """S-expression reference
 
     Default comparison is by identity (the handle).
@@ -825,18 +825,18 @@ class SimpleExpr(BaseExpr):
         end = f" @{hex(id(self._tape))}>"
         return start + end
 
-    def _get_downcast(self) -> Callable[[BaseExpr], SimpleExpr]:
+    def _get_downcast(self) -> Callable[[SExpr], BasicSExpr]:
         def downcast(expr):
-            if isinstance(expr, SimpleExpr):
+            if isinstance(expr, BasicSExpr):
                 return expr
             else:
-                return SimpleExpr(expr._tape, expr._handle)
+                return BasicSExpr(expr._tape, expr._handle)
 
         return downcast
 
 
 class TreeVisitor:
-    def visit(self, expr: BaseExpr):
+    def visit(self, expr: SExpr):
         pass
 
 
@@ -846,9 +846,7 @@ class TapeCrawler:
     _tape: Tape
     _pos: handle_type
 
-    def __init__(
-        self, tape: Tape, downcast: Callable[[BaseExpr], BaseExpr]
-    ) -> None:
+    def __init__(self, tape: Tape, downcast: Callable[[SExpr], SExpr]) -> None:
         self._tape = tape
         self._pos = 0
         self._downcast = downcast
@@ -927,7 +925,7 @@ class Record:
     tape: Tape
     handle: handle_type
     end_handle: handle_type
-    downcast: Callable[[BaseExpr], BaseExpr]
+    downcast: Callable[[SExpr], SExpr]
 
     def children(self) -> Iterator[Record]:
         """Return child records. Cannot be tokens."""
@@ -943,8 +941,8 @@ class Record:
     def read_args(self):
         return self.tape.read_args(self.handle)
 
-    def to_expr(self) -> BaseExpr:
-        base = SimpleExpr(self.tape, self.handle)
+    def to_expr(self) -> SExpr:
+        base = BasicSExpr(self.tape, self.handle)
         if is_metadata(base):
             return base
         return self.downcast(base)
@@ -959,5 +957,5 @@ def _select(iterable, idx: int):
 
 
 token_type: TypeAlias = Union[int, float, str, None]
-value_type: TypeAlias = Union[token_type, BaseExpr]
+value_type: TypeAlias = Union[token_type, SExpr]
 handle_type: TypeAlias = int

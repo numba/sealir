@@ -4,12 +4,12 @@ from collections import Counter
 from typing import Any
 
 from sealir import ase
-from sealir.ase import BaseExpr
+from sealir.ase import SExpr
 
 from .rewriter import TreeRewriter
 
 
-def pretty_print(expr: BaseExpr) -> str:
+def pretty_print(expr: SExpr) -> str:
     if ase.is_metadata(expr):
         return str(expr)
 
@@ -18,12 +18,12 @@ def pretty_print(expr: BaseExpr) -> str:
     ctr = oc.memo[expr]
     assert isinstance(ctr, Counter)
 
-    formatted: dict[BaseExpr, str] = {}
-    ident: dict[BaseExpr, int] = {}
+    formatted: dict[SExpr, str] = {}
+    ident: dict[SExpr, int] = {}
     seen = set()
 
     def fmt(arg):
-        if not isinstance(arg, BaseExpr):
+        if not isinstance(arg, SExpr):
             return repr(arg)
         elif ase.is_simple(arg):
             return formatted.get(arg)
@@ -55,7 +55,7 @@ class Occurrences(TreeRewriter[Counter]):
     """Count occurrences of expression used in arguments."""
 
     def rewrite_generic(
-        self, old: BaseExpr, args: tuple[Any, ...], updated: bool
+        self, old: SExpr, args: tuple[Any, ...], updated: bool
     ) -> Counter:
         ctr = Counter([old])
         for arg in args:

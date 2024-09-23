@@ -15,7 +15,7 @@ class _Value(grammar.Rule):
 
 
 class Lam(_Value):
-    body: ase.BaseExpr
+    body: ase.SExpr
 
 
 class Expr(_Value):
@@ -28,17 +28,17 @@ class Arg(_Value):
 
 
 class App(_Value):
-    arg: ase.BaseExpr
-    lam: ase.BaseExpr
+    arg: ase.SExpr
+    lam: ase.SExpr
 
 
 class Unpack(_Value):
     idx: int
-    tup: ase.BaseExpr
+    tup: ase.SExpr
 
 
 class Pack(_Value):
-    elts: tuple[ase.BaseExpr, ...]
+    elts: tuple[ase.SExpr, ...]
 
 
 class LamGrammar(grammar.Grammar):
@@ -52,7 +52,7 @@ def _intercept_cells(grm, fn):
     new_closure = []
     for i, cell in enumerate(fn.__closure__):
         val = cell.cell_contents
-        if isinstance(val, ase.BaseExpr):
+        if isinstance(val, ase.SExpr):
             if val._head == "Arg":
                 # increase de Lruijn index
                 [idx] = val._args
@@ -107,7 +107,7 @@ def lam_func(grm: grammar.Grammar):
     return wrap
 
 
-def app_func(grm, lam, arg0, *more_args) -> ase.BaseExpr:
+def app_func(grm, lam, arg0, *more_args) -> ase.SExpr:
     """Makes an apply expression."""
     args = (arg0, *more_args)
 
@@ -120,28 +120,28 @@ def app_func(grm, lam, arg0, *more_args) -> ase.BaseExpr:
 
 
 def unpack(
-    grm: grammar.Grammar, tup: ase.BaseExpr, nelem: int
-) -> tuple[ase.BaseExpr, ...]:
+    grm: grammar.Grammar, tup: ase.SExpr, nelem: int
+) -> tuple[ase.SExpr, ...]:
     """Unpack a tuple with known size with `(Unpack )`"""
     return tuple(
         map(lambda i: grm.write(Unpack(tup=tup, idx=i)), range(nelem))
     )
 
 
-def format(expr: ase.BaseExpr) -> str:
+def format(expr: ase.SExpr) -> str:
     """Multi-line formatting of the S-expression"""
     return format_lambda(expr).get()
 
 
 def simplify(grm: grammar.Grammar) -> grammar.Grammar:
     """Make a copy and remove dead node. Last node is assumed to be root."""
-    last = ase.SimpleExpr(grm._tape, grm._tape.last())
+    last = ase.BasicSExpr(grm._tape, grm._tape.last())
     new_tree = ase.Tape()
     ase.copy_tree_into(last, new_tree)
     return type(grm)(new_tree)
 
 
-def beta_reduction(app_expr: ase.BaseExpr) -> ase.BaseExpr:
+def beta_reduction(app_expr: ase.SExpr) -> ase.SExpr:
     """Reduces a (App arg (Lam ...))"""
     assert app_expr._head == "App"
 
@@ -174,22 +174,22 @@ def beta_reduction(app_expr: ase.BaseExpr) -> ase.BaseExpr:
     return out
 
 
-def run_abstraction_pass(grm: grammar.Grammar, root_expr: ase.BaseExpr):
+def run_abstraction_pass(grm: grammar.Grammar, root_expr: ase.SExpr):
     """Convert expressions that would otherwise require a let-binding
     to use lambda-abstraction with an application.
     """
 
     while True:
-        ctr: dict[ase.BaseExpr, int] = Counter()
+        ctr: dict[ase.SExpr, int] = Counter()
         seen = set()
 
         class Occurrences(ase.TreeVisitor):
             # TODO: replace prettyprinter one with this
-            def visit(self, expr: ase.BaseExpr):
+            def visit(self, expr: ase.SExpr):
                 if expr not in seen:
                     seen.add(expr)
                     for arg in expr._args:
-                        if isinstance(arg, ase.BaseExpr) and not ase.is_simple(
+                        if isinstance(arg, ase.SExpr) and not ase.is_simple(
                             arg
                         ):
                             ctr.update([arg])
@@ -207,7 +207,7 @@ def run_abstraction_pass(grm: grammar.Grammar, root_expr: ase.BaseExpr):
         expr = min(multi_occurring)
 
         # find parent lambda
-        def parent_containing_this(x: ase.BaseExpr):
+        def parent_containing_this(x: ase.SExpr):
             return x._head == "Lam"
 
         host_lam = first(ase.search_ancestors(expr, parent_containing_this))
@@ -219,10 +219,10 @@ def run_abstraction_pass(grm: grammar.Grammar, root_expr: ase.BaseExpr):
         class RewriteProgram(TreeRewriter):
             def rewrite_generic(
                 self,
-                old: ase.BaseExpr,
+                old: ase.SExpr,
                 args: tuple[Any, ...],
                 updated: bool,
-            ) -> Any | ase.BaseExpr:
+            ) -> Any | ase.SExpr:
                 if old in repl:
                     return repl[old]
                 return super().rewrite_generic(old, args, updated)
@@ -235,8 +235,8 @@ def run_abstraction_pass(grm: grammar.Grammar, root_expr: ase.BaseExpr):
 
 
 def replace_by_abstraction(
-    grm: grammar.Grammar, lamexpr: ase.BaseExpr, anchor: ase.BaseExpr
-) -> tuple[ase.BaseExpr, ase.BaseExpr]:
+    grm: grammar.Grammar, lamexpr: ase.SExpr, anchor: ase.SExpr
+) -> tuple[ase.SExpr, ase.SExpr]:
     """
     Returns a `( old_node, (app (lam rewritten_old_node) anchor) )` tuple.
     """
@@ -255,10 +255,10 @@ def replace_by_abstraction(
 
 def rewrite_into_abstraction(
     grm: grammar.Grammar,
-    root: ase.BaseExpr,
-    anchor: ase.BaseExpr,
-    lam_depth_map: dict[ase.BaseExpr, int],
-) -> ase.BaseExpr:
+    root: ase.SExpr,
+    anchor: ase.SExpr,
+    lam_depth_map: dict[ase.SExpr, int],
+) -> ase.SExpr:
 
     arg_index = lam_depth_map[anchor] - 1
 
@@ -267,7 +267,7 @@ def rewrite_into_abstraction(
     # outer lambdas before introducing new (arg 0)
     class RewriteAddArg(grammar.TreeRewriter):
 
-        def rewrite_Arg(self, orig: ase.BaseExpr, index: int):
+        def rewrite_Arg(self, orig: ase.SExpr, index: int):
             if orig not in lam_depth_map:
                 return orig._replace(index)
             depth_offset = lam_depth_map[orig] - lam_depth_map[anchor]
@@ -277,8 +277,8 @@ def rewrite_into_abstraction(
                 return orig._replace(index + 1)
 
         def rewrite_generic(
-            self, orig: ase.BaseExpr, args: tuple[Any, ...], updated: bool
-        ) -> Any | ase.BaseExpr:
+            self, orig: ase.SExpr, args: tuple[Any, ...], updated: bool
+        ) -> Any | ase.SExpr:
             if orig == anchor:
                 return grm.write(Arg(arg_index))
             return super().rewrite_generic(orig, args, updated)
@@ -289,7 +289,7 @@ def rewrite_into_abstraction(
     return out_expr
 
 
-def format_lambda(expr: ase.BaseExpr):
+def format_lambda(expr: ase.SExpr):
     class Writer:
         def __init__(self):
             self.items = []
@@ -333,7 +333,7 @@ def format_lambda(expr: ase.BaseExpr):
 
     descendants = list(ase.walk_descendants(expr))
 
-    def first_lam_parent(parents) -> ase.BaseExpr | None:
+    def first_lam_parent(parents) -> ase.SExpr | None:
         for p in reversed(parents):
             if p._head == "Lam":
                 return p
@@ -364,7 +364,7 @@ def format_lambda(expr: ase.BaseExpr):
         [out] = child_scope.formatted.values()
         wr.write(out)
 
-    grouped: defaultdict[ase.BaseExpr | None, LamScope]
+    grouped: defaultdict[ase.SExpr | None, LamScope]
     grouped = defaultdict(LamScope)
 
     for ident, (parents, child) in enumerate(reversed(descendants)):
@@ -414,7 +414,7 @@ def format_lambda(expr: ase.BaseExpr):
     return scope.writer
 
 
-class BetaReduction(grammar.TreeRewriter[ase.BaseExpr]):
+class BetaReduction(grammar.TreeRewriter[ase.SExpr]):
     """A tree rewriter implementing beta-reduction logic"""
 
     def __init__(self, drops, repl):
@@ -422,20 +422,18 @@ class BetaReduction(grammar.TreeRewriter[ase.BaseExpr]):
         self._drops = drops
         self._repl = repl
 
-    def rewrite_Arg(self, orig: ase.BaseExpr, index: int) -> ase.BaseExpr:
+    def rewrite_Arg(self, orig: ase.SExpr, index: int) -> ase.SExpr:
         return self._repl.get(orig, orig)
 
     def rewrite_App(
-        self, orig: ase.BaseExpr, lam: ase.BaseExpr, **kwargs
-    ) -> ase.BaseExpr:
+        self, orig: ase.SExpr, lam: ase.SExpr, **kwargs
+    ) -> ase.SExpr:
         if orig in self._drops:
             return lam
         else:
             return self.passthru()
 
-    def rewrite_Lam(
-        self, orig: ase.BaseExpr, body: ase.BaseExpr
-    ) -> ase.BaseExpr:
+    def rewrite_Lam(self, orig: ase.SExpr, body: ase.SExpr) -> ase.SExpr:
         if orig in self._drops:
             return body
         else:

@@ -64,7 +64,7 @@ def test_apply_bottomup():
     buffer = []
 
     class BufferVisitor(ase.TreeVisitor):
-        def visit(self, expr: ase.BaseExpr):
+        def visit(self, expr: ase.SExpr):
             buffer.append(expr)
 
     bv = BufferVisitor()
@@ -93,7 +93,7 @@ def test_calculator():
         def __init__(self):
             self.memo = {}
 
-        def visit(self, expr: ase.BaseExpr):
+        def visit(self, expr: ase.SExpr):
             head = expr._head
             args = expr._args
             if head == "num":
@@ -131,21 +131,21 @@ def test_calculator_traverse():
         e = tp.expr("mul", b, d)
 
     def calc(
-        sexpr: ase.BaseExpr, state: ase.TraverseState
-    ) -> Generator[ase.BaseExpr, int, int]:
+        sexpr: ase.SExpr, state: ase.TraverseState
+    ) -> Generator[ase.SExpr, int, int]:
         match sexpr:
-            case ase.SimpleExpr("num", (int(value),)):
+            case ase.BasicSExpr("num", (int(value),)):
                 return value
-            case ase.SimpleExpr(
-                "add", (ase.SimpleExpr() as lhs, ase.SimpleExpr() as rhs)
+            case ase.BasicSExpr(
+                "add", (ase.BasicSExpr() as lhs, ase.BasicSExpr() as rhs)
             ):
                 return (yield lhs) + (yield rhs)
-            case ase.SimpleExpr(
-                "sub", (ase.SimpleExpr() as lhs, ase.SimpleExpr() as rhs)
+            case ase.BasicSExpr(
+                "sub", (ase.BasicSExpr() as lhs, ase.BasicSExpr() as rhs)
             ):
                 return (yield lhs) - (yield rhs)
-            case ase.SimpleExpr(
-                "mul", (ase.SimpleExpr() as lhs, ase.SimpleExpr() as rhs)
+            case ase.BasicSExpr(
+                "mul", (ase.BasicSExpr() as lhs, ase.BasicSExpr() as rhs)
             ):
                 return (yield lhs) * (yield rhs)
             case _:

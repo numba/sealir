@@ -14,7 +14,7 @@ from sealir import ase, egg_utils, grammar, lam, scf
 from sealir.itertools import first
 
 
-class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
+class MakeTypeInferRules(grammar.TreeRewriter[ase.SExpr]):
     flag_save_history = False
     type_expr_tree: ase.Tape
 
@@ -22,43 +22,43 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
         super().__init__()
         self.type_expr_tree = type_expr_tree
 
-    def new_typevar(self, orig: ase.BaseExpr) -> ase.BaseExpr:
+    def new_typevar(self, orig: ase.SExpr) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return tp.expr("typevar", orig._handle)
 
-    def new_type(self, *args) -> ase.BaseExpr:
+    def new_type(self, *args) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return tp.expr("type", *args)
 
-    def new_trait(self, *args) -> ase.BaseExpr:
+    def new_trait(self, *args) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return tp.expr("trait", *args)
 
-    def new_equiv(self, *args) -> ase.BaseExpr:
+    def new_equiv(self, *args) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return tp.expr("rule-equiv", *args)
 
-    def new_proof(self, *args) -> ase.BaseExpr:
+    def new_proof(self, *args) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return tp.expr("rule-proof", *args)
 
-    def new_proof_of(self, *args) -> ase.BaseExpr:
+    def new_proof_of(self, *args) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return tp.expr("proof-of", *args)
 
-    def new_or(self, *args) -> ase.BaseExpr:
+    def new_or(self, *args) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return reduce(lambda x, y: tp.expr("or", x, y), args)
 
-    def new_result_of(self, func: ase.BaseExpr) -> ase.BaseExpr:
+    def new_result_of(self, func: ase.SExpr) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return tp.expr("result-of", func)
 
-    def new_isa(self, lhs: ase.BaseExpr, rhs: ase.BaseExpr) -> ase.BaseExpr:
+    def new_isa(self, lhs: ase.SExpr, rhs: ase.SExpr) -> ase.SExpr:
         with self.type_expr_tree as tp:
             return tp.expr("isa", lhs, rhs)
 
-    def find_arg(self, orig_body: ase.BaseExpr) -> Iterator[ase.BaseExpr]:
+    def find_arg(self, orig_body: ase.SExpr) -> Iterator[ase.SExpr]:
         for parents, child in ase.walk_descendants(orig_body):
             if child._head == "Arg":
                 lam_depth = len([p for p in parents if p._head == "Lam"])
@@ -66,31 +66,27 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
                 if argidx == lam_depth:
                     yield child
 
-    def apply_arg_rules(
-        self, orig_body: ase.BaseExpr, arg: ase.BaseExpr
-    ) -> None:
+    def apply_arg_rules(self, orig_body: ase.SExpr, arg: ase.SExpr) -> None:
         for arg_node in self.find_arg(orig_body):
             self.new_equiv(arg, self.memo[arg_node])
 
     def rewrite_generic(
-        self, orig: ase.BaseExpr, args: tuple[Any, ...], updated: bool
+        self, orig: ase.SExpr, args: tuple[Any, ...], updated: bool
     ):
         raise NotImplementedError(orig)
 
-    def rewrite_Arg(self, orig: ase.BaseExpr, index: int):
+    def rewrite_Arg(self, orig: ase.SExpr, index: int):
         return self.new_typevar(orig)
 
-    def rewrite_Lam(self, orig: ase.BaseExpr, body: ase.BaseExpr):
+    def rewrite_Lam(self, orig: ase.SExpr, body: ase.SExpr):
         [orig_body] = orig._args
-        assert isinstance(orig_body, ase.BaseExpr)
+        assert isinstance(orig_body, ase.SExpr)
         tv = self.new_typevar(orig)
         arg_node = first(self.find_arg(orig_body))
         self.new_equiv(tv, self.new_type("Lam", body, self.memo[arg_node]))
         return tv
 
-    def rewrite_App(
-        self, orig: ase.BaseExpr, lam: ase.BaseExpr, arg: ase.BaseExpr
-    ):
+    def rewrite_App(self, orig: ase.SExpr, lam: ase.SExpr, arg: ase.SExpr):
         tv = self.new_typevar(orig)
         self.new_equiv(tv, self.new_type("App", lam, arg))
         return tv
@@ -134,24 +130,24 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
         )
         return tv
 
-    def rewrite_Int(self, orig: ase.BaseExpr, val: int):
+    def rewrite_Int(self, orig: ase.SExpr, val: int):
         tv = self.new_typevar(orig)
         self.new_equiv(tv, self.new_type("Int"))
         return tv
 
-    def rewrite_Add(self, orig: ase.BaseExpr, lhs, rhs):
+    def rewrite_Add(self, orig: ase.SExpr, lhs, rhs):
         return self.binop_equiv("add", orig, (lhs, rhs))
 
-    def rewrite_Mul(self, orig: ase.BaseExpr, lhs, rhs):
+    def rewrite_Mul(self, orig: ase.SExpr, lhs, rhs):
         return self.binop_equiv("mul", orig, (lhs, rhs))
 
-    def rewrite_Lt(self, orig: ase.BaseExpr, lhs, rhs):
+    def rewrite_Lt(self, orig: ase.SExpr, lhs, rhs):
         return self.cmpop_equiv("lt", orig, (lhs, rhs))
 
-    def rewrite_Tuple(self, orig: ase.BaseExpr, args):
+    def rewrite_Tuple(self, orig: ase.SExpr, args):
         return self.new_type("Tuple", *args)
 
-    def rewrite_Unpack(self, orig: ase.BaseExpr, tup, idx: int):
+    def rewrite_Unpack(self, orig: ase.SExpr, tup, idx: int):
         tv = self.new_typevar(orig)
         orig_idx = orig.idx
         if not isinstance(orig_idx, int):
@@ -166,7 +162,7 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
             self.new_equiv(tv, self.new_type("TupleGetitem", tup, orig_idx))
         return tv
 
-    def rewrite_Loop(self, orig: ase.BaseExpr, body, arg):
+    def rewrite_Loop(self, orig: ase.SExpr, body, arg):
         [loop_body, loop_arg] = body, arg
         [orig_body, _] = orig._args
         tv = self.new_typevar(orig)
@@ -174,7 +170,7 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
         self.apply_arg_rules(orig_body, loop_arg)
         return tv
 
-    def rewrite_IfElse(self, orig: ase.BaseExpr, cond, arg, then, orelse):
+    def rewrite_IfElse(self, orig: ase.SExpr, cond, arg, then, orelse):
         bodies = then, orelse
         self.new_equiv(cond, self.new_type("Bool"))
         branches_tvs = []
@@ -198,7 +194,7 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.BaseExpr]):
         return tv
 
 
-def find_relevant_rules(root: ase.BaseExpr, equiv_list: list[ase.BaseExpr]):
+def find_relevant_rules(root: ase.SExpr, equiv_list: list[ase.SExpr]):
     relset = {root}
 
     def update_relevant(equiv):
@@ -223,7 +219,7 @@ def find_relevant_rules(root: ase.BaseExpr, equiv_list: list[ase.BaseExpr]):
     )
 
 
-def replace_equivalent(equiv_list: list[ase.BaseExpr]):
+def replace_equivalent(equiv_list: list[ase.SExpr]):
     from collections import defaultdict
     from pprint import pprint
 
@@ -860,7 +856,7 @@ def test_typeinfer():
     with UsecaseGrammar(ase.Tape()) as grm:
         my_function(grm)
     grm = lam.simplify(grm)
-    func_body = grm.downcast(ase.SimpleExpr(grm._tape, grm._tape.last()))
+    func_body = grm.downcast(ase.BasicSExpr(grm._tape, grm._tape.last()))
 
     print(lam.format(func_body))
 

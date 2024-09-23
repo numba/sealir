@@ -23,8 +23,8 @@ class Num(_Val):
 
 
 class _BinOp(_Val):
-    lhs: ase.BaseExpr
-    rhs: ase.BaseExpr
+    lhs: ase.SExpr
+    rhs: ase.SExpr
 
 
 class Add(_BinOp): ...
@@ -40,24 +40,24 @@ class Lt(_BinOp): ...
 
 
 class Loop(_Val):
-    body: ase.BaseExpr
-    args: tuple[ase.BaseExpr, ...]
+    body: ase.SExpr
+    args: tuple[ase.SExpr, ...]
 
 
 class If(_Val):
-    cond: ase.BaseExpr
-    then: ase.BaseExpr
-    args: tuple[ase.BaseExpr, ...]
+    cond: ase.SExpr
+    then: ase.SExpr
+    args: tuple[ase.SExpr, ...]
 
 
 class Func(_Val):
-    body: ase.BaseExpr
+    body: ase.SExpr
     name: str
-    args: tuple[ase.BaseExpr, ...]
+    args: tuple[ase.SExpr, ...]
 
 
 class Tuple(_Val):
-    args: tuple[ase.BaseExpr, ...]
+    args: tuple[ase.SExpr, ...]
 
 
 class UsecaseLamGrammar(grammar.Grammar):

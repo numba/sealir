@@ -2,11 +2,11 @@ import html
 from typing import Any
 
 from sealir import ase
-from sealir.ase import BaseExpr
+from sealir.ase import SExpr
 from sealir.rewriter import TreeRewriter
 
 
-def to_html(root: BaseExpr) -> str:
+def to_html(root: SExpr) -> str:
 
     reachable = {
         node for _, node in ase.walk_descendants_depth_first_no_repeat(root)
@@ -17,12 +17,12 @@ def to_html(root: BaseExpr) -> str:
         reference_already = set()
 
         def rewrite_generic(
-            self, orig: BaseExpr, args: tuple[Any, ...], updated: bool
-        ) -> str | BaseExpr:
+            self, orig: SExpr, args: tuple[Any, ...], updated: bool
+        ) -> str | SExpr:
             if orig in reachable:
                 args = list(args)
                 for i, child in enumerate(orig._args):
-                    if isinstance(child, BaseExpr):
+                    if isinstance(child, SExpr):
                         if (
                             not ase.is_simple(child)
                             and child in self.reference_already

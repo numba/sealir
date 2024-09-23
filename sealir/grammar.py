@@ -43,8 +43,8 @@ class Grammar:
             newcls._rules = ChainMap(*(t._rules for t in cls.start.__args__))
             cls.start = newcls
 
-    def write(self: Tgrammar, rule: Trule) -> ExprWithRule[Tgrammar, Trule]:
-        bounded = ExprWithRule._subclass(type(self), type(rule))
+    def write(self: Tgrammar, rule: Trule) -> NamedSExpr[Tgrammar, Trule]:
+        bounded = NamedSExpr._subclass(type(self), type(rule))
         if not isinstance(rule, self.start):
             raise ValueError(f"{type(rule)} is not a {self.start}")
         args = rule._get_sexpr_args()
@@ -54,15 +54,15 @@ class Grammar:
     @classmethod
     @lru_cache(maxsize=4096)
     def downcast(
-        cls: type[Tgrammar], expr: ase.BaseExpr
-    ) -> ExprWithRule[Tgrammar, Trule]:
+        cls: type[Tgrammar], expr: ase.SExpr
+    ) -> NamedSExpr[Tgrammar, Trule]:
         head = expr._head
         try:
             rulety = cls.start._rules[head]
         except KeyError:
             raise ValueError(f"{head!r} is not valid in the grammar")
         else:
-            return ExprWithRule._subclass(cls, rulety)(expr)
+            return NamedSExpr._subclass(cls, rulety)(expr)
 
     def __enter__(self) -> Self:
         self._tape.__enter__()
@@ -91,7 +91,7 @@ class _MetaRule(type):
     def __instancecheck__(cls, instance: Any) -> bool:
         if issubclass(cls, _CombinedRule):
             return any(isinstance(instance, t) for t in cls._combined)
-        if isinstance(instance, ase.BaseExpr):
+        if isinstance(instance, ase.SExpr):
             return instance._head == cls._sexpr_head
         else:
             return type.__instancecheck__(cls, instance)
@@ -186,25 +186,25 @@ class _CombinedRule(Rule):
     _combined: tuple[type[Rule], ...]
 
 
-class ExprWithRule(ase.BaseExpr, Generic[Tgrammar, Trule]):
+class NamedSExpr(ase.SExpr, Generic[Tgrammar, Trule]):
     _grammar: type[Grammar]
     _rulety: type[Rule]
 
     @classmethod
     def _subclass(
         cls, grammar: type[Tgrammar], rule: type[Trule]
-    ) -> type[ExprWithRule[Tgrammar, Trule]]:
+    ) -> type[NamedSExpr[Tgrammar, Trule]]:
         assert issubclass(grammar, Grammar)
         assert issubclass(rule, Rule)
         return type(
-            cls.__name__, (ExprWithRule,), dict(_grammar=grammar, _rulety=rule)
+            cls.__name__, (NamedSExpr,), dict(_grammar=grammar, _rulety=rule)
         )
 
     @classmethod
     def _wrap(cls, tape: ase.Tape, handle: ase.handle_type) -> Self:
-        return cls(ase.SimpleExpr._wrap(tape, handle))
+        return cls(ase.BasicSExpr._wrap(tape, handle))
 
-    def __init__(self, expr: ase.BaseExpr) -> None:
+    def __init__(self, expr: ase.SExpr) -> None:
         assert self._grammar
         assert self._rulety
         self._tape = expr._tape
@@ -244,7 +244,7 @@ class ExprWithRule(ase.BaseExpr, Generic[Tgrammar, Trule]):
         g = self._grammar
 
         def cast(x: ase.value_type) -> ase.value_type:
-            if isinstance(x, ase.BaseExpr):
+            if isinstance(x, ase.SExpr):
                 return g.downcast(x)
             else:
                 return x
@@ -252,10 +252,10 @@ class ExprWithRule(ase.BaseExpr, Generic[Tgrammar, Trule]):
         values = tuple(map(cast, self._expr._args))
         return values
 
-    def _get_downcast(self) -> Callable[[ase.BaseExpr], ExprWithRule]:
+    def _get_downcast(self) -> Callable[[ase.SExpr], NamedSExpr]:
         return self._grammar.downcast
 
-    def _replace(self, *args: ase.value_type) -> ExprWithRule[Tgrammar, Trule]:
+    def _replace(self, *args: ase.value_type) -> NamedSExpr[Tgrammar, Trule]:
         return self._grammar.downcast(self._expr._replace(*args))
 
     def _bind(self, *args) -> Mapping[str, Any]:
@@ -284,13 +284,13 @@ class TreeRewriter(rewriter.TreeRewriter[T]):
 
     def _default_rewrite_dispatcher(
         self,
-        orig: ase.BaseExpr,
+        orig: ase.SExpr,
         updated: bool,
         args: tuple[T | ase.value_type],
-    ) -> T | ase.BaseExpr:
+    ) -> T | ase.SExpr:
 
         if self.grammar is None:
-            assert isinstance(orig, ExprWithRule), repr(orig)
+            assert isinstance(orig, NamedSExpr), repr(orig)
         else:
             orig = self.grammar.downcast(orig)
         fname = f"rewrite_{orig._head}"

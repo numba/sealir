@@ -10,8 +10,8 @@ class Int(_Val):
 
 
 class _BinOp(_Val):
-    lhs: ase.BaseExpr
-    rhs: ase.BaseExpr
+    lhs: ase.SExpr
+    rhs: ase.SExpr
 
 
 class Add(_BinOp): ...
@@ -27,25 +27,25 @@ class Lt(_BinOp): ...
 
 
 class Loop(_Val):
-    body: ase.BaseExpr
-    arg: ase.BaseExpr
+    body: ase.SExpr
+    arg: ase.SExpr
 
 
 class IfElse(_Val):
-    cond: ase.BaseExpr
-    arg: ase.BaseExpr
-    then: ase.BaseExpr
-    orelse: ase.BaseExpr
+    cond: ase.SExpr
+    arg: ase.SExpr
+    then: ase.SExpr
+    orelse: ase.SExpr
 
 
 class Func(_Val):
-    body: ase.BaseExpr
+    body: ase.SExpr
     name: str
-    args: tuple[ase.BaseExpr, ...]
+    args: tuple[ase.SExpr, ...]
 
 
 class Tuple(_Val):
-    args: tuple[ase.BaseExpr, ...]
+    args: tuple[ase.SExpr, ...]
 
 
 class UsecaseGrammar(grammar.Grammar):

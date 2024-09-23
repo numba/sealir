@@ -4,7 +4,7 @@ from sealir.rewriter import TreeRewriter
 
 def test_rewrite():
 
-    class RewriteCalcMachine(TreeRewriter[ase.BaseExpr]):
+    class RewriteCalcMachine(TreeRewriter[ase.SExpr]):
         def rewrite_add(self, orig, lhs, rhs):
             tp = orig._tape
             [x] = lhs._args
