@@ -9,7 +9,7 @@ name = "sealir"
 version = "0.0.1"
 description = "S-Expression And Lambda Intemediate Representation (SEALIR)"
 authors = [
-    {name = "sklam", email = "na@na.na"}
+    {name = "Numba team", email = "na@na.na"}
 ]
 license = {text = "BSD-2-Clause"}
 readme = "README.md"
