@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import inspect
 
+from sealir import grammar, lam
 
-def region(lambar):
+
+def region(grm: grammar.Grammar):
     """Helper for defining regions that must be a 1-arity lambda."""
 
     def outer(fn):
         sig = inspect.signature(fn)
         arity = len(sig.parameters)
 
-        @lambar.lam_func
+        @lam.lam_func(grm)
         def body(tup):
-            args = lambar.unpack(tup, arity)
+            args = lam.unpack(grm, tup, arity)
             bound = sig.bind(*args)
             return fn(*bound.args, **bound.kwargs)
 

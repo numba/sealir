@@ -1,75 +1,86 @@
 from __future__ import annotations
 
-from typing import TypeVar, Generic, Any, Union
+from typing import Any, Generic, TypeVar, Union
 
 from sealir import ase
-
 
 T = TypeVar("T")
 
 
-class _PassThru:
-    def __repr__(self) -> str:
-        return "<PassThru>"
-
-
 class TreeRewriter(Generic[T], ase.TreeVisitor):
 
-    PassThru = _PassThru()
-
-    memo: dict[ase.Expr, Union[T, ase.Expr]]
+    memo: dict[ase.BaseExpr, Union[T, ase.BaseExpr]]
 
     flag_save_history = True
 
     def __init__(self):
         self.memo = {}
 
-    def visit(self, expr: ase.Expr) -> None:
+    def visit(self, expr: ase.BaseExpr) -> None:
+        if expr in self.memo:
+            return
         res = self._dispatch(expr)
-        if res is self.PassThru:
-            res = expr
         self.memo[expr] = res
         # Logic for save history
         if self.flag_save_history:
-            if res is not expr and isinstance(res, ase.Expr):
+            if res != expr and isinstance(res, ase.BaseExpr):
                 # Insert code that maps replacement back to old
                 cls = type(self)
-                ase.expr(
+                tp = expr._tape
+                tp.expr(
                     ".md.rewrite",
                     f"{cls.__module__}.{cls.__qualname__}",
                     res,
                     expr,
                 )
 
-    def _dispatch(self, orig: ase.Expr) -> Union[T, ase.Expr]:
-        head = orig.head
-        args = orig.args
+    def _dispatch(self, orig: ase.BaseExpr) -> T | ase.BaseExpr:
+        args = orig._args
         updated = False
 
         def _lookup(val):
             nonlocal updated
-            if isinstance(val, ase.Expr):
+            if isinstance(val, ase.BaseExpr):
                 updated = True
                 return self.memo[val]
             else:
                 return val
 
         args = tuple(_lookup(arg) for arg in args)
-        fname = f"rewrite_{head}"
-        fn = getattr(self, fname, None)
-        if fn is not None:
-            return fn(orig, *args)
+
+        if updated:
+            self._passthru_state = lambda: orig._replace(*args)
         else:
-            return self.rewrite_generic(orig, args, updated)
+            self._passthru_state = lambda: orig
+
+        res = self._default_rewrite_dispatcher(orig, updated, args)
+
+        return res
+
+    def passthru(self) -> ase.BaseExpr:
+        return self._passthru_state()
 
     def rewrite_generic(
-        self, orig: ase.Expr, args: tuple[Any, ...], updated: bool
-    ) -> Union[T, ase.Expr]:
+        self, orig: ase.BaseExpr, args: tuple[Any, ...], updated: bool
+    ) -> T | ase.BaseExpr:
         """Default implementation will automatically create a new node if
         children are updated; otherwise, returns the original expression if
         its children are unmodified.
         """
         if updated:
-            return ase.expr(orig.head, *args)
+            return orig._replace(*args)
         else:
             return orig
+
+    def _default_rewrite_dispatcher(
+        self,
+        orig: ase.BaseExpr,
+        updated: bool,
+        args: tuple[T | ase.value_type],
+    ) -> T | ase.BaseExpr:
+        fname = f"rewrite_{orig._head}"
+        fn = getattr(self, fname, None)
+        if fn is not None:
+            return fn(orig, *args)
+        else:
+            return self.rewrite_generic(orig, args, updated)

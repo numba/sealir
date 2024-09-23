@@ -3,7 +3,7 @@ from __future__ import annotations
 from textwrap import dedent
 
 from sealir import ase
-from sealir.ase import Expr
+from sealir.ase import SimpleExpr as Expr
 
 
 def test_match():
@@ -13,12 +13,12 @@ def test_match():
     ase module works as expected. It checks various cases of matching
     expressions with different depths and structures.
     """
-    with ase.Tape():
-        a = ase.expr("num", 123)
-        b = ase.expr("num", 321)
-        c = ase.expr("add", a, a)
-        d = ase.expr("sub", c, b)
-        e = ase.expr("mul", b, d)
+    with ase.Tape() as tp:
+        a = tp.expr("num", 123)
+        b = tp.expr("num", 321)
+        c = tp.expr("add", a, a)
+        d = tp.expr("sub", c, b)
+        e = tp.expr("mul", b, d)
 
     match e:
         case Expr("mul", (x, y)):

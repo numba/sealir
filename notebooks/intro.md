@@ -111,7 +111,7 @@ class RewriteCalcMachine(TreeRewriter[ase.Expr]):
 
 To utilize the rewrite pass, we can use the ``.apply_bottomup()`` method. This method traverses the S-expression tree from leaves to root, ensuring that inner-most expressions are processed first.
 
-Due to the append-only nature of the tape, older S-expressions always appear earlier than newer ones. The bottom-up traversal simply runs from the first record in the tape to the last. It's important to note that this method will process all nodes in the tape, even those not part of the current expression tree. Therefore, it's crucial that rewrites are side-effect free.
+Due to the append-only nature of the tape, older S-expressions always appear earlier than newer ones. The bottom-up traversal can simply runs from the first record in the tape to the last. By default, the method will compute the reachable set from the root of the expression tree and only apply the pass on to those in the set. It is possible to run the pass on all nodes irregardless of the reachability by setting keyword `reachable=None`. It's important to note that this will process all nodes in the tape, even those not part of the current expression tree. Therefore, it's crucial that rewrites are side-effect free.
 
 For cases where you need to avoid processing unreachable nodes, use ``.apply_topdown()``. This method traverses from root to leaves, skipping unreachable nodes, but at the cost of slower performance.
 
