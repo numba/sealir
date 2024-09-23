@@ -27,7 +27,7 @@ SExpr: TypeAlias = ase.BaseExpr
 def pp(expr: SExpr):
     if _DEBUG:
         print(
-            pformat(expr.as_tuple(-1, dedup=True))
+            pformat(ase.as_tuple(expr, -1, dedup=True))
             .replace(",", "")
             .replace("'", "")
         )
@@ -94,7 +94,6 @@ class ConvertToSExpr(ast.NodeTransformer):
         )
 
     def visit_Name(self, node: ast.Name) -> SExpr:
-        print(ast.dump(node))
         match node.ctx:
             case ast.Load():
                 ctx = "load"
@@ -315,7 +314,7 @@ def convert_to_sexpr(node: ast.AST):
     with ase.Tape() as stree:
         out = ConvertToSExpr(stree).visit(node)
     if _DEBUG:
-        pprint(out.as_tuple(depth=2**30))
+        pprint(ase.as_tuple(out, depth=-1))
     return out
 
 
@@ -885,13 +884,8 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                     case Py_If(test=test, then=blk_true, orelse=blk_false):
                         # look up variable in each block to find variable
                         # definitions
-                        # used = lookup_used(last)
-                        defs_true = lookup_defined(blk_true) | {
-                            ".io"
-                        }  # & used
-                        defs_false = lookup_defined(blk_false) | {
-                            ".io"
-                        }  # & used
+                        defs_true = lookup_defined(blk_true) | {".io"}
+                        defs_false = lookup_defined(blk_false) | {".io"}
                         defs = sorted(defs_true | defs_false)
                         blk_true = replace_scfg_pass(blk_true, defs)
                         blk_false = replace_scfg_pass(blk_false, defs)
@@ -922,19 +916,14 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                         test=VarLoad() as test,
                         body=ase.BaseExpr() as loopblk,
                     ):
-                        # look for variables used before defined
-                        used = lookup_input_vars(loopblk)
                         # look for defined names
                         defs = lookup_defined(loopblk) | {".io"}
                         # variables that loopback
                         backedge_var_prefix = "__scfg_backedge_var_"
                         loop_cont = "__scfg_loop_cont__"
-                        loopback_vars = [loop_cont, *sorted(used & defs)]
+                        loopback_vars = [loop_cont, *sorted(defs)]
                         # output variables
-                        output_vars = [
-                            *loopback_vars,
-                            *sorted(defs - {loop_cont, *loopback_vars}),
-                        ]
+                        output_vars = [*loopback_vars]
                         loopblk = replace_scfg_pass(loopblk, output_vars)
                         pack_name = f".packed.{loopblk._handle}"
                         # create packing for mutated variables
@@ -1273,7 +1262,7 @@ def restructure_source(function):
     print("convert_to_lambda", time.time() - t_start)
     if _DEBUG:
         pp(lam_node)
-    print(ase.pretty_str(lam_node))
+        print(ase.pretty_str(lam_node))
 
     # out = html_format.to_html(lam_node)
     with open("debug.html", "w") as fout:
@@ -1409,7 +1398,8 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
                 elems = []
                 for arg in args:
                     elems.append((yield arg))
-                return tuple(elems)
+                retval = tuple(elems)
+                return retval
             case BindArg():
                 return ctx.value_map[expr]
             case Scfg_If(
@@ -1419,9 +1409,10 @@ def lambda_evaluation(expr: ase.SimpleExpr, state: EvalLamState):
             ):
                 condval = yield cond
                 if condval:
-                    return (yield br_true)
+                    retval = yield br_true
                 else:
-                    return (yield br_false)
+                    retval = yield br_false
+                return retval
             case Scfg_While(body=loopblk):
                 loop_cond = True
                 while loop_cond:
