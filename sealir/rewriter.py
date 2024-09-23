@@ -7,6 +7,28 @@ from sealir import ase
 T = TypeVar("T")
 
 
+def insert_metadata(rewriter: str, repl: ase.SExpr, orig: ase.SExpr):
+    assert orig._tape == repl._tape
+    tp = orig._tape
+    tp.expr(
+        ".md.rewrite",
+        rewriter,
+        repl,
+        orig,
+    )
+
+
+def insert_metadata_map(memo: dict[ase.SExpr, ase.SExpr]):
+    """Helper to write metadata from a memo dictionary."""
+    for orig, repl in memo.items():
+        if isinstance(repl, ase.SExpr):
+            insert_metadata(
+                ".md.rewrite",
+                repl,
+                orig,
+            )
+
+
 class TreeRewriter(Generic[T], ase.TreeVisitor):
 
     memo: dict[ase.SExpr, Union[T, ase.SExpr]]
@@ -23,12 +45,14 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         self.memo[expr] = res
         # Logic for save history
         if self.flag_save_history:
-            if res != expr and isinstance(res, ase.SExpr):
+            if (
+                isinstance(res, ase.SExpr)
+                and res != expr
+                and res._tape == expr._tape
+            ):
                 # Insert code that maps replacement back to old
                 cls = type(self)
-                tp = expr._tape
-                tp.expr(
-                    ".md.rewrite",
+                insert_metadata(
                     f"{cls.__module__}.{cls.__qualname__}",
                     res,
                     expr,
