@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ctypes as _ct
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Self
@@ -31,19 +32,28 @@ def llvm_codegen(root: ase.SExpr):
     )
     fn = ir.Function(mod, fnty, name="foo")
 
+    # init entry block and builder
     builder = ir.IRBuilder(fn.append_basic_block())
+    retval_slot = builder.alloca(ll_pyobject_ptr)
+    builder.store(ll_pyobject_ptr(None), retval_slot)  # init retval to NULL
+    bb_main = builder.append_basic_block()
+    builder.branch(bb_main)
+    builder.position_at_end(bb_main)
 
     ctx = CodegenCtx(
         llvm_module=mod,
         llvm_func=fn,
         builder=builder,
         pyapi=PythonAPI(builder),
+        retval_slot=retval_slot,
     )
     for i in reversed(range(actual_num_args)):
         ctx.blam_stack.append(BLamArg(argidx=i))
     ctx.blam_stack.append(BLamIOArg())  # iostate
 
     memo = ase.traverse(bodynode, _codegen_loop, CodegenState(context=ctx))
+
+    builder.ret(builder.load(retval_slot))
 
     llvm_ir = str(mod)
     print(llvm_ir)
@@ -143,10 +153,12 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             with builder.goto_block(bb_then):
                 value_then = yield br_true
                 builder.branch(bb_endif)
+                bb_then_end = builder.basic_block
             # Else
             with builder.goto_block(bb_else):
                 value_else = yield br_false
                 builder.branch(bb_endif)
+                bb_else_end = builder.basic_block
             # EndIf
             builder.position_at_end(bb_endif)
             assert len(value_then) == len(value_else)
@@ -162,8 +174,8 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     # otherwise
                     assert left.type == right.type
                     phi = builder.phi(left.type)
-                    phi.add_incoming(left, bb_then)
-                    phi.add_incoming(right, bb_else)
+                    phi.add_incoming(left, bb_then_end)
+                    phi.add_incoming(right, bb_else_end)
                     phis.append(phi)
             return tuple(phis)
         case rvsdg.Scfg_While(body=loopblk):
@@ -207,6 +219,20 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
 
         case rvsdg.Py_Undef():
             return ll_pyobject_ptr(None)
+        case rvsdg.Py_None():
+            return pyapi.make_none()
+        case rvsdg.Py_Str(str(text)):
+            module = builder.module
+            encoded = bytearray(text.encode("utf-8") + b"\x00")
+            byte_string = ir.Constant(
+                ir.ArrayType(ll_byte, len(encoded)), encoded
+            )
+            unique_name = module.get_unique_name("const_string")
+            gv = ir.GlobalVariable(module, byte_string.type, unique_name)
+            gv.global_constant = True
+            gv.initializer = byte_string
+            gv.linkage = "internal"
+            return pyapi.string_from_string(builder.bitcast(gv, pyapi.cstring))
         case rvsdg.Py_Int(int(ival)):
             const = ir.Constant(pyapi.py_ssize_t, int(ival))
             return pyapi.long_from_ssize_t(const)
@@ -283,7 +309,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
         case rvsdg.Return(iostate=iostate, retval=retval):
             ensure_io((yield iostate))
             retval = yield retval
-            builder.ret(retval)
+            builder.store(retval, ctx.retval_slot)
         case rvsdg.Py_Call(
             iostate=iostate,
             callee=callee,
@@ -334,6 +360,7 @@ class CodegenCtx:
     llvm_func: ir.Function
     builder: ir.IRBuilder
     pyapi: PythonAPI
+    retval_slot: ir.Value
     blam_stack: list[BLamBase] = field(default_factory=list)
 
     @contextmanager
@@ -361,6 +388,7 @@ def determine_arity(root: ase.SExpr):
 
 # Adapted from numba/core/pythonapi/PythonApi
 class PythonAPI:
+    builder: ir.IRBuilder
 
     def __init__(self, builder):
         self.module = builder.basic_block.function.module
@@ -509,11 +537,11 @@ class PythonAPI:
             negone = self.int32(-1)
             is_good = self.builder.icmp_unsigned("!=", status, negone)
             # Stack allocate output and initialize to Null
-            outptr = cgutils.alloca_once_value(
-                self.builder, Constant(self.pyobj, None)
+            outptr = _alloca_once_value(
+                self.builder, ir.Constant(self.pyobj, None)
             )
             # If PySequence_Contains returns non-error value
-            with cgutils.if_likely(self.builder, is_good):
+            with self.builder.if_then(is_good):
                 if opstr == "not in":
                     status = self.builder.not_(status)
                 # Store the status as a boolean object
@@ -563,9 +591,69 @@ class PythonAPI:
         args.append(self.pyobj(None))
         return self.builder.call(fn, args)
 
+    def string_from_string(self, string):
+        fnty = ir.FunctionType(self.pyobj, [self.cstring])
+        fname = "PyUnicode_FromString"
+        fn = self._get_function(fnty, name=fname)
+        return self.builder.call(fn, [string])
+
+    def make_none(self):
+        obj = self.borrow_none()
+        self.incref(obj)
+        return obj
+
+    def borrow_none(self):
+        return self.get_c_object("_Py_NoneStruct")
+
+    def get_c_object(self, name):
+        """
+        Get a Python object through its C-accessible *name*
+        (e.g. "PyExc_ValueError").  The underlying variable must be
+        a `PyObject *`, and the value of that pointer is returned.
+        """
+        # A LLVM global variable is implicitly a pointer to the declared
+        # type, so fix up by using pyobj.pointee.
+        return _get_c_value(
+            self.builder, self.pyobj.pointee, name, dllimport=True
+        )
+
+    def incref(self, obj):
+        fnty = ir.FunctionType(ir.VoidType(), [self.pyobj])
+        fn = self._get_function(fnty, name="Py_IncRef")
+        self.builder.call(fn, [obj])
+
+    def decref(self, obj):
+        fnty = ir.FunctionType(ir.VoidType(), [self.pyobj])
+        fn = self._get_function(fnty, name="Py_DecRef")
+        self.builder.call(fn, [obj])
+
 
 def _get_or_insert_function(module, fnty, name):
+    # from numba's cgutils
     fn = module.globals.get(name, None)
     if fn is None:
         fn = ir.Function(module, fnty, name)
     return fn
+
+
+def _get_c_value(builder, typ, name, dllimport=False):
+    # from numba's context
+    aot_mode = True
+    module = builder.function.module
+    try:
+        gv = module.globals[name]
+    except KeyError:
+        unique_name = module.get_unique_name(name)
+        gv = ir.GlobalVariable(module, typ, unique_name, addrspace=0)
+        if dllimport and aot_mode and sys.platform == "win32":
+            gv.storage_class = "dllimport"
+    return gv
+
+
+def _alloca_once_value(builder: ir.IRBuilder, value):
+    with builder.goto_entry_block():
+        slot = builder.alloca(value.type)
+        builder.store(value, slot)
+
+    builder.store(value, slot)
+    return slot

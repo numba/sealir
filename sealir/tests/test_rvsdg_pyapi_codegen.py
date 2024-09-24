@@ -153,6 +153,67 @@ def test_range_iterator_1():
     run(udt, args)
 
 
+def test_for_loop_reduce_add_1d():
+    def udt(n: int) -> int:
+        c = 0
+        for i in range(n):
+            c += i
+        return c
+
+    args = (5,)
+    run(udt, args)
+
+    args = (0,)
+    run(udt, args)
+
+
+def test_for_loop_reduce_add_2d():
+    def udt(n: int) -> int:
+        c = 0
+        for i in range(n):
+            for j in range(i):
+                c += i + j
+        return c
+
+    args = (5,)
+    run(udt, args)
+
+    args = (0,)
+    run(udt, args)
+
+
+def test_for_loop_reduce_add_2d_w_break():
+    def udt(n: int) -> int:
+        c = 0
+        for i in range(n):
+            for j in range(i):
+                c += i * j
+                if c > 20:
+                    break
+        return c
+
+    args = (5,)
+    run(udt, args)
+
+    args = (0,)
+    run(udt, args)
+
+
+def test_for_if_1():
+    def udt(n):
+        t = 0
+        for i in range(n):
+            if i > 2:
+                # `s` is first defined in the loop conditionally
+                s = 123
+            t += i
+
+        return t, s
+
+    args = (5,)
+    run(udt, args)
+
+
 def run(func, args, *, localscope=None):
     expected = func(*args)
 
