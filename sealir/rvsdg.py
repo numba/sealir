@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import inspect
 import operator
 import time
 from collections import ChainMap
@@ -8,6 +9,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from functools import reduce
 from pprint import pformat, pprint
+from textwrap import dedent
 from typing import Any, Iterable, Iterator, NamedTuple, Sequence, TypeAlias
 
 from numba_rvsdg.core.datastructures.ast_transforms import (
@@ -20,6 +22,7 @@ from sealir import ase, grammar, lam
 from sealir.rewriter import TreeRewriter
 
 _DEBUG = False
+_DEBUG_HTML = False
 
 SExpr: TypeAlias = ase.SExpr
 
@@ -35,11 +38,13 @@ def pp(expr: SExpr):
 
 
 class ConvertToSExpr(ast.NodeTransformer):
-    _tape = ase.Tape
+    _tape: ase.Tape
+    _first_line: int
 
-    def __init__(self, tape):
+    def __init__(self, tape, first_line):
         super().__init__()
         self._tape = tape
+        self._first_line = first_line
 
     def generic_visit(self, node: ast.AST):
         raise NotImplementedError(ast.dump(node))
@@ -302,17 +307,17 @@ class ConvertToSExpr(ast.NodeTransformer):
     def get_loc(self, node: ast.AST) -> SExpr:
         return self._tape.expr(
             "PyAst_loc",
-            node.lineno,
+            self._first_line + node.lineno,
             node.col_offset,
-            node.end_lineno,
+            self._first_line + node.end_lineno,
             node.end_col_offset,
             None,
         )
 
 
-def convert_to_sexpr(node: ast.AST):
+def convert_to_sexpr(node: ast.AST, first_line: int):
     with ase.Tape() as stree:
-        out = ConvertToSExpr(stree).visit(node)
+        out = ConvertToSExpr(stree, first_line).visit(node)
     if _DEBUG:
         pprint(ase.as_tuple(out, depth=-1))
     return out
@@ -1283,11 +1288,14 @@ def restructure_source(function):
 
     transformed_ast = ast.fix_missing_locations(transformed_ast)
 
-    print(ast.unparse(transformed_ast))
+    srclines, firstline = inspect.getsourcelines(function)
+    firstline = 0
+
+    source_text = dedent("".join(srclines))
 
     t_start = time.time()
 
-    prgm = convert_to_sexpr(transformed_ast)
+    prgm = convert_to_sexpr(transformed_ast, firstline)
 
     print("convert_to_sexpr", time.time() - t_start)
 
@@ -1305,47 +1313,25 @@ def restructure_source(function):
 
     pp(rvsdg)
 
-    # out = html_format.to_html(rvsdg)
-    # with open("debug.html", "w") as fout:
-    #     print(html_format.write_html(out,fout))
-    # return
-
     lam_node = convert_to_lambda(rvsdg, varinfo)
     print("convert_to_lambda", time.time() - t_start)
     if _DEBUG:
         pp(lam_node)
         print(ase.pretty_str(lam_node))
 
-    # out = html_format.to_html(lam_node)
-    with open("debug.html", "w") as fout:
-        html_format.write_html(
-            fout, html_format.to_html(rvsdg), html_format.to_html(lam_node)
-        )
-
+    if _DEBUG_HTML:
+        # FIXME: This is currently slow due to inefficient metadata lookup.
+        print("writing html...")
+        ts = time.time()
+        with open("debug.html", "w") as fout:
+            html_format.write_html(
+                fout,
+                html_format.prepare_source(source_text),
+                html_format.to_html(rvsdg),
+                html_format.to_html(lam_node),
+            )
+        print("   took", time.time() - ts)
     return lam_node
-
-    # # DEMO FIND ORIGINAL AST
-    # print('---py_range----')
-    # def find_py_range(rvsdg):
-    #     for path, node in rvsdg.walk_descendants():
-    #         if node.args and node.args[0] == "py_call":
-    #             match node.args[1]:
-    #                 case ase.BasicSExpr("expr", ("py_global_load", "range")):
-    #                     return node
-
-    # py_range = find_py_range(rvsdg)
-    # print(py_range.str())
-
-    # print('---find md----')
-    # md = next(py_range.search_parents(lambda x: x._head == ".md.rewrite"))
-    # (_, _, orig) = md.args
-    # loc = orig.args[-1]
-
-    # lines, offset = inspect.getsourcelines(function)
-    # line_offset = loc.args[0]
-
-    # print(offset + line_offset, '|', lines[line_offset])
-    # rvsdg.tape.render_dot(show_metadata=True).view()
 
 
 ######################

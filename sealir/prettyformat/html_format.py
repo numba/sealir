@@ -3,7 +3,22 @@ from typing import Any
 
 from sealir import ase
 from sealir.ase import SExpr
-from sealir.rewriter import TreeRewriter
+from sealir.rewriter import TreeRewriter, metadata_find_original
+
+
+def find_source_md(node: SExpr) -> SExpr | None:
+    def loc_test(x):
+        if isinstance(x, SExpr):
+            if x._head.startswith("PyAst"):
+                if x._args[-1]._head == "PyAst_loc":
+                    return True
+        return False
+
+    out = metadata_find_original(node, loc_test)
+    if out is not None:
+        return out._args[-1]
+    else:
+        return None
 
 
 def to_html(root: SExpr) -> str:
@@ -28,22 +43,47 @@ def to_html(root: SExpr) -> str:
                             and child in self.reference_already
                         ):
                             args[i] = (
-                                f"<div class='handle_ref handle' data-ref='{child._handle}'>${child._handle}</div>"
+                                "<div class='handle_ref handle' "
+                                f"data-ref='{child._handle}'>"
+                                f"${child._handle}"
+                                "</div>"
                             )
                         else:
                             self.reference_already.add(child)
 
                 parts = [html.escape(orig._head)]
                 parts.extend(map(str, args))
-                handle = f"<div class='handle_origin handle' data-ref='{orig._handle}'>${orig._handle}</div>"
-                out = f"<div class='sexpr'>{handle} {' '.join(parts)}</div>"
+                handle = (
+                    "<div class='handle_origin handle' "
+                    f"data-ref='{orig._handle}'>"
+                    f"${orig._handle}"
+                    "</div>"
+                )
+                if src := find_source_md(orig):
+                    si = src._args
+                    pp_src = f"[{si[0]}:{si[1]-1} to {si[2]}:{si[3]}]"
+                    data = " ".join(
+                        f"data-{k}={v}"
+                        for k, v in zip(
+                            ["lineStart", "colStart", "lineEnd", "colEnd"], si
+                        )
+                    )
+                    source = f"<div class='source_info' {data}>{pp_src}</div>"
+                else:
+                    source = ""
+                out = f"<div class='sexpr'>{handle}{source}{' '.join(parts)}</div>"
                 return out
             else:
                 return None
 
     cvt = ToHtml()
     ase.apply_bottomup(root, cvt)
-    return cvt.memo[root]
+    res = cvt.memo[root]
+    return f"<div class='sexpr-container'>{res}</div>"
+
+
+def prepare_source(source_text: str) -> str:
+    return f"<div class='pre-container'><pre id='source-text'>{source_text}</pre></div>"
 
 
 def style_text():
@@ -93,6 +133,7 @@ div.sexpr:hover {
     /* box-shadow: 0 0 5px rgba(0, 0, 255, 0.5); */
 
   border-left-color: blue;
+  border-top-color: blue;
 }
 
 div.handle_origin {
@@ -108,8 +149,39 @@ div.handle_ref {
     color: #666666
 }
 
+div.source_info {
+    font-size: 0.6em;
+}
+
 .selected {
     color: #ff0000;
+}
+
+div.pre-container {
+  display: block;
+  padding: 10px;
+  border: 1px solid #ccc;
+  font-family: monospace;
+  white-space: pre-wrap;
+}
+
+.highlight {
+  background-color: yellow;
+}
+
+.tooltip {
+  position: absolute;
+  z-index: 1000;
+  background-color: rgba(255, 255, 255, 0.9);
+  border: 1px solid #333;
+  padding: 10px;
+  max-width: 300px;
+  max-height: 300px;
+  overflow-y: auto;
+  word-break: break-all;
+  font-family: monospace;
+  font-size: .8em;
+  white-space: pre-wrap;
 }
 
 #canvas {
@@ -133,14 +205,14 @@ def write_html(file, *contents):
     print("</head>", file=file)
     print("<body>", file=file)
     for content in contents:
-        print(f"<div class='sexpr-container'>{content}</div>", file=file)
+        print(content, file=file)
     print('<canvas id="canvas"></canvas>', file=file)
     print("</body>", file=file)
     print("</html>", file=file)
 
 
 def script_text():
-    out = """
+    out = r"""
 
 <script>
 
@@ -260,6 +332,140 @@ function adjustSVGSize() {
 
 window.addEventListener('scroll', adjustSVGSize);
 window.addEventListener('resize', adjustSVGSize);
+
+
+///////// highlight source
+
+let originalSourceText;
+
+function highlightCode(startLine, endLine, startColumn, endColumn) {
+  originalSourceText = document.querySelector('body > .pre-container pre').textContent;
+
+
+  // Get the pre element
+  const preElement = document.querySelector('.pre-container pre');
+
+  if (!preElement) {
+    console.error('No <pre> element found');
+    return;
+  }
+  // Split the content into lines
+  const lines = preElement.textContent.split('\n');
+
+
+  // Find the range of lines to highlight
+  const startIndex = Math.max(0, startLine);
+  const endIndex = Math.min(lines.length - 1, endLine);
+
+  // Apply highlighting styles
+
+  for (let i = startIndex; i <= endIndex; i++) {
+    const line = lines[i];
+    if (line.slice(startColumn - 1, endColumn)) {
+        const highlightedLine = line.slice(0, startColumn - 1) + '<span class="highlight">' + line.slice(startColumn - 1, endColumn) + '</span>' + line.slice(endColumn);
+        // Replace the original line with the highlighted version
+        lines[i] = highlightedLine;
+    }
+  }
+  // Join the modified lines back together
+  preElement.innerHTML = lines.join('\n');
+
+}
+
+
+function clearHighlight() {
+  // Restore the original text
+  const preElement = document.querySelector('body > .pre-container pre');
+  if (preElement) {
+    preElement.textContent = originalSourceText;
+  }
+}
+
+// Function to handle click event on source_info div
+function handleSourceInfoClick(event) {
+  const sourceInfoDiv = event.target.closest('.source_info');
+  if (!sourceInfoDiv) {
+    console.error("source info div not found");
+    return;
+  }
+
+  const linestart = parseInt(sourceInfoDiv.dataset.linestart, 10) - 1;
+  const colstart = parseInt(sourceInfoDiv.dataset.colstart, 10);
+  const lineend = parseInt(sourceInfoDiv.dataset.lineend, 10) - 1;
+  const colend = parseInt(sourceInfoDiv.dataset.colend, 10);
+
+  if (originalSourceText) clearHighlight();
+
+
+  highlightCode(linestart, lineend, colstart, colend);
+}
+
+// Function to handle hover event on source_info div
+function handleSourceInfoHover(event) {
+  const sourceInfoDiv = event.target.closest('.source_info');
+  if (!sourceInfoDiv) return;
+
+  const linestart = parseInt(sourceInfoDiv.dataset.linestart, 10) - 1;
+  const colstart = parseInt(sourceInfoDiv.dataset.colstart, 10);
+  const lineend = parseInt(sourceInfoDiv.dataset.lineend, 10) - 1;
+  const colend = parseInt(sourceInfoDiv.dataset.colend, 10);
+
+  // Create tooltip element
+  const tooltip = document.createElement('div');
+  tooltip.className = 'tooltip';
+  tooltip.style.position = 'absolute';
+
+  // Add tooltip to DOM
+  document.body.appendChild(tooltip);
+
+  // Populate the tooltip with the highlighted text
+  const lines = document.querySelector('body > .pre-container pre').textContent.split('\n');
+  line = lines[linestart]
+  if (line){
+    tooltip.innerHTML = line.slice(0, colstart - 1) + '<span class="highlight">' + line.slice(colstart - 1, colend) + '</span>' + line.slice(colend);
+    tooltip.innerHTML = `${linestart+1} | ` + tooltip.innerHTML;
+  }
+  // Function to update tooltip position
+  function updateTooltipPosition(e) {
+    const rect = tooltip.getBoundingClientRect();
+    const x = e.clientX + 10;
+    const y = e.clientY + 10;
+
+    // Adjust tooltip position based on scroll
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
+    tooltip.style.left = `${x + scrollLeft}px`;
+    tooltip.style.top = `${y + scrollTop}px`;
+
+
+  }
+  // Add event listener for mousemove
+  window.addEventListener('mousemove', updateTooltipPosition);
+
+  // Remove event listener when leaving the element
+  sourceInfoDiv.addEventListener('mouseleave', () => {
+    window.removeEventListener('mousemove', updateTooltipPosition);
+    tooltip.remove();
+  });
+}
+
+window.addEventListener("load", function(){
+
+    // Add click event listener to all .source_info elements
+    document.querySelectorAll('.source_info').forEach(element => {
+        element.addEventListener('click', handleSourceInfoClick);
+    });
+
+
+    // Add hover event listener to all .source_info elements
+    document.querySelectorAll('.source_info').forEach(element => {
+        element.addEventListener('mouseenter', handleSourceInfoHover);
+    });
+
+});
+
+
 </script>
     """
     return out

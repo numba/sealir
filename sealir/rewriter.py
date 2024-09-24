@@ -1,21 +1,23 @@
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar, Union
+from collections import deque
+from typing import Any, Generic, NamedTuple, TypeVar, Union
 
 from sealir import ase
 
 T = TypeVar("T")
 
 
+class MdRewriteLayout(NamedTuple):
+    rewriter: str
+    repl: ase.SExpr
+    orig: ase.SExpr
+
+
 def insert_metadata(rewriter: str, repl: ase.SExpr, orig: ase.SExpr):
     assert orig._tape == repl._tape
     tp = orig._tape
-    tp.expr(
-        ".md.rewrite",
-        rewriter,
-        repl,
-        orig,
-    )
+    tp.expr(".md.rewrite", *MdRewriteLayout(rewriter, repl, orig))
 
 
 def insert_metadata_map(memo: dict[ase.SExpr, ase.SExpr]):
@@ -27,6 +29,29 @@ def insert_metadata_map(memo: dict[ase.SExpr, ase.SExpr]):
                 repl,
                 orig,
             )
+
+
+def metadata_find_original(node: ase.SExpr, loc_test) -> ase.SExpr | None:
+    def iter_md_orig(node: ase.SExpr):
+        stack = deque([node])
+        while stack:
+            node = stack.pop()
+            for parent in ase.walk_parents(node):
+                if parent._head == ".md.rewrite":
+                    md = MdRewriteLayout(*parent._args)
+                    if md.orig != node:
+                        if loc_test(md.orig):
+                            yield md.orig
+                        else:
+                            stack.append(md.orig)
+                else:
+                    stack.appendleft(parent)
+
+    mds = iter_md_orig(node)
+    try:
+        return next(iter(mds))
+    except StopIteration:
+        return None
 
 
 class TreeRewriter(Generic[T], ase.TreeVisitor):
