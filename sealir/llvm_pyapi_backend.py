@@ -115,6 +115,9 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             packed = yield packed_expr
             retval = packed[idx]
             return retval
+        case rvsdg.Py_Int(int(ival)):
+            const = ir.Constant(pyapi.py_ssize_t, ival)
+            return pyapi.long_from_ssize_t(const)
         case rvsdg.Py_BinOp(opname=str(op), iostate=iostate, lhs=lhs, rhs=rhs):
             ioval = ensure_io((yield iostate))
             lhsval = yield lhs
@@ -133,7 +136,23 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 case _:
                     raise NotImplementedError(op)
             return ioval, retval
-
+        case rvsdg.Py_InplaceBinOp(
+                opname=str(op),
+                iostate=iostate,
+                lhs=lhs,
+                rhs=rhs,
+            ):
+                ioval = ensure_io((yield iostate))
+                lhsval = yield lhs
+                rhsval = yield rhs
+                match op:
+                    case "+":
+                        res = ctx.pyapi.number_add(lhsval, rhsval, inplace=True)
+                    case "*":
+                        res = ctx.pyapi.number_multiply(lhsval, rhsval, inplace=True)
+                    case _:
+                        raise NotImplementedError(op)
+                return ioval, res
         case rvsdg.Return(iostate=iostate, retval=retval):
             ensure_io((yield iostate))
             retval = yield retval
@@ -223,6 +242,58 @@ class PythonAPI:
     def _get_function(self, fnty, name):
 
         return _get_or_insert_function(self.module, fnty, name)
+
+    def _long_from_native_int(self, ival, func_name, native_int_type,
+                              signed):
+        fnty = ir.FunctionType(self.pyobj, [native_int_type])
+        fn = self._get_function(fnty, name=func_name)
+        return self.builder.call(fn, [ival])
+
+    def long_from_long(self, ival):
+        func_name = "PyLong_FromLong"
+        fnty = ir.FunctionType(self.pyobj, [self.long])
+        fn = self._get_function(fnty, name=func_name)
+        return self.builder.call(fn, [ival])
+
+    def long_from_ulong(self, ival):
+        return self._long_from_native_int(ival, "PyLong_FromUnsignedLong",
+                                          self.long, signed=False)
+
+    def long_from_ssize_t(self, ival):
+        return self._long_from_native_int(ival, "PyLong_FromSsize_t",
+                                          self.py_ssize_t, signed=True)
+
+    def long_from_longlong(self, ival):
+        return self._long_from_native_int(ival, "PyLong_FromLongLong",
+                                          self.longlong, signed=True)
+
+    def long_from_ulonglong(self, ival):
+        return self._long_from_native_int(ival, "PyLong_FromUnsignedLongLong",
+                                          self.ulonglong, signed=False)
+
+    def long_from_signed_int(self, ival):
+        """
+        Return a Python integer from any native integer value.
+        """
+        bits = ival.type.width
+        if bits <= self.long.width:
+            return self.long_from_long(self.builder.sext(ival, self.long))
+        elif bits <= self.longlong.width:
+            return self.long_from_longlong(self.builder.sext(ival, self.longlong))
+        else:
+            raise OverflowError("integer too big (%d bits)" % (bits))
+
+    def long_from_unsigned_int(self, ival):
+        """
+        Same as long_from_signed_int, but for unsigned values.
+        """
+        bits = ival.type.width
+        if bits <= self.ulong.width:
+            return self.long_from_ulong(self.builder.zext(ival, self.ulong))
+        elif bits <= self.ulonglong.width:
+            return self.long_from_ulonglong(self.builder.zext(ival, self.ulonglong))
+        else:
+            raise OverflowError("integer too big (%d bits)" % (bits))
 
     def _get_number_operator(self, name):
         fnty = ir.FunctionType(self.pyobj, [self.pyobj, self.pyobj])
