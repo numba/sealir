@@ -1,7 +1,5 @@
 from collections import ChainMap
 
-import pytest
-
 from sealir import ase, lam
 from sealir.rvsdg import (
     EvalCtx,
