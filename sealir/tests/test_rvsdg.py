@@ -140,7 +140,7 @@ def test_if_else_4():
 
 
 def test_while_1():
-    def udt(n: int, m: int) -> int:
+    def udt(n: int, m: int) -> tuple[int, int]:
         i = 0
         c = 0
         while i < n:
@@ -151,12 +151,12 @@ def test_while_1():
     args = (5, 3)
     run(udt, args)
 
-    # args = (0, 3)
-    # run(udt, args)
+    args = (0, 3)
+    run(udt, args)
 
 
 def test_range_iterator_1():
-    def udt(n: int) -> int:
+    def udt(n: int) -> tuple[int, int]:
         it = iter(range(n))
         a = next(it)
         b = next(it)

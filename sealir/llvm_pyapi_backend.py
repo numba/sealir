@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ctypes as _ct
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Self
 
 from llvmlite import binding as llvm
@@ -166,14 +166,68 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     phi.add_incoming(right, bb_else)
                     phis.append(phi)
             return tuple(phis)
+        case rvsdg.Scfg_While(body=loopblk):
+            bb_before = builder.basic_block
+            bb_loopbody = builder.append_basic_block("loopbody")
+            bb_endloop = builder.append_basic_block("endloop")
+            builder.branch(bb_loopbody)
+            # loop body
+            builder.position_at_end(bb_loopbody)
+            # setup phi nodes for loopback variables
+            loopback_pack = ctx.blam_stack[-1]
+            assert isinstance(loopback_pack, BLamValue)
+            phis = []
+            fixups = {}
+            for i, var in enumerate(loopback_pack.val):
+                if isinstance(var, BLamIOArg):
+                    # iostate
+                    phis.append(var)
+                else:
+                    # otherwise
+                    phi = builder.phi(var.type)
+                    phi.add_incoming(var, bb_before)
+                    fixups[i] = phi
+                    phis.append(phi)
+            # replace the top of stack
+            ctx.blam_stack[-1] = replace(loopback_pack, val=tuple(phis))
+            # generate body
+            loopout = yield loopblk
+            # get loop condition
+            loopcond = builder.icmp_unsigned(
+                "!=", pyapi.int32(0), pyapi.object_istrue(loopout[0])
+            )
+            # fix up phis
+            for i, phi in fixups.items():
+                phi.add_incoming(loopout[i], builder.basic_block)
+            # back jump
+            builder.cbranch(loopcond, bb_loopbody, bb_endloop)
+            # end loop
+            builder.position_at_end(bb_endloop)
+            return loopout
+
+        case rvsdg.Py_Undef():
+            return ll_pyobject_ptr(None)
         case rvsdg.Py_Int(int(ival)):
-            const = ir.Constant(pyapi.py_ssize_t, ival)
+            const = ir.Constant(pyapi.py_ssize_t, int(ival))
             return pyapi.long_from_ssize_t(const)
         case rvsdg.Py_Tuple(args):
             elems = []
             for arg in args:
                 elems.append((yield arg))
             return pyapi.tuple_pack(elems)
+        case rvsdg.Py_UnaryOp(
+            opname=str(opname),
+            iostate=iostate,
+            arg=val,
+        ):
+            ioval = yield iostate
+            val = yield val
+            match opname:
+                case "not":
+                    retval = pyapi.bool_from_bool(pyapi.object_not(val))
+                case _:
+                    raise NotImplementedError(opname)
+            return ioval, retval
         case rvsdg.Py_BinOp(opname=str(op), iostate=iostate, lhs=lhs, rhs=rhs):
             ioval = ensure_io((yield iostate))
             lhsval = yield lhs
@@ -459,6 +513,11 @@ class PythonAPI:
         fn = self._get_function(fnty, name="PyObject_IsTrue")
         return self.builder.call(fn, [obj])
 
+    def object_not(self, obj):
+        fnty = ir.FunctionType(ir.IntType(32), [self.pyobj])
+        fn = self._get_function(fnty, name="PyObject_Not")
+        return self.builder.call(fn, [obj])
+
     def tuple_pack(self, items):
         fnty = ir.FunctionType(self.pyobj, [self.py_ssize_t], var_arg=True)
         fn = self._get_function(fnty, name="PyTuple_Pack")
@@ -466,6 +525,18 @@ class PythonAPI:
         args = [n]
         args.extend(items)
         return self.builder.call(fn, args)
+
+    def bool_from_bool(self, bval):
+        """
+        Get a Python bool from a LLVM boolean.
+        """
+        longval = self.builder.zext(bval, self.long)
+        return self.bool_from_long(longval)
+
+    def bool_from_long(self, ival):
+        fnty = ir.FunctionType(self.pyobj, [self.long])
+        fn = self._get_function(fnty, name="PyBool_FromLong")
+        return self.builder.call(fn, [ival])
 
 
 def _get_or_insert_function(module, fnty, name):
