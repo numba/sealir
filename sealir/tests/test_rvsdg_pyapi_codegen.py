@@ -142,6 +142,17 @@ def test_while_1():
     run(udt, args)
 
 
+def test_range_iterator_1():
+    def udt(n: int) -> tuple[int, int]:
+        it = iter(range(n))
+        a = next(it)
+        b = next(it)
+        return a, b
+
+    args = (5,)
+    run(udt, args)
+
+
 def run(func, args, *, localscope=None):
     expected = func(*args)
 

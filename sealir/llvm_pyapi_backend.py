@@ -284,7 +284,25 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             ensure_io((yield iostate))
             retval = yield retval
             builder.ret(retval)
-
+        case rvsdg.Py_Call(
+            iostate=iostate,
+            callee=callee,
+            args=args,
+        ):
+            ioval = ensure_io((yield iostate))
+            callee = yield callee
+            argvals = []
+            for arg in args:
+                argvals.append((yield arg))
+            retval = pyapi.call_function_objargs(callee, argvals)
+            return ioval, retval
+        case rvsdg.Py_GlobalLoad(str(glbname)):
+            freezeobj = __builtins__[glbname]
+            ptr = pyapi.py_ssize_t(id(freezeobj))
+            obj = builder.inttoptr(
+                ptr, ll_pyobject_ptr, name=f"global.{glbname}"
+            )
+            return obj
         case _:
             raise NotImplementedError(ase.as_tuple(expr, depth=2))
 
@@ -537,6 +555,13 @@ class PythonAPI:
         fnty = ir.FunctionType(self.pyobj, [self.long])
         fn = self._get_function(fnty, name="PyBool_FromLong")
         return self.builder.call(fn, [ival])
+
+    def call_function_objargs(self, callee, objargs):
+        fnty = ir.FunctionType(self.pyobj, [self.pyobj], var_arg=True)
+        fn = self._get_function(fnty, name="PyObject_CallFunctionObjArgs")
+        args = [callee] + list(objargs)
+        args.append(self.pyobj(None))
+        return self.builder.call(fn, args)
 
 
 def _get_or_insert_function(module, fnty, name):
