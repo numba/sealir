@@ -70,7 +70,7 @@ class JitCallable:
         cls, rt: llvm.ResourceTracker, ptr: int, arity: int
     ) -> Self:
         pyfunc = _ct.PYFUNCTYPE(_ct.py_object, *([_ct.py_object] * arity))(ptr)
-        return JitCallable(rt=rt, pyfunc=pyfunc)
+        return cls(rt=rt, pyfunc=pyfunc)
 
     def __call__(self, *args: Any) -> Any:
         return self.pyfunc(*args)
@@ -112,9 +112,60 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
         case lam.Lam(body=body):
             return (yield body)
         case lam.Unpack(idx=int(idx), tup=packed_expr):
+            # handled at compile time
             packed = yield packed_expr
             retval = packed[idx]
             return retval
+        case lam.Pack(args):
+            # handled at compile time
+            elems = []
+            for arg in args:
+                elems.append((yield arg))
+            retval = tuple(elems)
+            return retval
+        case rvsdg.Scfg_If(
+            test=cond,
+            then=br_true,
+            orelse=br_false,
+        ):
+            condval = yield cond
+            # unpack pybool
+            condbit = builder.icmp_unsigned(
+                "!=", pyapi.int32(0), pyapi.object_istrue(condval)
+            )
+
+            bb_then = builder.append_basic_block("then")
+            bb_else = builder.append_basic_block("else")
+            bb_endif = builder.append_basic_block("endif")
+
+            builder.cbranch(condbit, bb_then, bb_else)
+            # Then
+            with builder.goto_block(bb_then):
+                value_then = yield br_true
+                builder.branch(bb_endif)
+            # Else
+            with builder.goto_block(bb_else):
+                value_else = yield br_false
+                builder.branch(bb_endif)
+            # EndIf
+            builder.position_at_end(bb_endif)
+            assert len(value_then) == len(value_else)
+            phis = []
+            for left, right in zip(value_then, value_else, strict=True):
+                if isinstance(left, BLamIOArg) or isinstance(right, BLamIOArg):
+                    # handle iostate
+                    assert isinstance(left, BLamIOArg) and isinstance(
+                        right, BLamIOArg
+                    )
+                    phis.append(left)
+                else:
+                    # otherwise
+                    assert left.type == right.type
+                    phi = builder.phi(left.type)
+                    phi.add_incoming(left, bb_then)
+                    phi.add_incoming(right, bb_else)
+                    phis.append(phi)
+            return tuple(phis)
         case rvsdg.Py_Int(int(ival)):
             const = ir.Constant(pyapi.py_ssize_t, ival)
             return pyapi.long_from_ssize_t(const)
@@ -142,22 +193,39 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     raise NotImplementedError(op)
             return ioval, retval
         case rvsdg.Py_InplaceBinOp(
-                opname=str(op),
-                iostate=iostate,
-                lhs=lhs,
-                rhs=rhs,
-            ):
-                ioval = ensure_io((yield iostate))
-                lhsval = yield lhs
-                rhsval = yield rhs
-                match op:
-                    case "+":
-                        res = ctx.pyapi.number_add(lhsval, rhsval, inplace=True)
-                    case "*":
-                        res = ctx.pyapi.number_multiply(lhsval, rhsval, inplace=True)
-                    case _:
-                        raise NotImplementedError(op)
-                return ioval, res
+            opname=str(op),
+            iostate=iostate,
+            lhs=lhs,
+            rhs=rhs,
+        ):
+            ioval = ensure_io((yield iostate))
+            lhsval = yield lhs
+            rhsval = yield rhs
+            match op:
+                case "+":
+                    res = ctx.pyapi.number_add(lhsval, rhsval, inplace=True)
+                case "*":
+                    res = ctx.pyapi.number_multiply(
+                        lhsval, rhsval, inplace=True
+                    )
+                case _:
+                    raise NotImplementedError(op)
+            return ioval, res
+        case rvsdg.Py_Compare(
+            opname=str(op),
+            iostate=iostate,
+            lhs=lhs,
+            rhs=rhs,
+        ):
+            ioval = ensure_io((yield iostate))
+            lhsval = yield lhs
+            rhsval = yield rhs
+            match op:
+                case "<" | ">" | "!=" | "in":
+                    res = pyapi.object_richcompare(lhsval, rhsval, op)
+                case _:
+                    raise NotImplementedError(op)
+            return ioval, res
         case rvsdg.Return(iostate=iostate, retval=retval):
             ensure_io((yield iostate))
             retval = yield retval
@@ -235,6 +303,7 @@ class PythonAPI:
         self.pyobj = ll_pyobject_ptr
         self.pyobjptr = self.pyobj.as_pointer()
         self.voidptr = ir.PointerType(ll_byte)
+        self.int32 = ir.IntType(32)
         self.long = ir.IntType(_ct.sizeof(_ct.c_long) * 8)
         self.ulong = self.long
         self.longlong = ir.IntType(_ct.sizeof(_ct.c_ulonglong) * 8)
@@ -248,8 +317,7 @@ class PythonAPI:
 
         return _get_or_insert_function(self.module, fnty, name)
 
-    def _long_from_native_int(self, ival, func_name, native_int_type,
-                              signed):
+    def _long_from_native_int(self, ival, func_name, native_int_type, signed):
         fnty = ir.FunctionType(self.pyobj, [native_int_type])
         fn = self._get_function(fnty, name=func_name)
         return self.builder.call(fn, [ival])
@@ -261,20 +329,24 @@ class PythonAPI:
         return self.builder.call(fn, [ival])
 
     def long_from_ulong(self, ival):
-        return self._long_from_native_int(ival, "PyLong_FromUnsignedLong",
-                                          self.long, signed=False)
+        return self._long_from_native_int(
+            ival, "PyLong_FromUnsignedLong", self.long, signed=False
+        )
 
     def long_from_ssize_t(self, ival):
-        return self._long_from_native_int(ival, "PyLong_FromSsize_t",
-                                          self.py_ssize_t, signed=True)
+        return self._long_from_native_int(
+            ival, "PyLong_FromSsize_t", self.py_ssize_t, signed=True
+        )
 
     def long_from_longlong(self, ival):
-        return self._long_from_native_int(ival, "PyLong_FromLongLong",
-                                          self.longlong, signed=True)
+        return self._long_from_native_int(
+            ival, "PyLong_FromLongLong", self.longlong, signed=True
+        )
 
     def long_from_ulonglong(self, ival):
-        return self._long_from_native_int(ival, "PyLong_FromUnsignedLongLong",
-                                          self.ulonglong, signed=False)
+        return self._long_from_native_int(
+            ival, "PyLong_FromUnsignedLongLong", self.ulonglong, signed=False
+        )
 
     def long_from_signed_int(self, ival):
         """
@@ -284,7 +356,9 @@ class PythonAPI:
         if bits <= self.long.width:
             return self.long_from_long(self.builder.sext(ival, self.long))
         elif bits <= self.longlong.width:
-            return self.long_from_longlong(self.builder.sext(ival, self.longlong))
+            return self.long_from_longlong(
+                self.builder.sext(ival, self.longlong)
+            )
         else:
             raise OverflowError("integer too big (%d bits)" % (bits))
 
@@ -296,7 +370,9 @@ class PythonAPI:
         if bits <= self.ulong.width:
             return self.long_from_ulong(self.builder.zext(ival, self.ulong))
         elif bits <= self.ulonglong.width:
-            return self.long_from_ulonglong(self.builder.zext(ival, self.ulonglong))
+            return self.long_from_ulonglong(
+                self.builder.zext(ival, self.ulonglong)
+            )
         else:
             raise OverflowError("integer too big (%d bits)" % (bits))
 
@@ -333,6 +409,55 @@ class PythonAPI:
         return self._call_number_operator(
             "FloorDivide", lhs, rhs, inplace=inplace
         )
+
+    def object_richcompare(self, lhs, rhs, opstr):
+        """
+        Refer to Python source Include/object.h for macros definition
+        of the opid.
+        """
+        ops = ["<", "<=", "==", "!=", ">", ">="]
+        if opstr in ops:
+            opid = ops.index(opstr)
+            fnty = ir.FunctionType(
+                self.pyobj, [self.pyobj, self.pyobj, ir.IntType(32)]
+            )
+            fn = self._get_function(fnty, name="PyObject_RichCompare")
+            lopid = self.int32(opid)
+            return self.builder.call(fn, (lhs, rhs, lopid))
+        elif opstr == "is":
+            bitflag = self.builder.icmp_unsigned("==", lhs, rhs)
+            return self.bool_from_bool(bitflag)
+        elif opstr == "is not":
+            bitflag = self.builder.icmp_unsigned("!=", lhs, rhs)
+            return self.bool_from_bool(bitflag)
+        elif opstr in ("in", "not in"):
+            fnty = ir.FunctionType(ir.IntType(32), [self.pyobj, self.pyobj])
+            fn = self._get_function(fnty, name="PySequence_Contains")
+            status = self.builder.call(fn, (rhs, lhs))
+            negone = self.int32(-1)
+            is_good = self.builder.icmp_unsigned("!=", status, negone)
+            # Stack allocate output and initialize to Null
+            outptr = cgutils.alloca_once_value(
+                self.builder, Constant(self.pyobj, None)
+            )
+            # If PySequence_Contains returns non-error value
+            with cgutils.if_likely(self.builder, is_good):
+                if opstr == "not in":
+                    status = self.builder.not_(status)
+                # Store the status as a boolean object
+                truncated = self.builder.trunc(status, ir.IntType(1))
+                self.builder.store(self.bool_from_bool(truncated), outptr)
+
+            return self.builder.load(outptr)
+        else:
+            raise NotImplementedError(
+                "Unknown operator {op!r}".format(op=opstr)
+            )
+
+    def object_istrue(self, obj):
+        fnty = ir.FunctionType(ir.IntType(32), [self.pyobj])
+        fn = self._get_function(fnty, name="PyObject_IsTrue")
+        return self.builder.call(fn, [obj])
 
     def tuple_pack(self, items):
         fnty = ir.FunctionType(self.pyobj, [self.py_ssize_t], var_arg=True)

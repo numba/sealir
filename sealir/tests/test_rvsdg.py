@@ -65,7 +65,7 @@ def test_inplace_add_2():
 
 
 def test_multi_assign():
-    def udt(n: int, m: int) -> int:
+    def udt(n: int, m: int) -> tuple[int, int]:
         a = b = n + m
         return a, b
 
