@@ -118,6 +118,11 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
         case rvsdg.Py_Int(int(ival)):
             const = ir.Constant(pyapi.py_ssize_t, ival)
             return pyapi.long_from_ssize_t(const)
+        case rvsdg.Py_Tuple(args):
+            elems = []
+            for arg in args:
+                elems.append((yield arg))
+            return pyapi.tuple_pack(elems)
         case rvsdg.Py_BinOp(opname=str(op), iostate=iostate, lhs=lhs, rhs=rhs):
             ioval = ensure_io((yield iostate))
             lhsval = yield lhs
@@ -328,6 +333,14 @@ class PythonAPI:
         return self._call_number_operator(
             "FloorDivide", lhs, rhs, inplace=inplace
         )
+
+    def tuple_pack(self, items):
+        fnty = ir.FunctionType(self.pyobj, [self.py_ssize_t], var_arg=True)
+        fn = self._get_function(fnty, name="PyTuple_Pack")
+        n = self.py_ssize_t(len(items))
+        args = [n]
+        args.extend(items)
+        return self.builder.call(fn, args)
 
 
 def _get_or_insert_function(module, fnty, name):
