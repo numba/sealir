@@ -154,7 +154,8 @@ class Tape:
         return "".join(buf)
 
     @graphviz_function
-    def render_dot(self, *, gv, show_metadata: bool = False):
+    def render_dot(self, *, gv, show_metadata: bool = False,
+                   only_reachable: bool = False):
         def make_label(i, x):
             if isinstance(x, SExpr):
                 return f"<{i}> [{x._handle}]"
@@ -197,6 +198,8 @@ class Tape:
             idx = record.handle
             head = record.read_head()
             args = record.read_args()
+            if only_reachable and idx not in reachable:
+                continue # skip
             if not show_metadata and head.startswith(metadata_prefix):
                 # Skip metadata
                 continue
