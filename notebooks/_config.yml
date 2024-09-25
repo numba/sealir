@@ -4,6 +4,7 @@
 title: SealIR
 author: Numba team
 logo: seal.png
+copyright: "2024"
 
 # Force re-execution of notebooks on each build.
 # See https://jupyterbook.org/content/execute.html
@@ -30,3 +31,6 @@ latex:
 # html:
 #   use_issues_button: true
 #   use_repository_button: true
+
+# Exclude these files
+exclude_patterns: [README.md]

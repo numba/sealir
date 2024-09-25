@@ -18,11 +18,6 @@ class Lam(_Value):
     body: ase.SExpr
 
 
-class Expr(_Value):
-    head: str
-    args: tuple[ase.value_type, ...]
-
-
 class Arg(_Value):
     index: int
 

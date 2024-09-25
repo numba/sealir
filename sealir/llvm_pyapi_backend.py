@@ -57,6 +57,9 @@ def llvm_codegen(root: ase.SExpr):
 
     llvm_ir = str(mod)
     print(llvm_ir)
+
+    # llmod = llvm.parse_assembly(llvm_ir)
+    # llvm.view_dot_graph(llvm.get_function_cfg(llmod.get_function("foo")), view=True)
     # Create JIT
     lljit = llvm.create_lljit_compiler()
     rt = (
