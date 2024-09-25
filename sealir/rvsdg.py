@@ -4,6 +4,7 @@ import ast
 import inspect
 import operator
 import time
+import logging
 from collections import ChainMap
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -20,6 +21,10 @@ from numba_rvsdg.core.datastructures.ast_transforms import (
 
 from sealir import ase, grammar, lam
 from sealir.rewriter import TreeRewriter
+
+
+_logger = logging.getLogger(__name__)
+
 
 _DEBUG = False
 _DEBUG_HTML = False
@@ -1240,7 +1245,7 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
     reachable = ase.reachable_set(prgm)
     ase.apply_bottomup(prgm, FindParentLet(), reachable=reachable)
 
-    print("   var_load - let analysis", time.time() - ts)
+    _logger.debug("   var_load - let analysis", time.time() - ts)
 
     class RewriteToLambda(grammar.TreeRewriter[SExpr]):
         def rewrite_VarLoad(self, orig: SExpr, name: str) -> SExpr:
@@ -1271,7 +1276,7 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
         rtl = RewriteToLambda()
         ase.apply_bottomup(prgm, rtl, reachable=reachable)
         memo = rtl.memo
-        print("   rewrite_let_into_lambda", time.time() - ts)
+        _logger.debug("   rewrite_let_into_lambda", time.time() - ts)
         prgm = memo[prgm]
 
     return prgm  # lb.run_abstraction_pass(prgm)
@@ -1297,24 +1302,24 @@ def restructure_source(function):
 
     prgm = convert_to_sexpr(transformed_ast, firstline)
 
-    print("convert_to_sexpr", time.time() - t_start)
+    _logger.debug("convert_to_sexpr", time.time() - t_start)
 
     varinfo = find_variable_info(prgm)
-    pprint(varinfo)
+    _logger.debug(varinfo)
 
-    print("find_variable_info", time.time() - t_start)
+    _logger.debug("find_variable_info", time.time() - t_start)
 
     grm = Grammar(prgm._tape)
     rvsdg = convert_to_rvsdg(grm, prgm, varinfo)
 
-    print("convert_to_rvsdg", time.time() - t_start)
+    _logger.debug("convert_to_rvsdg", time.time() - t_start)
 
     from sealir.prettyformat import html_format
 
     pp(rvsdg)
 
     lam_node = convert_to_lambda(rvsdg, varinfo)
-    print("convert_to_lambda", time.time() - t_start)
+    _logger.debug("convert_to_lambda", time.time() - t_start)
     if _DEBUG:
         pp(lam_node)
         print(ase.pretty_str(lam_node))
