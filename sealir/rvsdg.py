@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import ast
 import inspect
+import logging
 import operator
 import time
-import logging
 from collections import ChainMap
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -21,7 +21,6 @@ from numba_rvsdg.core.datastructures.ast_transforms import (
 
 from sealir import ase, grammar, lam
 from sealir.rewriter import TreeRewriter
-
 
 _logger = logging.getLogger(__name__)
 
