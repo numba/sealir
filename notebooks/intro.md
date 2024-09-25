@@ -14,6 +14,8 @@ kernelspec:
 
 # Introduction
 
+ SealIR (🦭 IR) is a compiler infrastructure for the development of domain-specific compilers using S-expression and lambda calculus as the building block.
+
 ```{code-cell} ipython3
 from sealir import ase
 ```

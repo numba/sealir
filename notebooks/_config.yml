@@ -3,7 +3,7 @@
 
 title: SealIR
 author: Numba team
-# logo: logo.png
+logo: seal.png
 
 # Force re-execution of notebooks on each build.
 # See https://jupyterbook.org/content/execute.html
