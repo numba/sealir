@@ -60,7 +60,7 @@
     <script>DOCUMENTATION_OPTIONS.pagename = 'intro';</script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Lambda" href="lambda.html" />
+    <link rel="next" title="Lambda Calculus Encoding and Grammar" href="lambda.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   </head>
@@ -149,8 +149,14 @@
   
   
   
+    
+    
+      
+    
+    
+    <img src="_static/seal.png" class="logo__image only-light" alt="SealIR - Home"/>
+    <script>document.write(`<img src="_static/seal.png" class="logo__image only-dark" alt="SealIR - Home"/>`);</script>
   
-    <p class="title logo__title">SealIR</p>
   
 </a></div>
         <div class="sidebar-primary-item">
@@ -175,7 +181,8 @@
             </li>
         </ul>
         <ul class="nav bd-sidenav">
-<li class="toctree-l1"><a class="reference internal" href="lambda.html">Lambda</a></li>
+<li class="toctree-l1"><a class="reference internal" href="lambda.html">Lambda Calculus Encoding and Grammar</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rvsdg.html">RVSDG? Numba Intermediate Language (NIL)?</a></li>
 </ul>
 
     </div>
@@ -326,16 +333,16 @@ document.write(`
                 <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-tape-and-s-expressions">The Tape and S-expressions</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#a-rewrite-system-treerewriter">A Rewrite System (<code class="docutils literal notranslate"><span class="pre">TreeRewriter</span></code>)</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#applying-rewrite-rules-expr-apply-bottomup-and-expr-apply-topdown">Applying Rewrite Rules: <code class="docutils literal notranslate"><span class="pre">Expr.apply_bottomup</span></code> and <code class="docutils literal notranslate"><span class="pre">Expr.apply_topdown</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#applying-rewrite-rules-ase-apply-bottomup-and-ase-apply-topdown">Applying Rewrite Rules: <code class="docutils literal notranslate"><span class="pre">ase.apply_bottomup()</span></code> and <code class="docutils literal notranslate"><span class="pre">ase.apply_topdown()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#accessing-rewrite-results-treerewriter-memo">Accessing Rewrite Results: <code class="docutils literal notranslate"><span class="pre">TreeRewriter.memo</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tracking-rewrite-history">Tracking Rewrite History</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#manual-traversal-techniques">Manual Traversal Techniques</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#expr-walk-descendants"><code class="docutils literal notranslate"><span class="pre">Expr.walk_descendants</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#expr-walk-parents"><code class="docutils literal notranslate"><span class="pre">Expr.walk_parents()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#expr-contains-expr"><code class="docutils literal notranslate"><span class="pre">Expr.contains(Expr)</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#expr-search-parents-predicate"><code class="docutils literal notranslate"><span class="pre">Expr.search_parents(predicate)</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ase-walk-descendants-expr"><code class="docutils literal notranslate"><span class="pre">ase.walk_descendants(expr)</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ase-walk-parents"><code class="docutils literal notranslate"><span class="pre">ase.walk_parents()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ase-contains-expr-expr"><code class="docutils literal notranslate"><span class="pre">ase.contains(expr,</span> <span class="pre">expr)</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ase-search-parents-expr-predicate"><code class="docutils literal notranslate"><span class="pre">ase.search_parents(expr,</span> <span class="pre">predicate)</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#using-match-on-s-expression">Using <code class="docutils literal notranslate"><span class="pre">match</span></code> on S-expression</a></li>
 </ul>
 </li>
@@ -352,6 +359,7 @@ document.write(`
                   
   <section class="tex2jax_ignore mathjax_ignore" id="introduction">
 <h1>Introduction<a class="headerlink" href="#introduction" title="Link to this heading">#</a></h1>
+<p>SealIR (🦭 IR) is a compiler infrastructure for the development of domain-specific compilers using S-expression and lambda calculus as the building block.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">sealir</span> <span class="kn">import</span> <span class="n">ase</span>
@@ -366,9 +374,36 @@ document.write(`
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">ase</span><span class="o">.</span><span class="n">Tape</span><span class="p">()</span> <span class="k">as</span> <span class="n">tape</span><span class="p">:</span>
-    <span class="n">a</span> <span class="o">=</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-    <span class="n">b</span> <span class="o">=</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
-    <span class="n">c</span> <span class="o">=</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;add&quot;</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;add&quot;</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Each SExpr contains the <code class="docutils literal notranslate"><span class="pre">_head</span></code> and <code class="docutils literal notranslate"><span class="pre">_args</span></code> attributes. (They have underscore prefix because subclasses can provide named fields.)</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">type</span><span class="p">(</span><span class="n">a</span><span class="p">),</span> <span class="n">a</span><span class="o">.</span><span class="n">_head</span><span class="p">,</span> <span class="n">a</span><span class="o">.</span><span class="n">_args</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>(sealir.ase.BasicSExpr, &#39;num&#39;, (1,))
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">type</span><span class="p">(</span><span class="n">c</span><span class="p">),</span> <span class="n">c</span><span class="o">.</span><span class="n">_head</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">_args</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>(sealir.ase.BasicSExpr,
+ &#39;add&#39;,
+ (&lt;Expr &#39;num&#39; [1] @0x10d60e2d0&gt;, &lt;Expr &#39;num&#39; [5] @0x10d60e2d0&gt;))
 </pre></div>
 </div>
 </div>
@@ -381,7 +416,7 @@ document.write(`
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10f50b050
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10d60e2d0
 |      0 | &lt;0: none&gt;
 |      1 | num 1
 |      5 | num 2
@@ -406,8 +441,8 @@ document.write(`
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">tape</span><span class="p">:</span>
-    <span class="n">d</span> <span class="o">=</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
-    <span class="n">e</span> <span class="o">=</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;mul&quot;</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="n">c</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
+    <span class="n">e</span> <span class="o">=</span> <span class="n">tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;mul&quot;</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">d</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -419,7 +454,7 @@ document.write(`
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10f50b050
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10d60e2d0
 |      0 | &lt;0: none&gt;
 |      1 | num 1
 |      5 | num 2
@@ -447,12 +482,12 @@ document.write(`
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">str</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">pretty_str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Expr(mul, &lt;Expr &#39;num&#39; [5] @0x10f50b050&gt;, &lt;Expr &#39;sub&#39; [14] @0x10f50b050&gt;)
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>BasicSExpr(mul, &lt;Expr &#39;num&#39; [5] @0x10d60e2d0&gt;, &lt;Expr &#39;sub&#39; [14] @0x10d60e2d0&gt;)
 (mul (num 2) (sub (add (num 1) (num 2)) (num 2)))
 </pre></div>
 </div>
@@ -468,42 +503,42 @@ document.write(`
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">sealir.rewriter</span> <span class="kn">import</span> <span class="n">TreeRewriter</span>
 
 
-<span class="k">class</span> <span class="nc">RewriteCalcMachine</span><span class="p">(</span><span class="n">TreeRewriter</span><span class="p">[</span><span class="n">ase</span><span class="o">.</span><span class="n">Expr</span><span class="p">]):</span>
+<span class="k">class</span> <span class="nc">RewriteCalcMachine</span><span class="p">(</span><span class="n">TreeRewriter</span><span class="p">[</span><span class="n">ase</span><span class="o">.</span><span class="n">SExpr</span><span class="p">]):</span>
     <span class="k">def</span> <span class="nf">rewrite_add</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">orig</span><span class="p">,</span> <span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">):</span>
-        <span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="n">lhs</span><span class="o">.</span><span class="n">args</span>
-        <span class="p">[</span><span class="n">y</span><span class="p">]</span> <span class="o">=</span> <span class="n">rhs</span><span class="o">.</span><span class="n">args</span>
-        <span class="k">return</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span><span class="p">)</span>
+        <span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="n">lhs</span><span class="o">.</span><span class="n">_args</span>
+        <span class="p">[</span><span class="n">y</span><span class="p">]</span> <span class="o">=</span> <span class="n">rhs</span><span class="o">.</span><span class="n">_args</span>
+        <span class="k">return</span> <span class="n">orig</span><span class="o">.</span><span class="n">_tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">rewrite_sub</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">orig</span><span class="p">,</span> <span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">):</span>
-        <span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="n">lhs</span><span class="o">.</span><span class="n">args</span>
-        <span class="p">[</span><span class="n">y</span><span class="p">]</span> <span class="o">=</span> <span class="n">rhs</span><span class="o">.</span><span class="n">args</span>
-        <span class="k">return</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="n">x</span> <span class="o">-</span> <span class="n">y</span><span class="p">)</span>
+        <span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="n">lhs</span><span class="o">.</span><span class="n">_args</span>
+        <span class="p">[</span><span class="n">y</span><span class="p">]</span> <span class="o">=</span> <span class="n">rhs</span><span class="o">.</span><span class="n">_args</span>
+        <span class="k">return</span> <span class="n">orig</span><span class="o">.</span><span class="n">_tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="n">x</span> <span class="o">-</span> <span class="n">y</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">rewrite_mul</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">orig</span><span class="p">,</span> <span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">):</span>
-        <span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="n">lhs</span><span class="o">.</span><span class="n">args</span>
-        <span class="p">[</span><span class="n">y</span><span class="p">]</span> <span class="o">=</span> <span class="n">rhs</span><span class="o">.</span><span class="n">args</span>
-        <span class="k">return</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="n">x</span> <span class="o">*</span> <span class="n">y</span><span class="p">)</span>
+        <span class="p">[</span><span class="n">x</span><span class="p">]</span> <span class="o">=</span> <span class="n">lhs</span><span class="o">.</span><span class="n">_args</span>
+        <span class="p">[</span><span class="n">y</span><span class="p">]</span> <span class="o">=</span> <span class="n">rhs</span><span class="o">.</span><span class="n">_args</span>
+        <span class="k">return</span> <span class="n">orig</span><span class="o">.</span><span class="n">_tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="n">x</span> <span class="o">*</span> <span class="n">y</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
 </div>
-<section id="applying-rewrite-rules-expr-apply-bottomup-and-expr-apply-topdown">
-<h3>Applying Rewrite Rules: <code class="docutils literal notranslate"><span class="pre">Expr.apply_bottomup</span></code> and <code class="docutils literal notranslate"><span class="pre">Expr.apply_topdown</span></code><a class="headerlink" href="#applying-rewrite-rules-expr-apply-bottomup-and-expr-apply-topdown" title="Link to this heading">#</a></h3>
-<p>To utilize the rewrite pass, we can use the <code class="docutils literal notranslate"><span class="pre">.apply_bottomup()</span></code> method. This method traverses the S-expression tree from leaves to root, ensuring that inner-most expressions are processed first.</p>
-<p>Due to the append-only nature of the tape, older S-expressions always appear earlier than newer ones. The bottom-up traversal simply runs from the first record in the tape to the last. It’s important to note that this method will process all nodes in the tape, even those not part of the current expression tree. Therefore, it’s crucial that rewrites are side-effect free.</p>
-<p>For cases where you need to avoid processing unreachable nodes, use <code class="docutils literal notranslate"><span class="pre">.apply_topdown()</span></code>. This method traverses from root to leaves, skipping unreachable nodes, but at the cost of slower performance.</p>
+<section id="applying-rewrite-rules-ase-apply-bottomup-and-ase-apply-topdown">
+<h3>Applying Rewrite Rules: <code class="docutils literal notranslate"><span class="pre">ase.apply_bottomup()</span></code> and <code class="docutils literal notranslate"><span class="pre">ase.apply_topdown()</span></code><a class="headerlink" href="#applying-rewrite-rules-ase-apply-bottomup-and-ase-apply-topdown" title="Link to this heading">#</a></h3>
+<p>To utilize the rewrite pass, we can use the <code class="docutils literal notranslate"><span class="pre">apply_bottomup()</span></code> method. This method traverses the S-expression tree from leaves to root, ensuring that inner-most expressions are processed first.</p>
+<p>Due to the append-only nature of the tape, older S-expressions always appear earlier than newer ones. The bottom-up traversal can simply runs from the first record in the tape to the last. By default, the method will compute the reachable set from the root of the expression tree and only apply the pass on to those in the set. It is possible to run the pass on all nodes irregardless of the reachability by setting keyword <code class="docutils literal notranslate"><span class="pre">reachable=None</span></code>. It’s important to note that this will process all nodes in the tape, even those not part of the current expression tree. Therefore, it’s crucial that rewrites are side-effect free.</p>
+<p>For cases where you need to avoid processing unreachable nodes, use <code class="docutils literal notranslate"><span class="pre">apply_topdown()</span></code>. This method traverses from root to leaves, skipping unreachable nodes, but at the cost of slower performance.</p>
 <p>Here’s an example of applying the calculator rewrite rules:</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">calc</span> <span class="o">=</span> <span class="n">RewriteCalcMachine</span><span class="p">()</span>
-<span class="k">with</span> <span class="n">e</span><span class="o">.</span><span class="n">tape</span><span class="p">:</span>
-    <span class="n">e</span><span class="o">.</span><span class="n">apply_bottomup</span><span class="p">(</span><span class="n">calc</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">tape</span><span class="o">.</span><span class="n">dump</span><span class="p">())</span>
+<span class="k">with</span> <span class="n">e</span><span class="o">.</span><span class="n">_tape</span><span class="p">:</span>
+    <span class="n">ase</span><span class="o">.</span><span class="n">apply_bottomup</span><span class="p">(</span><span class="n">e</span><span class="p">,</span> <span class="n">calc</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">_tape</span><span class="o">.</span><span class="n">dump</span><span class="p">())</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10f50b050
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10d60e2d0
 |      0 | &lt;0: none&gt;
 |      1 | num 1
 |      5 | num 2
@@ -528,12 +563,12 @@ document.write(`
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">result</span> <span class="o">=</span> <span class="n">calc</span><span class="o">.</span><span class="n">memo</span><span class="p">[</span><span class="n">e</span><span class="p">]</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">str</span><span class="p">())</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">pretty_str</span><span class="p">(</span><span class="n">result</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Expr(num, 2)
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>BasicSExpr(num, 2)
 (num 2)
 </pre></div>
 </div>
@@ -547,11 +582,11 @@ document.write(`
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>{&lt;Expr &#39;num&#39; [1] @0x10f50b050&gt;: &lt;Expr &#39;num&#39; [1] @0x10f50b050&gt;,
- &lt;Expr &#39;num&#39; [5] @0x10f50b050&gt;: &lt;Expr &#39;num&#39; [5] @0x10f50b050&gt;,
- &lt;Expr &#39;add&#39; [9] @0x10f50b050&gt;: &lt;Expr &#39;num&#39; [24] @0x10f50b050&gt;,
- &lt;Expr &#39;sub&#39; [14] @0x10f50b050&gt;: &lt;Expr &#39;num&#39; [34] @0x10f50b050&gt;,
- &lt;Expr &#39;mul&#39; [19] @0x10f50b050&gt;: &lt;Expr &#39;num&#39; [44] @0x10f50b050&gt;}
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>{&lt;Expr &#39;num&#39; [1] @0x10d60e2d0&gt;: &lt;Expr &#39;num&#39; [1] @0x10d60e2d0&gt;,
+ &lt;Expr &#39;num&#39; [5] @0x10d60e2d0&gt;: &lt;Expr &#39;num&#39; [5] @0x10d60e2d0&gt;,
+ &lt;Expr &#39;add&#39; [9] @0x10d60e2d0&gt;: &lt;Expr &#39;num&#39; [24] @0x10d60e2d0&gt;,
+ &lt;Expr &#39;sub&#39; [14] @0x10d60e2d0&gt;: &lt;Expr &#39;num&#39; [34] @0x10d60e2d0&gt;,
+ &lt;Expr &#39;mul&#39; [19] @0x10d60e2d0&gt;: &lt;Expr &#39;num&#39; [44] @0x10d60e2d0&gt;}
 </pre></div>
 </div>
 </div>
@@ -590,14 +625,14 @@ document.write(`
 </section>
 <section id="manual-traversal-techniques">
 <h2>Manual Traversal Techniques<a class="headerlink" href="#manual-traversal-techniques" title="Link to this heading">#</a></h2>
-<p>The <code class="docutils literal notranslate"><span class="pre">Expr</span></code> class in SealIR provides several methods for manually traversing the S-expression tree. These methods offer fine-grained control over tree exploration and analysis.</p>
-<section id="expr-walk-descendants">
-<h3><code class="docutils literal notranslate"><span class="pre">Expr.walk_descendants</span></code><a class="headerlink" href="#expr-walk-descendants" title="Link to this heading">#</a></h3>
-<p>This method allows you to iterate over the expression tree in a top-down manner, yielding both the ancestry and the current <code class="docutils literal notranslate"><span class="pre">Expr</span></code>:</p>
+<p>The <code class="docutils literal notranslate"><span class="pre">SExpr</span></code> class in SealIR provides several methods for manually traversing the S-expression tree. These methods offer fine-grained control over tree exploration and analysis.</p>
+<section id="ase-walk-descendants-expr">
+<h3><code class="docutils literal notranslate"><span class="pre">ase.walk_descendants(expr)</span></code><a class="headerlink" href="#ase-walk-descendants-expr" title="Link to this heading">#</a></h3>
+<p>This method allows you to iterate over the expression tree in a top-down manner, yielding both the ancestry and the <code class="docutils literal notranslate"><span class="pre">SExpr</span></code>:</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">parents</span><span class="p">,</span> <span class="n">cur</span> <span class="ow">in</span> <span class="n">e</span><span class="o">.</span><span class="n">walk_descendants</span><span class="p">():</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;(&#39;</span><span class="p">,</span> <span class="s1">&#39; . &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">p</span><span class="o">.</span><span class="n">head</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parents</span><span class="p">]),</span> <span class="s1">&#39;)&#39;</span><span class="p">,</span> <span class="s1">&#39;---&gt;&#39;</span><span class="p">,</span> <span class="n">cur</span><span class="o">.</span><span class="n">str</span><span class="p">())</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">parents</span><span class="p">,</span> <span class="n">cur</span> <span class="ow">in</span> <span class="n">ase</span><span class="o">.</span><span class="n">walk_descendants</span><span class="p">(</span><span class="n">e</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s1">&#39;(&#39;</span><span class="p">,</span> <span class="s1">&#39; . &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="n">p</span><span class="o">.</span><span class="n">_head</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">parents</span><span class="p">]),</span> <span class="s1">&#39;)&#39;</span><span class="p">,</span> <span class="s1">&#39;---&gt;&#39;</span><span class="p">,</span> <span class="n">ase</span><span class="o">.</span><span class="n">pretty_str</span><span class="p">(</span><span class="n">cur</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
@@ -614,43 +649,43 @@ document.write(`
 </div>
 </div>
 </section>
-<section id="expr-walk-parents">
-<h3><code class="docutils literal notranslate"><span class="pre">Expr.walk_parents()</span></code><a class="headerlink" href="#expr-walk-parents" title="Link to this heading">#</a></h3>
+<section id="ase-walk-parents">
+<h3><code class="docutils literal notranslate"><span class="pre">ase.walk_parents()</span></code><a class="headerlink" href="#ase-walk-parents" title="Link to this heading">#</a></h3>
 <p>Use this method to iterate over all parents (users) of a given expression:</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">list</span><span class="p">(</span><span class="n">a</span><span class="o">.</span><span class="n">walk_parents</span><span class="p">())</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">list</span><span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">walk_parents</span><span class="p">(</span><span class="n">a</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>[&lt;Expr &#39;add&#39; [9] @0x10f50b050&gt;]
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>[&lt;Expr &#39;add&#39; [9] @0x10d60e2d0&gt;]
 </pre></div>
 </div>
 </div>
 </div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">list</span><span class="p">(</span><span class="n">b</span><span class="o">.</span><span class="n">walk_parents</span><span class="p">())</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">list</span><span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">walk_parents</span><span class="p">(</span><span class="n">b</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>[&lt;Expr &#39;add&#39; [9] @0x10f50b050&gt;,
- &lt;Expr &#39;sub&#39; [14] @0x10f50b050&gt;,
- &lt;Expr &#39;mul&#39; [19] @0x10f50b050&gt;]
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>[&lt;Expr &#39;add&#39; [9] @0x10d60e2d0&gt;,
+ &lt;Expr &#39;sub&#39; [14] @0x10d60e2d0&gt;,
+ &lt;Expr &#39;mul&#39; [19] @0x10d60e2d0&gt;]
 </pre></div>
 </div>
 </div>
 </div>
 </section>
-<section id="expr-contains-expr">
-<h3><code class="docutils literal notranslate"><span class="pre">Expr.contains(Expr)</span></code><a class="headerlink" href="#expr-contains-expr" title="Link to this heading">#</a></h3>
+<section id="ase-contains-expr-expr">
+<h3><code class="docutils literal notranslate"><span class="pre">ase.contains(expr,</span> <span class="pre">expr)</span></code><a class="headerlink" href="#ase-contains-expr-expr" title="Link to this heading">#</a></h3>
 <p>This method tests whether an S-expression tree contains another S-expression:</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">b</span><span class="o">.</span><span class="n">walk_parents</span><span class="p">():</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">str</span><span class="p">()</span><span class="si">}</span><span class="s2"> contains </span><span class="si">{</span><span class="n">b</span><span class="o">.</span><span class="n">str</span><span class="p">()</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">,</span> <span class="n">p</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">b</span><span class="p">))</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">ase</span><span class="o">.</span><span class="n">walk_parents</span><span class="p">(</span><span class="n">b</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">ase</span><span class="o">.</span><span class="n">pretty_str</span><span class="p">(</span><span class="n">p</span><span class="p">)</span><span class="si">}</span><span class="s2"> contains </span><span class="si">{</span><span class="n">ase</span><span class="o">.</span><span class="n">pretty_str</span><span class="p">(</span><span class="n">b</span><span class="p">)</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">,</span> <span class="n">ase</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">b</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
@@ -664,9 +699,9 @@ document.write(`
 </div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;c = </span><span class="si">{</span><span class="n">c</span><span class="o">.</span><span class="n">str</span><span class="p">()</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;a = </span><span class="si">{</span><span class="n">a</span><span class="o">.</span><span class="n">str</span><span class="p">()</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;a in c?&quot;</span><span class="p">,</span> <span class="n">c</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">a</span><span class="p">))</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;c = </span><span class="si">{</span><span class="n">ase</span><span class="o">.</span><span class="n">pretty_str</span><span class="p">(</span><span class="n">c</span><span class="p">)</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;a = </span><span class="si">{</span><span class="n">ase</span><span class="o">.</span><span class="n">pretty_str</span><span class="p">(</span><span class="n">a</span><span class="p">)</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;a in c?&quot;</span><span class="p">,</span> <span class="n">ase</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">a</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
@@ -682,8 +717,8 @@ a in c? True
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">tape</span><span class="p">:</span>
-    <span class="n">x</span> <span class="o">=</span> <span class="n">ase</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-<span class="n">c</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">tape</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+<span class="n">ase</span><span class="o">.</span><span class="n">contains</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -694,13 +729,13 @@ a in c? True
 </div>
 </div>
 </section>
-<section id="expr-search-parents-predicate">
-<h3><code class="docutils literal notranslate"><span class="pre">Expr.search_parents(predicate)</span></code><a class="headerlink" href="#expr-search-parents-predicate" title="Link to this heading">#</a></h3>
+<section id="ase-search-parents-expr-predicate">
+<h3><code class="docutils literal notranslate"><span class="pre">ase.search_parents(expr,</span> <span class="pre">predicate)</span></code><a class="headerlink" href="#ase-search-parents-expr-predicate" title="Link to this heading">#</a></h3>
 <p>This method allows you to iterate over parents that satisfy a certain predicate:</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">b</span><span class="o">.</span><span class="n">search_parents</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">head</span> <span class="o">==</span> <span class="s2">&quot;mul&quot;</span><span class="p">):</span>
-    <span class="nb">print</span><span class="p">(</span><span class="n">p</span><span class="o">.</span><span class="n">str</span><span class="p">())</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">ase</span><span class="o">.</span><span class="n">search_parents</span><span class="p">(</span><span class="n">b</span><span class="p">,</span> <span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">.</span><span class="n">_head</span> <span class="o">==</span> <span class="s2">&quot;mul&quot;</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">pretty_str</span><span class="p">(</span><span class="n">p</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
@@ -713,18 +748,18 @@ a in c? True
 </section>
 <section id="using-match-on-s-expression">
 <h3>Using <code class="docutils literal notranslate"><span class="pre">match</span></code> on S-expression<a class="headerlink" href="#using-match-on-s-expression" title="Link to this heading">#</a></h3>
-<p><code class="docutils literal notranslate"><span class="pre">Expr</span></code> supports the use of Python’s <code class="docutils literal notranslate"><span class="pre">match</span></code> statement.</p>
+<p><code class="docutils literal notranslate"><span class="pre">SExpr</span></code> supports the use of Python’s <code class="docutils literal notranslate"><span class="pre">match</span></code> statement.</p>
 <p>Matching simple expressions:</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">match</span> <span class="n">e</span><span class="p">:</span>
-    <span class="k">case</span> <span class="n">ase</span><span class="o">.</span><span class="n">Expr</span><span class="p">(</span><span class="s2">&quot;mul&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)):</span>
+    <span class="k">case</span> <span class="n">ase</span><span class="o">.</span><span class="n">BasicSExpr</span><span class="p">(</span><span class="s2">&quot;mul&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)):</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Multiplication: </span><span class="si">{</span><span class="n">x</span><span class="si">}</span><span class="s2"> * </span><span class="si">{</span><span class="n">y</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Multiplication: Expr(num, 2) * Expr(sub, &lt;Expr &#39;add&#39; [9] @0x10f50b050&gt;, &lt;Expr &#39;num&#39; [5] @0x10f50b050&gt;)
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Multiplication: BasicSExpr(num, 2) * BasicSExpr(sub, &lt;Expr &#39;add&#39; [9] @0x10d60e2d0&gt;, &lt;Expr &#39;num&#39; [5] @0x10d60e2d0&gt;)
 </pre></div>
 </div>
 </div>
@@ -733,13 +768,13 @@ a in c? True
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">match</span> <span class="n">d</span><span class="p">:</span>
-    <span class="k">case</span> <span class="n">ase</span><span class="o">.</span><span class="n">Expr</span><span class="p">(</span><span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">Expr</span><span class="p">(</span><span class="s2">&quot;add&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)),</span> <span class="n">ase</span><span class="o">.</span><span class="n">Expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="p">(</span><span class="mi">2</span><span class="p">,)))):</span>
+    <span class="k">case</span> <span class="n">ase</span><span class="o">.</span><span class="n">BasicSExpr</span><span class="p">(</span><span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">BasicSExpr</span><span class="p">(</span><span class="s2">&quot;add&quot;</span><span class="p">,</span> <span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)),</span> <span class="n">ase</span><span class="o">.</span><span class="n">BasicSExpr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="p">(</span><span class="mi">2</span><span class="p">,)))):</span>
         <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Subtraction: (</span><span class="si">{</span><span class="n">x</span><span class="si">}</span><span class="s2"> + </span><span class="si">{</span><span class="n">y</span><span class="si">}</span><span class="s2">) - 2&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Subtraction: (Expr(num, 1) + Expr(num, 2)) - 2
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Subtraction: (BasicSExpr(num, 1) + BasicSExpr(num, 2)) - 2
 </pre></div>
 </div>
 </div>
@@ -785,7 +820,7 @@ a in c? True
        title="next page">
       <div class="prev-next-info">
         <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">Lambda</p>
+        <p class="prev-next-title">Lambda Calculus Encoding and Grammar</p>
       </div>
       <i class="fa-solid fa-angle-right"></i>
     </a>
@@ -807,16 +842,16 @@ a in c? True
     <ul class="visible nav section-nav flex-column">
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#the-tape-and-s-expressions">The Tape and S-expressions</a></li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#a-rewrite-system-treerewriter">A Rewrite System (<code class="docutils literal notranslate"><span class="pre">TreeRewriter</span></code>)</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#applying-rewrite-rules-expr-apply-bottomup-and-expr-apply-topdown">Applying Rewrite Rules: <code class="docutils literal notranslate"><span class="pre">Expr.apply_bottomup</span></code> and <code class="docutils literal notranslate"><span class="pre">Expr.apply_topdown</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#applying-rewrite-rules-ase-apply-bottomup-and-ase-apply-topdown">Applying Rewrite Rules: <code class="docutils literal notranslate"><span class="pre">ase.apply_bottomup()</span></code> and <code class="docutils literal notranslate"><span class="pre">ase.apply_topdown()</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#accessing-rewrite-results-treerewriter-memo">Accessing Rewrite Results: <code class="docutils literal notranslate"><span class="pre">TreeRewriter.memo</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tracking-rewrite-history">Tracking Rewrite History</a></li>
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#manual-traversal-techniques">Manual Traversal Techniques</a><ul class="nav section-nav flex-column">
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#expr-walk-descendants"><code class="docutils literal notranslate"><span class="pre">Expr.walk_descendants</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#expr-walk-parents"><code class="docutils literal notranslate"><span class="pre">Expr.walk_parents()</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#expr-contains-expr"><code class="docutils literal notranslate"><span class="pre">Expr.contains(Expr)</span></code></a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#expr-search-parents-predicate"><code class="docutils literal notranslate"><span class="pre">Expr.search_parents(predicate)</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ase-walk-descendants-expr"><code class="docutils literal notranslate"><span class="pre">ase.walk_descendants(expr)</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ase-walk-parents"><code class="docutils literal notranslate"><span class="pre">ase.walk_parents()</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ase-contains-expr-expr"><code class="docutils literal notranslate"><span class="pre">ase.contains(expr,</span> <span class="pre">expr)</span></code></a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ase-search-parents-expr-predicate"><code class="docutils literal notranslate"><span class="pre">ase.search_parents(expr,</span> <span class="pre">predicate)</span></code></a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#using-match-on-s-expression">Using <code class="docutils literal notranslate"><span class="pre">match</span></code> on S-expression</a></li>
 </ul>
 </li>
@@ -844,7 +879,7 @@ By Numba team
 
   <p class="copyright">
     
-      © Copyright 2023.
+      © Copyright 2024.
       <br/>
     
   </p>

@@ -8,7 +8,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
 
-    <title>Lambda &#8212; SealIR</title>
+    <title>Lambda Calculus Encoding and Grammar &#8212; SealIR</title>
   
   
   
@@ -60,6 +60,7 @@
     <script>DOCUMENTATION_OPTIONS.pagename = 'lambda';</script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="RVSDG? Numba Intermediate Language (NIL)?" href="rvsdg.html" />
     <link rel="prev" title="Introduction" href="intro.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
@@ -147,8 +148,14 @@
   
   
   
+    
+    
+      
+    
+    
+    <img src="_static/seal.png" class="logo__image only-light" alt="SealIR - Home"/>
+    <script>document.write(`<img src="_static/seal.png" class="logo__image only-dark" alt="SealIR - Home"/>`);</script>
   
-    <p class="title logo__title">SealIR</p>
   
 </a></div>
         <div class="sidebar-primary-item">
@@ -173,7 +180,8 @@
             </li>
         </ul>
         <ul class="current nav bd-sidenav">
-<li class="toctree-l1 current active"><a class="current reference internal" href="#">Lambda</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Lambda Calculus Encoding and Grammar</a></li>
+<li class="toctree-l1"><a class="reference internal" href="rvsdg.html">RVSDG? Numba Intermediate Language (NIL)?</a></li>
 </ul>
 
     </div>
@@ -299,7 +307,9 @@ document.write(`
   </button>
 `);
 </script>
-
+<button class="sidebar-toggle secondary-toggle btn btn-sm" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
 </div></div>
       
     </div>
@@ -310,11 +320,21 @@ document.write(`
               
 
 <div id="jb-print-docs-body" class="onlyprint">
-    <h1>Lambda</h1>
+    <h1>Lambda Calculus Encoding and Grammar</h1>
     <!-- Table of contents -->
     <div id="print-main-content">
         <div id="jb-print-toc">
             
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#intro">Intro</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#abstraction-pass">Abstraction Pass</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#beta-reduction">Beta-reduction</a></li>
+</ul>
+            </nav>
         </div>
     </div>
 </div>
@@ -324,30 +344,66 @@ document.write(`
 <div id="searchbox"></div>
                 <article class="bd-article">
                   
-  <section class="tex2jax_ignore mathjax_ignore" id="lambda">
-<h1>Lambda<a class="headerlink" href="#lambda" title="Link to this heading">#</a></h1>
+  <section class="tex2jax_ignore mathjax_ignore" id="lambda-calculus-encoding-and-grammar">
+<h1>Lambda Calculus Encoding and Grammar<a class="headerlink" href="#lambda-calculus-encoding-and-grammar" title="Link to this heading">#</a></h1>
+<section id="intro">
+<h2>Intro<a class="headerlink" href="#intro" title="Link to this heading">#</a></h2>
+<p>SealIR provides a builtin lambda calculus encoding grammar that contains the bare bone of lambda calculus semantic.</p>
+<p>The lambda calculus grammar:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">expr</span> <span class="p">:</span> <span class="p">(</span><span class="n">Lam</span> <span class="n">body</span><span class="p">:</span> <span class="n">expr</span><span class="p">)</span>
+     <span class="o">|</span> <span class="p">(</span><span class="n">App</span> <span class="n">arg</span><span class="p">:</span> <span class="n">expr</span> 
+            <span class="n">lam</span><span class="p">:</span> <span class="n">expr</span><span class="p">)</span>
+     <span class="o">|</span> <span class="p">(</span><span class="n">Arg</span> <span class="n">idx</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span>
+     <span class="o">|</span> <span class="p">(</span><span class="n">Pack</span> <span class="o">*</span><span class="n">values</span><span class="p">:</span> <span class="n">expr</span><span class="p">)</span>
+     <span class="o">|</span> <span class="p">(</span><span class="n">Unpack</span> <span class="n">idx</span><span class="p">:</span> <span class="nb">int</span> 
+               <span class="n">tup</span><span class="p">:</span> <span class="n">expr</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>It uses De Bruijn index to achieve nameless reference to values. A <code class="docutils literal notranslate"><span class="pre">(Arg</span> <span class="pre">N)</span></code> refers to the Nth enclosing lambda abstraction.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">sealir.lam</span> <span class="kn">import</span> <span class="n">LamBuilder</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">sealir</span> <span class="kn">import</span> <span class="n">lam</span><span class="p">,</span> <span class="n">ase</span><span class="p">,</span> <span class="n">grammar</span>
 </pre></div>
 </div>
 </div>
 </div>
+<p>Grammar can be extended to include user defined node types. To do so, user can define a new <code class="docutils literal notranslate"><span class="pre">grammar.Rule</span></code> class as the root of the grammar and subclass the root with additional rules for specific node types.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lambar</span> <span class="o">=</span> <span class="n">LamBuilder</span><span class="p">()</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">_Val</span><span class="p">(</span><span class="n">grammar</span><span class="o">.</span><span class="n">Rule</span><span class="p">):</span>
+    <span class="k">pass</span>
+
+<span class="k">class</span> <span class="nc">Num</span><span class="p">(</span><span class="n">_Val</span><span class="p">):</span>
+    <span class="c1"># (Num int)</span>
+    <span class="n">value</span><span class="p">:</span> <span class="nb">int</span>
+
+<span class="k">class</span> <span class="nc">_BinOp</span><span class="p">(</span><span class="n">_Val</span><span class="p">):</span>
+    <span class="c1"># (_BinOp lhs rhs)</span>
+    <span class="n">lhs</span><span class="p">:</span> <span class="n">ase</span><span class="o">.</span><span class="n">SExpr</span>
+    <span class="n">rhs</span><span class="p">:</span> <span class="n">ase</span><span class="o">.</span><span class="n">SExpr</span>
+
+<span class="k">class</span> <span class="nc">Add</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
+<span class="k">class</span> <span class="nc">Sub</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
+<span class="k">class</span> <span class="nc">Mul</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
+
+<span class="c1"># Build the grammar that combines the builtin lambda-calculus grammar</span>
+<span class="k">class</span> <span class="nc">Grammar</span><span class="p">(</span><span class="n">grammar</span><span class="o">.</span><span class="n">Grammar</span><span class="p">):</span>
+    <span class="n">start</span> <span class="o">=</span> <span class="n">lam</span><span class="o">.</span><span class="n">LamGrammar</span><span class="o">.</span><span class="n">start</span> <span class="o">|</span> <span class="n">_Val</span>
 </pre></div>
 </div>
 </div>
 </div>
+<p><code class="docutils literal notranslate"><span class="pre">grammar.Grammar</span></code> provides some checking to what is written into the tape. To write with a grammar object, wrap the tape with it:</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@lambar</span><span class="o">.</span><span class="n">lam_func</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">grm</span> <span class="o">=</span> <span class="n">Grammar</span><span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">Tape</span><span class="p">())</span>
+
+<span class="nd">@lam</span><span class="o">.</span><span class="n">lam_func</span><span class="p">(</span><span class="n">grm</span><span class="p">)</span>
 <span class="k">def</span> <span class="nf">func_body</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
-    <span class="n">a</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;mul&quot;</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;num&quot;</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
-    <span class="n">b</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;add&quot;</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">x</span><span class="p">)</span>
-    <span class="n">c</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;sub&quot;</span><span class="p">,</span> <span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">)</span>
-    <span class="n">d</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">expr</span><span class="p">(</span><span class="s2">&quot;mul&quot;</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">c</span><span class="p">)</span>
+    <span class="n">a</span> <span class="o">=</span> <span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Mul</span><span class="p">(</span><span class="n">lhs</span><span class="o">=</span><span class="n">x</span><span class="p">,</span> <span class="n">rhs</span><span class="o">=</span><span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Num</span><span class="p">(</span><span class="mi">2</span><span class="p">))))</span>
+    <span class="n">b</span> <span class="o">=</span> <span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Add</span><span class="p">(</span><span class="n">lhs</span><span class="o">=</span><span class="n">a</span><span class="p">,</span> <span class="n">rhs</span><span class="o">=</span><span class="n">x</span><span class="p">))</span>
+    <span class="n">c</span> <span class="o">=</span> <span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Sub</span><span class="p">(</span><span class="n">lhs</span><span class="o">=</span><span class="n">a</span><span class="p">,</span> <span class="n">rhs</span><span class="o">=</span><span class="n">b</span><span class="p">))</span>
+    <span class="n">d</span> <span class="o">=</span> <span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Mul</span><span class="p">(</span><span class="n">lhs</span><span class="o">=</span><span class="n">b</span><span class="p">,</span> <span class="n">rhs</span><span class="o">=</span><span class="n">c</span><span class="p">))</span>
     <span class="k">return</span> <span class="n">d</span>
 </pre></div>
 </div>
@@ -355,16 +411,28 @@ document.write(`
 </div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lambar</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">func_body</span><span class="p">))</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">func_body</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>&lt;Expr &#39;Lam&#39; [29] @0x10d7f2e40&gt;
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lam</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">func_body</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
 <div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>let $15 = λ {
-  let $3 = expr &#39;mul&#39; (arg 0) (expr &#39;num&#39; 2)
-  let $8 = expr &#39;add&#39; $3 (arg 0)
-  let $12 = expr &#39;sub&#39; $3 $8
-  let $14 = expr &#39;mul&#39; $8 $12
+  let $3 = Mul (Arg 0) (Num 2)
+  let $8 = Add $3 (Arg 0)
+  let $12 = Sub $3 $8
+  let $14 = Mul $8 $12
 }
 </pre></div>
 </div>
@@ -372,58 +440,62 @@ document.write(`
 </div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lambar</span><span class="o">.</span><span class="n">tape</span><span class="o">.</span><span class="n">dump</span><span class="p">())</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">func_body</span><span class="o">.</span><span class="n">_tape</span><span class="o">.</span><span class="n">dump</span><span class="p">())</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10fa333b0
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10d7f2e40
 |      0 | &lt;0: none&gt;
-|      1 | arg 0
-|      5 | expr &#39;num&#39;, 2
-|     10 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
-|     16 | expr &#39;add&#39;, &lt;10&gt;, &lt;1&gt;
-|     22 | expr &#39;sub&#39;, &lt;10&gt;, &lt;16&gt;
-|     28 | expr &#39;mul&#39;, &lt;16&gt;, &lt;22&gt;
-|     34 | lam &lt;28&gt;
+|      1 | Arg 0
+|      5 | Num 2
+|      9 | Mul &lt;1&gt;, &lt;5&gt;
+|     14 | Add &lt;9&gt;, &lt;1&gt;
+|     19 | Sub &lt;9&gt;, &lt;14&gt;
+|     24 | Mul &lt;14&gt;, &lt;19&gt;
+|     29 | Lam &lt;24&gt;
 </pre></div>
 </div>
 </div>
 </div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lambar</span><span class="o">.</span><span class="n">render_dot</span><span class="p">()</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">func_body</span><span class="o">.</span><span class="n">_tape</span><span class="o">.</span><span class="n">render_dot</span><span class="p">()</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<img alt="_images/ba33986f29e5ae06c27478ecacfdf8522cc2af59ca5476eaf0409c2cfdcc37a0.svg" src="_images/ba33986f29e5ae06c27478ecacfdf8522cc2af59ca5476eaf0409c2cfdcc37a0.svg" /></div>
+<img alt="_images/d8569ec5a8673a643354f9579b950ea72dfae2b7f1bb0cc550760f8ff06f3319.svg" src="_images/d8569ec5a8673a643354f9579b950ea72dfae2b7f1bb0cc550760f8ff06f3319.svg" /></div>
 </div>
+</section>
+<section id="abstraction-pass">
+<h2>Abstraction Pass<a class="headerlink" href="#abstraction-pass" title="Link to this heading">#</a></h2>
+<p>The <code class="docutils literal notranslate"><span class="pre">lam</span></code> module provides some common passes to work with lambda-calculus encoding. One such pass is the abstraction pass, which introduce lambda abstraction to avoid multiple references to the same <code class="docutils literal notranslate"><span class="pre">SExpr</span></code> node.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">func_body</span> <span class="o">=</span> <span class="n">lambar</span><span class="o">.</span><span class="n">run_abstraction_pass</span><span class="p">(</span><span class="n">func_body</span><span class="p">)</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">func_body</span> <span class="o">=</span> <span class="n">lam</span><span class="o">.</span><span class="n">run_abstraction_pass</span><span class="p">(</span><span class="n">grm</span><span class="p">,</span> <span class="n">func_body</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
 </div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lambar</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">func_body</span><span class="p">))</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lam</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">func_body</span><span class="p">))</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
 <div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>let $15 = λ {
-  let $12 = expr &#39;mul&#39; (arg 0) (expr &#39;num&#39; 2)
-  let $13 = λ {
-    let $7 = expr &#39;add&#39; (arg 0) (arg 1)
-    let $8 = λ {
-      let $2 = expr &#39;sub&#39; (arg 1) (arg 0)
-      let $6 = expr &#39;mul&#39; (arg 0) $2
+  let $12 = λ {
+    let $7 = λ {
+      let $2 = Sub (Arg 1) (Arg 0)
+      let $4 = Mul (Arg 0) $2
     }
-    let $11 = app $8 $7
+    let $8 = Add (Arg 0) (Arg 1)
+    let $9 = App $8 $7
   }
-  let $14 = app $13 $12
+  let $13 = Mul (Arg 0) (Num 2)
+  let $14 = App $13 $12
 }
 </pre></div>
 </div>
@@ -431,103 +503,121 @@ document.write(`
 </div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lambar</span><span class="o">.</span><span class="n">tape</span><span class="o">.</span><span class="n">dump</span><span class="p">())</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">func_body</span><span class="o">.</span><span class="n">_tape</span><span class="o">.</span><span class="n">dump</span><span class="p">())</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10fa333b0
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10d7f2e40
 |      0 | &lt;0: none&gt;
-|      1 | arg 0
-|      5 | expr &#39;num&#39;, 2
-|     10 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
-|     16 | expr &#39;add&#39;, &lt;10&gt;, &lt;1&gt;
-|     22 | expr &#39;sub&#39;, &lt;10&gt;, &lt;16&gt;
-|     28 | expr &#39;mul&#39;, &lt;16&gt;, &lt;22&gt;
-|     34 | lam &lt;28&gt;
-|     38 | arg 1
-|     42 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;38&gt;, &lt;1&gt;
-|     48 | arg 0
-|     52 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;48&gt;, &lt;10&gt;
-|     58 | expr &#39;add&#39;, &lt;48&gt;, &lt;38&gt;
-|     64 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;58&gt;, &lt;16&gt;
-|     70 | expr &#39;sub&#39;, &lt;48&gt;, &lt;58&gt;
-|     76 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;70&gt;, &lt;22&gt;
-|     82 | expr &#39;mul&#39;, &lt;58&gt;, &lt;70&gt;
-|     88 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;82&gt;, &lt;28&gt;
-|     94 | lam &lt;82&gt;
-|     98 | app &lt;94&gt;, &lt;10&gt;
-|    103 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
-|    109 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;103&gt;, &lt;10&gt;
-|    115 | expr &#39;add&#39;, &lt;103&gt;, &lt;1&gt;
-|    121 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;115&gt;, &lt;16&gt;
-|    127 | expr &#39;sub&#39;, &lt;103&gt;, &lt;115&gt;
-|    133 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;127&gt;, &lt;22&gt;
-|    139 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;98&gt;, &lt;28&gt;
-|    145 | lam &lt;98&gt;
-|    149 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;145&gt;, &lt;34&gt;
-|    155 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
-|    161 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;155&gt;, &lt;10&gt;
-|    167 | expr &#39;add&#39;, &lt;155&gt;, &lt;1&gt;
-|    173 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;167&gt;, &lt;16&gt;
-|    179 | expr &#39;sub&#39;, &lt;155&gt;, &lt;167&gt;
-|    185 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;179&gt;, &lt;22&gt;
-|    191 | expr &#39;mul&#39;, &lt;167&gt;, &lt;179&gt;
-|    197 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;191&gt;, &lt;28&gt;
-|    203 | lam &lt;191&gt;
-|    207 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;203&gt;, &lt;34&gt;
-|    213 | arg 2
-|    217 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;213&gt;, &lt;38&gt;
-|    223 | arg 1
-|    227 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;223&gt;, &lt;48&gt;
-|    233 | arg 0
-|    237 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;233&gt;, &lt;58&gt;
-|    243 | expr &#39;sub&#39;, &lt;223&gt;, &lt;233&gt;
-|    249 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;243&gt;, &lt;70&gt;
-|    255 | expr &#39;mul&#39;, &lt;233&gt;, &lt;243&gt;
-|    261 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;255&gt;, &lt;82&gt;
-|    267 | lam &lt;255&gt;
-|    271 | app &lt;267&gt;, &lt;58&gt;
-|    276 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
-|    282 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;276&gt;, &lt;10&gt;
-|    288 | expr &#39;add&#39;, &lt;276&gt;, &lt;1&gt;
-|    294 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;288&gt;, &lt;16&gt;
-|    300 | expr &#39;sub&#39;, &lt;276&gt;, &lt;288&gt;
-|    306 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;300&gt;, &lt;22&gt;
-|    312 | expr &#39;mul&#39;, &lt;288&gt;, &lt;300&gt;
-|    318 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;312&gt;, &lt;28&gt;
-|    324 | lam &lt;312&gt;
-|    328 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;324&gt;, &lt;34&gt;
-|    334 | expr &#39;add&#39;, &lt;48&gt;, &lt;38&gt;
-|    340 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;334&gt;, &lt;58&gt;
-|    346 | expr &#39;sub&#39;, &lt;48&gt;, &lt;334&gt;
-|    352 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;346&gt;, &lt;70&gt;
-|    358 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;271&gt;, &lt;82&gt;
-|    364 | lam &lt;271&gt;
-|    368 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;364&gt;, &lt;94&gt;
-|    374 | app &lt;364&gt;, &lt;276&gt;
-|    379 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;374&gt;, &lt;98&gt;
-|    385 | expr &#39;mul&#39;, &lt;1&gt;, &lt;5&gt;
-|    391 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;385&gt;, &lt;103&gt;
-|    397 | expr &#39;add&#39;, &lt;385&gt;, &lt;1&gt;
-|    403 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;397&gt;, &lt;115&gt;
-|    409 | expr &#39;sub&#39;, &lt;385&gt;, &lt;397&gt;
-|    415 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;409&gt;, &lt;127&gt;
-|    421 | lam &lt;374&gt;
-|    425 | .md.rewrite &#39;sealir.lam.LamBuilder.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;421&gt;, &lt;145&gt;
+|      1 | Arg 0
+|      5 | Num 2
+|      9 | Mul &lt;1&gt;, &lt;5&gt;
+|     14 | Add &lt;9&gt;, &lt;1&gt;
+|     19 | Sub &lt;9&gt;, &lt;14&gt;
+|     24 | Mul &lt;14&gt;, &lt;19&gt;
+|     29 | Lam &lt;24&gt;
+|     33 | Arg 1
+|     37 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;33&gt;, &lt;1&gt;
+|     43 | Arg 0
+|     47 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;43&gt;, &lt;9&gt;
+|     53 | Add &lt;43&gt;, &lt;33&gt;
+|     58 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;53&gt;, &lt;14&gt;
+|     64 | Sub &lt;43&gt;, &lt;53&gt;
+|     69 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;64&gt;, &lt;19&gt;
+|     75 | Mul &lt;53&gt;, &lt;64&gt;
+|     80 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;75&gt;, &lt;24&gt;
+|     86 | Lam &lt;75&gt;
+|     90 | App &lt;9&gt;, &lt;86&gt;
+|     95 | .md.rewrite &#39;sealir.lam.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;90&gt;, &lt;24&gt;
+|    101 | Lam &lt;90&gt;
+|    105 | .md.rewrite &#39;sealir.lam.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;101&gt;, &lt;29&gt;
+|    111 | Arg 2
+|    115 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;111&gt;, &lt;33&gt;
+|    121 | Arg 1
+|    125 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;121&gt;, &lt;43&gt;
+|    131 | Arg 0
+|    135 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;131&gt;, &lt;53&gt;
+|    141 | Sub &lt;121&gt;, &lt;131&gt;
+|    146 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;141&gt;, &lt;64&gt;
+|    152 | Mul &lt;131&gt;, &lt;141&gt;
+|    157 | .md.rewrite &#39;sealir.lam.rewrite_into_abstraction.&lt;locals&gt;.RewriteAddArg&#39;, &lt;152&gt;, &lt;75&gt;
+|    163 | Lam &lt;152&gt;
+|    167 | App &lt;53&gt;, &lt;163&gt;
+|    172 | .md.rewrite &#39;sealir.lam.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;167&gt;, &lt;75&gt;
+|    178 | Lam &lt;167&gt;
+|    182 | .md.rewrite &#39;sealir.lam.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;178&gt;, &lt;86&gt;
+|    188 | App &lt;9&gt;, &lt;178&gt;
+|    193 | .md.rewrite &#39;sealir.lam.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;188&gt;, &lt;90&gt;
+|    199 | Lam &lt;188&gt;
+|    203 | .md.rewrite &#39;sealir.lam.run_abstraction_pass.&lt;locals&gt;.RewriteProgram&#39;, &lt;199&gt;, &lt;101&gt;
 </pre></div>
 </div>
 </div>
 </div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">lambar</span><span class="o">.</span><span class="n">render_dot</span><span class="p">()</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">func_body</span><span class="o">.</span><span class="n">_tape</span><span class="o">.</span><span class="n">render_dot</span><span class="p">()</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<img alt="_images/18d341efd49a078f5760c367ec03630e6a1615dfcc84ebf434efbeed46839e66.svg" src="_images/18d341efd49a078f5760c367ec03630e6a1615dfcc84ebf434efbeed46839e66.svg" /></div>
+<img alt="_images/34c6e151045cb6f5d81c212679761a0d85d072d4940d27eb71a4aa5b8bdcba42.svg" src="_images/34c6e151045cb6f5d81c212679761a0d85d072d4940d27eb71a4aa5b8bdcba42.svg" /></div>
 </div>
+</section>
+<section id="beta-reduction">
+<h2>Beta-reduction<a class="headerlink" href="#beta-reduction" title="Link to this heading">#</a></h2>
+<p>Beta-reduction is a fundamental operation in lambda calculus. It is the process of substituting the argument of a lambda abstraction with an expression. SealIR provides a builtin beta-reduction pass that can be used to reduce a lambda abstraction:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">with</span> <span class="n">grm</span><span class="p">:</span>
+    <span class="n">app</span> <span class="o">=</span> <span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">lam</span><span class="o">.</span><span class="n">App</span><span class="p">(</span><span class="n">arg</span><span class="o">=</span><span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Num</span><span class="p">(</span><span class="mi">123</span><span class="p">)),</span> 
+                            <span class="n">lam</span><span class="o">=</span><span class="n">func_body</span><span class="p">))</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">lam</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">app</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>let $15 = λ {
+  let $12 = λ {
+    let $7 = λ {
+      let $2 = Sub (Arg 1) (Arg 0)
+      let $4 = Mul (Arg 0) $2
+    }
+    let $8 = Add (Arg 0) (Arg 1)
+    let $9 = App $8 $7
+  }
+  let $13 = Mul (Arg 0) (Num 2)
+  let $14 = App $13 $12
+}
+let $17 = App (Num 123) $15
+</pre></div>
+</div>
+</div>
+</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nb">print</span><span class="p">(</span><span class="n">lam</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">lam</span><span class="o">.</span><span class="n">beta_reduction</span><span class="p">(</span><span class="n">app</span><span class="p">)))</span>
+</pre></div>
+</div>
+</div>
+<div class="cell_output docutils container">
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>let $12 = λ {
+  let $7 = λ {
+    let $2 = Sub (Arg 1) (Arg 0)
+    let $4 = Mul (Arg 0) $2
+  }
+  let $8 = Add (Arg 0) (Arg 1)
+  let $9 = App $8 $7
+}
+let $13 = Mul (Num 123) (Num 2)
+let $14 = App $13 $12
+</pre></div>
+</div>
+</div>
+</div>
+</section>
 </section>
 
     <script type="text/x-thebe-config">
@@ -569,12 +659,38 @@ document.write(`
         <p class="prev-next-title">Introduction</p>
       </div>
     </a>
+    <a class="right-next"
+       href="rvsdg.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">RVSDG? Numba Intermediate Language (NIL)?</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
 </div>
                 </footer>
               
             </div>
             
             
+              
+                <div class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item">
+  <div class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav class="bd-toc-nav page-toc">
+    <ul class="visible nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#intro">Intro</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#abstraction-pass">Abstraction Pass</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#beta-reduction">Beta-reduction</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
               
             
           </div>
@@ -595,7 +711,7 @@ By Numba team
 
   <p class="copyright">
     
-      © Copyright 2023.
+      © Copyright 2024.
       <br/>
     
   </p>
