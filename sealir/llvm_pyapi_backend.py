@@ -119,11 +119,11 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     return val
                 case _:
                     raise NotImplementedError(sv)
-        case lam.App(arg=argval, lam=lam_func):
+        case lam.App(arg=argval, lam=lam.Lam() as lam_func):
             with ctx.bind_app(lam_func, (yield argval)):
-                return (yield lam_func)
-        case lam.Lam(body=body):
-            return (yield body)
+                return (yield lam_func.body)
+        # case lam.Lam(body=body):
+        #     return (yield body)
         case lam.Unpack(idx=int(idx), tup=packed_expr):
             # handled at compile time
             packed = yield packed_expr
