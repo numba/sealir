@@ -181,6 +181,13 @@ class Rule(metaclass=_MetaRule):
                     "Only the last field can be vararg."
                 )
 
+    @classmethod
+    def _field_position(cls, attrname: str) -> int:
+        for i, fd in enumerate(cls._fields):
+            if fd.name == attrname:
+                return i
+        raise NameError(f"{attrname} not in {cls}")
+
 
 class _CombinedRule(Rule):
     _combined: tuple[type[Rule], ...]

@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from pprint import pprint
-from typing import Any, Iterable, Iterator, Sequence
+from functools import cache, cached_property, partial
+from typing import Any, Callable, Iterable, Iterator, Sequence, TypeAlias
 
 from sealir import ase, lam, rvsdg
 from sealir.graphviz_support import graphviz_function
@@ -75,6 +75,12 @@ class ExprNode(GraphNode):
 
 
 @dataclass(frozen=True)
+class UnpackedNode(GraphNode):
+    src: GraphNode
+    port: int
+
+
+@dataclass(frozen=True)
 class Packed(GraphNode):
     values: tuple[GraphNode, ...]
 
@@ -86,7 +92,20 @@ class Packed(GraphNode):
 class Edge:
     src: GraphNode
     dst: GraphNode
+    src_port: int
     dst_port: int
+
+
+EdgeList: TypeAlias = list[Edge]
+
+
+def edge_maker(src, dst, dst_port):
+    match src:
+        case UnpackedNode(src=src, port=src_port):
+            pass
+        case _:
+            src_port = 0
+    return Edge(src=src, dst=dst, src_port=src_port, dst_port=dst_port)
 
 
 def ensure_io(obj: Any) -> rvsdg.EvalIO:
@@ -96,7 +115,7 @@ def ensure_io(obj: Any) -> rvsdg.EvalIO:
 
 def build_value_state_connection(
     lam_node: ase.SExpr, argnames: Sequence[str]
-) -> list[Edge]:
+) -> EdgeList:
     """
     Builds a value-state connection for a lambda node in the RVSDG form.
 
@@ -133,7 +152,7 @@ def build_value_state_connection(
                 elts = map(wrap, expr)
                 ret = Packed(elts, enclosing_subgraph=tos_subgraph())
                 for i, elt in enumerate(elts):
-                    edges.add(Edge(src=elt, dst=ret, dst_port=i))
+                    edges.add(edge_maker(src=elt, dst=ret, dst_port=i))
                 return ret
             case _:
                 raise AssertionError(type(expr))
@@ -157,14 +176,8 @@ def build_value_state_connection(
                     case tuple():
                         retval = packed[idx]
                         return retval
-                    case ase.SExpr() as arg:
-                        edges.add(
-                            Edge(src=wrap(arg), dst=wrap(expr), dst_port=0)
-                        )
-                        return expr
-                    case GraphNode() as arg:
-                        edges.add(Edge(src=arg, dst=wrap(expr), dst_port=0))
-                        return expr
+                    case ase.SExpr() | GraphNode():
+                        return UnpackedNode(src=wrap(packed), port=idx)
                     case _:
                         raise NotImplementedError
             case lam.Pack(args):
@@ -197,8 +210,12 @@ def build_value_state_connection(
                             enclosing_subgraph=tos_subgraph(),
                         )
                         phis.append(phi)
-                        edges.add(Edge(src=wrap(left), dst=phi, dst_port=0))
-                        edges.add(Edge(src=wrap(right), dst=phi, dst_port=1))
+                        edges.add(
+                            edge_maker(src=wrap(left), dst=phi, dst_port=0)
+                        )
+                        edges.add(
+                            edge_maker(src=wrap(right), dst=phi, dst_port=1)
+                        )
                 return tuple(phis)
             case rvsdg.Scfg_While(body=loopblk):
                 tos = ctx.blam_stack[-1]
@@ -212,7 +229,7 @@ def build_value_state_connection(
                             port_index=i,
                             enclosing_subgraph=tos_subgraph(),
                         )
-                        edges.add(Edge(src=wrap(v), dst=phi, dst_port=0))
+                        edges.add(edge_maker(src=wrap(v), dst=phi, dst_port=0))
                         phis_mut.append(phi)
                     phis = tuple(phis_mut)
                     # Replace the top of stack with the out going value of the
@@ -223,20 +240,24 @@ def build_value_state_connection(
 
                     loop_end_vars = yield loopblk
                     for phi, lev in zip(phis, loop_end_vars, strict=True):
-                        edges.add(Edge(src=wrap(lev), dst=phi, dst_port=0))
+                        edges.add(
+                            edge_maker(src=wrap(lev), dst=phi, dst_port=0)
+                        )
                 return tuple(phis)
             case rvsdg.Return(iostate=iostate, retval=retval):
                 ioval = ensure_io((yield iostate))
                 retval = yield retval
-                edges.add(Edge(src=wrap(ioval), dst=sink, dst_port=0))
-                edges.add(Edge(src=wrap(retval), dst=sink, dst_port=1))
+                edges.add(edge_maker(src=wrap(ioval), dst=sink, dst_port=0))
+                edges.add(edge_maker(src=wrap(retval), dst=sink, dst_port=1))
                 return ioval, retval
             case _:
                 for i, arg in enumerate(expr._args):
                     if isinstance(arg, ase.SExpr):
                         argval = yield arg
                         edges.add(
-                            Edge(src=wrap(argval), dst=wrap(expr), dst_port=i)
+                            edge_maker(
+                                wrap(argval), dst=wrap(expr), dst_port=i
+                            )
                         )
                 return expr
 
@@ -322,10 +343,127 @@ def render_dot(edges: Sequence[Edge], *, gv: Any) -> Any:
 
     for edge in edges:
         g.edge(
-            make_id(edge.src), make_id(edge.dst), headlabel=str(edge.dst_port)
+            make_id(edge.src),
+            make_id(edge.dst),
+            headlabel=str(edge.dst_port),
+            taillabel=str(edge.src_port),
         )
 
     for n in nodes:
         if n.is_origin:
             g.edge("origin", make_id(n), weight="10")
     return g
+
+
+@dataclass(frozen=True)
+class EdgeInfo:
+    edges: EdgeList
+
+    def get_input_port(self, portid: int) -> GraphNode:
+        for edge in self.edges:
+            if edge.dst_port == portid:
+                return edge.src
+        else:
+            raise IndexError(f"no edge for input port {portid}")
+
+    def get_output_port(self, portid: int) -> GraphNode:
+        for edge in self.edges:
+            if edge.src_port == portid:
+                return edge.dst
+        else:
+            raise IndexError(f"no edge for output port {portid}")
+
+
+class UseDefAnalysis:
+    _edges: EdgeList
+
+    def __init__(self, edges: EdgeList):
+        self._edges = edges
+
+    @property
+    def edges(self) -> EdgeList:
+        return self._edges
+
+    @cached_property
+    def nodes(self) -> list[GraphNode]:
+        # Discover nodes
+        seen_nodes = set()
+        for edge in self._edges:
+            for node in (edge.src, edge.dst):
+                if node not in seen_nodes:
+                    seen_nodes.add(node)
+        return seen_nodes
+
+    @cached_property
+    def node_outputs(self) -> dict[GraphNode, EdgeInfo]:
+        outputs: dict[GraphNode, EdgeList] = defaultdict(list)
+        for edge in self._edges:
+            outputs[edge.src].append(edge)
+        return {src: EdgeInfo(edges) for src, edges in outputs.items()}
+
+    @cached_property
+    def node_inputs(self) -> dict[GraphNode, EdgeInfo]:
+        inputs: dict[GraphNode, EdgeList] = defaultdict(list)
+        for edge in self._edges:
+            inputs[edge.dst].append(edge)
+        return {src: EdgeInfo(edges) for src, edges in inputs.items()}
+
+    @cached_property
+    def expr_to_node(self) -> dict[ase.SExpr, ExprNode]:
+        out: dict[ase.SExpr, GraphNode] = {}
+        for node in self.nodes:
+            match node:
+                case ExprNode():
+                    out[node.expr] = node
+        return out
+
+    @cache
+    def is_output_of(self, test: GraphNode, of: GraphNode) -> bool:
+        edgeinfo = self.node_outputs.get(of)
+        if edgeinfo is not None:
+            for edge in edgeinfo.edges:
+                if edge.dst == test:
+                    return True
+        return False
+
+    # @cache
+    def get_users_of(
+        self, of: GraphNode, port: int | None = None
+    ) -> set[GraphNode]:
+        if port is not None:
+            test = lambda edge: edge.src_port == port
+        else:
+            test = lambda edge: True
+        users_of = {
+            edge.dst for edge in filter(test, self.node_outputs[of].edges)
+        }
+        return users_of
+
+    # @cache
+    def is_sole_user(
+        self, test: GraphNode, of: GraphNode, port: int | None = None
+    ) -> bool:
+        users = self.get_users_of(of, port=port)
+        return len(users) == 1 and test in users
+
+    def search(
+        self, matcher: Callable[[GraphNode], bool]
+    ) -> Iterator[GraphNode]:
+        for node in self.nodes:
+            if matcher(node):
+                yield node
+
+    def search_use_chain(self, *matchers: Callable[[GraphNode], bool]):
+        assert len(matchers) > 1
+
+        def process(match_fns, prefixes):
+            head, *tail = match_fns
+            searches = self.search(partial(head, prefixes))
+            if tail:
+                for node in searches:
+                    yield from process(tail, (*prefixes, node))
+            else:
+                for node in searches:
+                    yield (*prefixes, node)
+
+        yield from process(matchers, ())
