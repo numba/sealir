@@ -306,3 +306,7 @@ class TreeRewriter(rewriter.TreeRewriter[T]):
             return fn(orig, **orig._bind(*args))
         else:
             return self.rewrite_generic(orig, args, updated)
+
+
+def field_position(grm: type[Rule], attr: str) -> int:
+    return grm._field_position(attr)

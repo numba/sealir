@@ -3,9 +3,9 @@ from functools import partial
 from pprint import pprint
 from typing import cast
 
-from sealir import rvsdg, rvsdg_conns
+from sealir import rvsdg, rvsdg_conns, grammar
 
-DOT_VIEW = False
+DOT_VIEW = True
 
 
 def test_for_loop():
@@ -19,7 +19,7 @@ def test_for_loop():
     uda = rvsdg_conns.UseDefAnalysis(edges)
 
     def callee_is_global_load(node: rvsdg_conns.GraphNode, name: str) -> bool:
-        callee_pos = rvsdg.Py_Call._field_position("callee")
+        callee_pos = grammar.field_position(rvsdg.Py_Call, "callee")
         callee_node = uda.node_inputs[node]
         callee_expr = cast(
             rvsdg_conns.ExprNode, callee_node.get_input_port(callee_pos)
@@ -62,7 +62,7 @@ def test_for_loop():
         )
     )
 
-    callee_pos = rvsdg.Py_Call._field_position("callee")
+    callee_pos = grammar.field_position(rvsdg.Py_Call, "callee")
     assert isinstance(range_node.expr, rvsdg.Py_Call)
     assert (
         uda.node_inputs[range_node].get_input_port(callee_pos).expr.name
