@@ -1,9 +1,8 @@
 import inspect
-from functools import partial
-from pprint import pprint
+from types import SimpleNamespace
 from typing import cast
 
-from sealir import rvsdg, rvsdg_conns, grammar
+from sealir import ase, grammar, rvsdg, rvsdg_conns
 
 DOT_VIEW = True
 
@@ -49,16 +48,73 @@ def test_for_loop():
                         return True
 
     def get_next_node(prefixes, x):
-        [_, iter_node] = prefixes
+        [*_, iter_node] = prefixes
         if uda.is_sole_user(x, of=iter_node, port=1):
             match x:
                 case rvsdg_conns.ExprNode(expr=rvsdg.Py_Call()):
                     if callee_is_global_load(x, name="next"):
                         return True
 
-    [(range_node, iter_node, next_node)] = list(
+    def get_endloop_compare(prefixes, x):
+        [*_, next_node] = prefixes
+        for user in uda.get_users_of(of=next_node, port=1):
+            if user == x:
+                match user:
+                    case rvsdg_conns.ExprNode(expr=rvsdg.Py_Compare()):
+                        lhs_idx = grammar.field_position(
+                            rvsdg.Py_Compare, "lhs"
+                        )
+                        rhs_idx = grammar.field_position(
+                            rvsdg.Py_Compare, "rhs"
+                        )
+                        lhs_node = uda.node_inputs[user].get_input_port(
+                            lhs_idx
+                        )
+                        rhs_node = uda.node_inputs[user].get_input_port(
+                            rhs_idx
+                        )
+
+                        # The following is needed because plain variable is for
+                        # capturing but `x.y` is a matched value
+                        tmp = SimpleNamespace()
+                        tmp.next_node = next_node
+
+                        sentinel = (
+                            uda.node_inputs[next_node]
+                            .get_input_port(
+                                grammar.field_position(rvsdg.Py_Call, "args")
+                                + 1
+                            )
+                            .expr
+                        )
+
+                        def capture_info(node):
+                            match node:
+                                case tmp.next_node:
+                                    return (0, node)
+                                case rvsdg_conns.ExprNode(
+                                    expr=rvsdg.Py_Str() as string
+                                ):
+                                    return (1, string)
+                            return (-1, None)
+
+                        captured = sorted(
+                            map(capture_info, (lhs_node, rhs_node))
+                        )
+                        match captured:
+                            case ((0, _), (1, string)) if ase.matches(
+                                string, sentinel
+                            ):
+                                return True
+                            case _:
+                                continue
+
+    [(range_node, iter_node, next_node, endloop_compare)] = list(
         uda.search_use_chain(
-            lambda _, x: match_range_call(x), get_iter_node, get_next_node
+            lambda _, x: match_range_call(x),
+            get_iter_node,
+            get_next_node,
+            get_endloop_compare,
         )
     )
 
@@ -78,6 +134,8 @@ def test_for_loop():
         uda.node_inputs[next_node].get_input_port(callee_pos).expr.name
         == "next"
     )
+    assert isinstance(endloop_compare.expr, rvsdg.Py_Compare)
+    print(range_node, iter_node, next_node, endloop_compare)
 
 
 def test_if_else():

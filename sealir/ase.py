@@ -23,7 +23,7 @@ from collections import Counter, deque
 from collections.abc import Coroutine
 from dataclasses import dataclass, field
 from enum import IntEnum
-from functools import cached_property
+from functools import cached_property, reduce
 from pprint import pformat
 from typing import (
     Any,
@@ -599,6 +599,36 @@ def contains(self: SExpr, test: SExpr) -> bool:
         if child == test:
             return True
     return False
+
+
+def matches(self: SExpr, test: SExpr) -> bool:
+    """Match structurally?"""
+
+    def arg_eq(pair: tuple[value_type, value_type]) -> bool:
+        match (x, y):
+            case (SExpr(), SExpr()):
+                return True
+            case _:
+                return x == y
+
+    walk = walk_descendants_depth_first_no_repeat
+    iterator = iter(zip(walk(self), walk(test), strict=True))
+    while True:
+        try:
+            out = next(iterator)
+        except ValueError:
+            return False
+        except StopIteration:
+            return True
+        (_, left), (_, right) = out
+        match (left, right):
+            case (SExpr(), SExpr()) if (
+                left._head == right._head
+                and all(reduce(arg_eq, zip(left._args, right._args)))
+            ):
+                continue
+            case _:
+                return False
 
 
 # Apply API
