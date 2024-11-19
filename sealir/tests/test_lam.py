@@ -64,6 +64,33 @@ class UsecaseLamGrammar(grammar.Grammar):
     start = LamGrammar.start | _Val
 
 
+def test_curry():
+    with UsecaseLamGrammar(ase.Tape()) as grm:
+
+        @lam_func(grm)
+        def lam1(a, b):
+            return a
+
+        out = app_func(grm, lam1, grm.write(Num(1)), grm.write(Num(2)))
+        print(ase.pretty_str(out))
+        assert (
+            ase.pretty_str(out) ==
+            "(App (Num 2) (App (Num 1) (Lam (Lam (Arg 1)))))"
+        )
+
+        @lam_func(grm)
+        def lam2(a, b):
+            return b
+
+        out = app_func(grm, lam2, grm.write(Num(1)), grm.write(Num(2)))
+        print(ase.pretty_str(out))
+        assert (
+            ase.pretty_str(out) ==
+            "(App (Num 2) (App (Num 1) (Lam (Lam (Arg 0)))))"
+        )
+
+
+
 def test_lam():
     with UsecaseLamGrammar(ase.Tape()) as grm:
 
@@ -73,8 +100,10 @@ def test_lam():
             d = grm.write(Sub(lhs=a, rhs=a))
             return grm.write(Tuple((c, d)))
 
+
         out = app_func(grm, lam1, grm.write(Num(1)), grm.write(Num(2)))
 
+    print(ase.pretty_str(lam1))
     print(ase.pretty_str(out))
 
     with grm:

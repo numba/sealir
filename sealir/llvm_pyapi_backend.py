@@ -47,9 +47,9 @@ def llvm_codegen(root: ase.SExpr):
         pyapi=PythonAPI(builder),
         retval_slot=retval_slot,
     )
-    for i in reversed(range(actual_num_args)):
-        ctx.blam_stack.append(BLamArg(argidx=i))
     ctx.blam_stack.append(BLamIOArg())  # iostate
+    for i in range(actual_num_args):
+        ctx.blam_stack.append(BLamArg(argidx=i))
 
     memo = ase.traverse(bodynode, _codegen_loop, CodegenState(context=ctx))
 

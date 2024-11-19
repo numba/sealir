@@ -1254,7 +1254,7 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
                 if name not in parameters:
                     return grm.write(Py_Undef())
                 else:
-                    return grm.write(lam.Arg(parameters.index(name) + depth))
+                    return grm.write(lam.Arg(len(parameters) - parameters.index(name) - 1 + depth))
             return grm.write(lam.Arg(depth))
 
         def rewrite_Let(

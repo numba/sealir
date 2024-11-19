@@ -40,7 +40,7 @@ class LamGrammar(grammar.Grammar):
     start = _Value
 
 
-def _intercept_cells(grm, fn):
+def _intercept_cells(grm, fn, arity):
     if fn.__closure__ is None:
         return fn
     changed = False
@@ -51,7 +51,7 @@ def _intercept_cells(grm, fn):
             if val._head == "Arg":
                 # increase de Lruijn index
                 [idx] = val._args
-                new_closure.append(types.CellType(grm.write(Arg(idx + 1))))
+                new_closure.append(types.CellType(grm.write(Arg(arity - 1 - idx + 1))))
                 changed = True
             elif val._head != "Lam":
                 # cannot refer to Expr by freevars
@@ -90,7 +90,7 @@ def lam_func(grm: grammar.Grammar):
         #    ^--------------|
         args = [grm.write(Arg(i)) for i in range(len(argnames))]
         # intercept cell variables
-        fn = _intercept_cells(grm, fn)
+        fn = _intercept_cells(grm, fn, len(argnames))
         # Reverse arguments so that arg0 refers to the innermost lambda.
         # And, it is the rightmost argument in Python.
         # That way, first `(app )` will replace the leftmost Python argument
@@ -106,10 +106,8 @@ def app_func(grm, lam, arg0, *more_args) -> ase.SExpr:
     """Makes an apply expression."""
     args = (arg0, *more_args)
 
-    stack = list(args)
     out = lam
-    while stack:
-        arg = stack.pop()
+    for arg in args:
         out = grm.write(App(lam=out, arg=arg))
     return out
 
@@ -154,12 +152,12 @@ def beta_reduction(app_expr: ase.SExpr) -> ase.SExpr:
     for parents, child in ase.walk_descendants(app_expr):
         if isinstance(child, Arg):
             lams = [x for x in parents if isinstance(x, Lam)]
-            if len(lams) <= napps:  # don't go deeper
+            if len(lams) >= napps:  # don't go deeper
                 debruijn = child.index
                 # in range?
-                if debruijn < len(lams):
-                    arg2repl[child] = app_exprs[-debruijn - 1].arg
-                    drops.add(lams[-debruijn - 1])
+                if debruijn <= len(app_exprs) - 1:
+                    arg2repl[child] = app_exprs[::-1][debruijn - 1].arg
+                    drops.add(lams[:napps][-debruijn])
 
     assert arg2repl
     br = BetaReduction(drops, arg2repl)
