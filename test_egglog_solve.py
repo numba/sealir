@@ -10,6 +10,7 @@ from egglog import Expr, i64, Vec, String, EGraph, function
 
 # Borrowed deBruijn handling from normalization-by-evaluation
 
+
 class Env(Expr):
     @classmethod
     def nil(cls) -> Env: ...
@@ -31,15 +32,14 @@ class Value(Expr):
         pass
 
 
-
 class Scope(Expr):
-    def __init__(self, uid: i64):
-        ...
+    def __init__(self, uid: i64): ...
+
 
 class STerm(Expr):
 
     @classmethod
-    def lam(cls, scope: Scope, body: STerm) -> STerm:  ...
+    def lam(cls, scope: Scope, body: STerm) -> STerm: ...
 
     @classmethod
     def app(cls, lam: STerm, arg: STerm) -> STerm: ...
@@ -60,17 +60,14 @@ class STerm(Expr):
     @classmethod
     def ret(cls, iostate: STerm, retval: STerm) -> STerm: ...
 
-
     @classmethod
     def func(cls, name: String) -> STerm: ...
-
 
 
 def make_call(fn, *args):
     for arg in args:
         fn = STerm.app(fn, arg)
     return fn
-
 
 
 def PyBinop(opname: String, iostate: STerm, lhs: STerm, rhs: STerm) -> STerm:
@@ -82,35 +79,34 @@ def Pack(*args: STerm) -> STerm:
 
 
 @function
-def eval(env: Env, expr: STerm) -> Value:
-    ...
+def eval(env: Env, expr: STerm) -> Value: ...
+
 
 @function
-def VClosure(env: Env, expr: STerm) -> Value:
-    ...
+def VClosure(env: Env, expr: STerm) -> Value: ...
+
 
 @function
-def Lookup(env: Env, debruijn: i64) -> Value:
-    ...
+def Lookup(env: Env, debruijn: i64) -> Value: ...
+
 
 @function
-def ParentEnv(env: Env) -> Env:
-    ...
+def ParentEnv(env: Env) -> Env: ...
+
 
 @function
-def Depth(env: Env) -> i64:
-    ...
+def Depth(env: Env) -> i64: ...
+
 
 @function
-def VLam(cl: Value) -> Value:
-    ...
+def VLam(cl: Value) -> Value: ...
+
 
 @function
-def VApp(f: Value, x: Value) -> Value:
-    ...
+def VApp(f: Value, x: Value) -> Value: ...
 @function
-def VRet(f: Value, x: Value) -> Value:
-    ...
+def VRet(f: Value, x: Value) -> Value: ...
+
 
 @dataclass(frozen=True)
 class EnvCtx:
@@ -133,10 +129,10 @@ class EnvCtx:
         return self.lam_map[self.get_parent_lambda()]
 
 
-
 @dataclass(frozen=True)
 class EggConvState(ase.TraverseState):
     context: EnvCtx
+
 
 def convert_tuple_to_egglog(root):
     def conversion(expr: ase.BasicSExpr, state: EggConvState):
@@ -176,18 +172,25 @@ def convert_tuple_to_egglog(root):
 
     egraph = EGraph()
 
-
     @egraph.register
-    def _custom(lam: STerm,
-                expr: STerm, expr2: STerm, expr3: STerm,
-                term: STerm,
-                val: STerm, val2: STerm,
-                  exprVec: Vec[STerm],
-                  env: Env, env2: Env,
-                  scope: Scope,
-                  x: Value,
-                  i: i64, j: i64,
-                  m: i64, n: i64, ):
+    def _custom(
+        lam: STerm,
+        expr: STerm,
+        expr2: STerm,
+        expr3: STerm,
+        term: STerm,
+        val: STerm,
+        val2: STerm,
+        exprVec: Vec[STerm],
+        env: Env,
+        env2: Env,
+        scope: Scope,
+        x: Value,
+        i: i64,
+        j: i64,
+        m: i64,
+        n: i64,
+    ):
         from egglog import birewrite, rewrite, set_, rule, eq, ne, union, set_
 
         # Uses NbE logic from https://github.com/egraphs-good/egglog/pull/28
@@ -196,54 +199,40 @@ def convert_tuple_to_egglog(root):
         Lam = STerm.lam
         App = STerm.app
 
-        yield rewrite(
-            eval(env, Lam(scope, expr))
-        ).to(
-            VLam( VClosure(env, expr) )
+        # --- Lambda Evaluation ---
+        # create VClosure from Lam
+        yield rewrite(eval(env, Lam(scope, expr))).to(
+            VLam(VClosure(env, expr))
         )
 
-        yield rewrite(
-            eval(env, App(term, val))
-        ).to(
+        # create VApp from App
+        yield rewrite(eval(env, App(term, val))).to(
             VApp(eval(env, term), eval(env, val))
         )
 
-        # rewrite (vapp (VLam (VClosure e t)) x) (eval (Cons x e) t))
-        yield rewrite(
-            VApp( VLam( VClosure(env, term) ), x )
-        ).to(
-            eval( Env.cons(x, env), term )
+        # reduce VApp(VLam(VClosure))
+        yield rewrite(VApp(VLam(VClosure(env, term)), x)).to(
+            eval(Env.cons(x, env), term)
         )
 
         # --- Lookup logic ---
-        yield rewrite(
-            eval( env, Var(scope, i) )
-        ).to(
-            Lookup( env, i )
-        )
-        yield rewrite(
-            Lookup( Env.cons(x, env), 0 )
-        ).to(
-            x
-        )
-        yield rewrite(
-            Lookup( Env.cons(x, env), i )
-        ).to(
-            Lookup( env, i - 1)
-        )
+        # fmt: off
+        yield rewrite(   eval( env, Var(scope, i)  ) ).to( Lookup( env, i )    )
+        yield rewrite( Lookup( Env.cons(x, env), 0 ) ).to( x                   )
+        yield rewrite( Lookup( Env.cons(x, env), i ) ).to( Lookup( env, i - 1) )
+        # fmt: on
 
         # --- Value bound ---
-        yield rewrite(
-            eval( env, STerm.param(i) )
-        ).to(
+
+        # eval of (param) -> Value
+        yield rewrite(eval(env, STerm.param(i))).to(
             Value.bound(STerm.param(i))
         )
 
         # --- VRet ---
-        yield rewrite(
-            eval( env, STerm.ret(val, val2) )
-        ).to(
-            VRet( eval(env, val), eval(env, val2))
+        # eval of (ret)
+        yield rewrite(eval(env, STerm.ret(val, val2))).to(
+            VRet(eval(env, val), eval(env, val2))
         )
 
     env = Env.nil()
@@ -251,40 +240,54 @@ def convert_tuple_to_egglog(root):
     rootexpr = egraph.let("root", eval(env, sterm))
     print(str(sterm).replace("STerm.", ""))
 
-    egraph.saturate()
-    # egraph.display()
-    print("output".center(80, '-'))
+    saturate(egraph)
+    print("output".center(80, "-"))
 
     out = egraph.simplify(rootexpr, 10)
     print(str(out).replace("STerm.", ""))
 
+    return egraph, rootexpr, out
 
 
-def run(udt):
+def saturate(egraph, limit=1_000):
+    # workaround egraph.saturate() is always opening the viz.
+    i = 0
+    while egraph.run(1).updated and i < limit:
+        i += 1
+
+
+def run(udt, checks):
+    from egglog import eq
+
     sexpr = rvsdg.restructure_source(udt)
 
     grm = rvsdg.Grammar(sexpr._tape)
 
     args = [0, 1, 2]
-    sexpr = lam.app_func(grm, sexpr,
-                         *[grm.write(rvsdg.BindArg(x)) for x in args])
+    sexpr = lam.app_func(
+        grm, sexpr, *[grm.write(rvsdg.BindArg(x)) for x in args]
+    )
     pprint(ase.as_tuple(sexpr, depth=-1))
-    convert_tuple_to_egglog(sexpr)
+    egraph, rootexpr, out = convert_tuple_to_egglog(sexpr)
+    facts = [eq(rootexpr).to(x)
+             for x in checks]
+    egraph.check(*facts)
 
 
-
-def testme():
+def test_basic_return():
     # def udt(a, b, c):
     #     for i in range(a, b):
     #         c += i + b
     #         c += c
     #     return c
-    def udt(a, b): #, c):
-        return a  #+ b # + c
+    def udt(a, b):  # , c):
+        return a  # + b # + c
 
-    run(udt)
+    checks = [
+        VRet(Value.bound(STerm.param(0)), Value.bound(STerm.param(1)))
+    ]
+    run(udt, checks)
 
 
 if __name__ == "__main__":
     testme()
-
