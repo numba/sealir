@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pprint import pprint
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -7,6 +8,9 @@ from dataclasses import dataclass, field
 from sealir import rvsdg, ase, lam
 
 from egglog import Expr, i64, Vec, String, EGraph, function
+
+
+DEBUG = bool(os.environ.get("DEBUG", False))
 
 # Borrowed deBruijn handling from normalization-by-evaluation
 
@@ -106,6 +110,8 @@ def VLam(cl: Value) -> Value: ...
 def VApp(f: Value, x: Value) -> Value: ...
 @function
 def VRet(f: Value, x: Value) -> Value: ...
+@function
+def VUnpack(i: i64, x: Value) -> Value: ...
 
 
 @dataclass(frozen=True)
@@ -219,7 +225,10 @@ def convert_tuple_to_egglog(root):
         # fmt: off
         yield rewrite(   eval( env, Var(scope, i)  ) ).to( Lookup( env, i )    )
         yield rewrite( Lookup( Env.cons(x, env), 0 ) ).to( x                   )
-        yield rewrite( Lookup( Env.cons(x, env), i ) ).to( Lookup( env, i - 1) )
+        yield rewrite( Lookup( Env.cons(x, env), i ) ).to( Lookup( env, i - 1),
+            # given
+            ne(i).to(0)
+        )
         # fmt: on
 
         # --- Value bound ---
@@ -235,6 +244,13 @@ def convert_tuple_to_egglog(root):
             VRet(eval(env, val), eval(env, val2))
         )
 
+        # --- VUnpack ---
+        # eval of (unpack)
+        yield rewrite(eval(env, STerm.unpack(i, val))).to(
+            VUnpack(i, eval(env, val))
+        )
+
+
     env = Env.nil()
 
     rootexpr = egraph.let("root", eval(env, sterm))
@@ -243,18 +259,191 @@ def convert_tuple_to_egglog(root):
     saturate(egraph)
     print("output".center(80, "-"))
 
-    out = egraph.simplify(rootexpr, 10)
+    out = egraph.simplify(rootexpr, 1)
     print(str(out).replace("STerm.", ""))
 
     return egraph, rootexpr, out
 
 
 def saturate(egraph, limit=1_000):
-    # workaround egraph.saturate() is always opening the viz.
-    i = 0
-    while egraph.run(1).updated and i < limit:
-        i += 1
+    if DEBUG:
+        egraph.saturate(limit=limit)
+    else:
+        # workaround egraph.saturate() is always opening the viz.
+        i = 0
+        while egraph.run(1).updated and i < limit:
+            i += 1
 
+
+def serialize_to_viz(egraph):
+    from sealir.egg_utils import extract_eclasses, ECTree
+    ecdata = extract_eclasses(egraph)
+
+    ectree = ECTree(ecdata)
+    pprint(ectree._parent_eclasses)
+    print("Roots")
+    roots = ectree.root_eclasses()
+    pprint(roots)
+    [root] = roots
+    with ectree.write_html_root(root) as buf:
+        with open("ectree.html", "w") as fout:
+            write_style(fout)
+
+            fout.write("<div id='hidden' >")
+            fout.write("</div>")
+            fout.write("<div id='main' >")
+            fout.write(buf.getvalue())
+            fout.write("</div>")
+
+def write_style(fout):
+    def println(*args):
+        print(*args, file=fout)
+
+    println("""
+<style>
+body {
+    padding-bottom: 5em;
+}
+
+#hidden {
+    display: none;
+}
+
+div.eclass {
+    border: 1px solid #ccc;
+    padding: 2px;
+    margin: 1px;
+    padding-right: 0;
+    margin-right: 0;
+    background-color: #eee;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+div.term {
+    border: 1px solid #ccc;
+    padding: 1px;
+    margin: 1px;
+    background-color: #fff;
+    flex: 0 1 auto;
+}
+
+.activated:not(:has(.activated))  {
+    background-color: green;
+
+}
+
+.toolbutton {
+    cursor: pointer;
+}
+
+.eclass_name  {
+    font-size: 0.8em;
+    color: #666;
+}
+.bottom-toolbox {
+    position: fixed;
+    bottom: 0;
+    width: 100%;
+    background-color: rgba(255, 255, 255, 0.5);
+    padding: 10px;
+    box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
+    z-index: 9999;
+}
+
+
+.bottom-textbox {
+    width: 90%;
+    padding: 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 16px;
+    margin: 0 auto;
+    display: block;
+}
+</style>
+<script>
+
+document.addEventListener('click', (e) => {
+
+    if (e.target.classList.contains("term")) {
+        e.stopPropagation();
+
+        document.querySelectorAll('.activated').forEach(term => {
+            term.classList.remove('activated');
+        });
+
+        e.target.classList.add('activated');
+    }
+});
+
+/* JS to copy HTML element of the referenced eclass */
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('eclass_name')) {
+        const ec = e.target.dataset.eclass;
+        const targetContent = document.querySelector(`div[data-eclass="${ec}"]`);
+        if (targetContent) {
+            e.target.parentElement.innerHTML = targetContent.innerHTML;
+        }
+        e.preventDefault();
+    }
+});
+</script>
+
+<div class="bottom-toolbox">
+    <p>
+    Click term to select. Once selected, key 'f' to focus; key 'v' to toggle
+    visibility. Enter op name in box to filter out.
+    </p>
+    <input type="text" class="bottom-textbox" placeholder="op names to hide">
+</div>
+<script>
+const filterBox = document.querySelector('.bottom-textbox');
+
+filterBox.addEventListener('input', function() {
+    const hideOps = this.value.split(',').map(s => s.trim());
+    const allTerms = document.querySelectorAll('div.term[data-term-op]');
+
+    allTerms.forEach(term => {
+        const opname = term.getAttribute('data-term-op');
+        if (hideOps.includes(opname)) {
+            term.style.display = 'none';
+        } else {
+            term.style.display = 'block';
+        }
+    });
+});
+
+
+
+document.addEventListener('keydown', function(e) {
+    const termDiv = document.querySelector("div.activated");
+    if (!termDiv) return;
+
+    if (e.key == 'f' ) {
+        const mainDiv = document.getElementById('main');
+        mainDiv.innerHTML = termDiv.innerHTML;
+        e.preventDefault();
+    } else if (e.key == 'v') {
+        const op = termDiv.dataset.termOp;
+        const terms = document.querySelectorAll(`div[data-term-op="${op}"] > div.content`);
+        terms.forEach(term => {
+            term.style.display = term.style.display === 'none' ? 'block' : 'none';
+        });
+        e.preventDefault();
+    }
+});
+
+
+document.addEventListener('DOMContentLoaded', function(e) {
+    /* copy original state */
+    const mainDiv = document.getElementById('main');
+    const hiddenDiv = document.getElementById('hidden');
+    hiddenDiv.innerHTML = mainDiv.innerHTML;
+});
+</script>
+""")
 
 def run(udt, checks):
     from egglog import eq
@@ -269,19 +458,39 @@ def run(udt, checks):
     )
     pprint(ase.as_tuple(sexpr, depth=-1))
     egraph, rootexpr, out = convert_tuple_to_egglog(sexpr)
+
+    serialize_to_viz(egraph)
+
+
+    # Check
     facts = [eq(rootexpr).to(x)
              for x in checks]
     egraph.check(*facts)
+    return egraph
 
 
-def test_basic_return():
-    # def udt(a, b, c):
-    #     for i in range(a, b):
-    #         c += i + b
-    #         c += c
-    #     return c
-    def udt(a, b):  # , c):
-        return a  # + b # + c
+def test_basic_return_1():
+    def udt(a, b):
+        return a
+
+    checks = [
+        VRet(Value.bound(STerm.param(0)), Value.bound(STerm.param(1)))
+    ]
+    run(udt, checks)
+
+def test_basic_return_2():
+    def udt(a, b):
+        return b
+
+    checks = [
+        VRet(Value.bound(STerm.param(0)), Value.bound(STerm.param(2)))
+    ]
+    run(udt, checks)
+
+
+def test_me():
+    def udt(a, b):
+        return a + b
 
     checks = [
         VRet(Value.bound(STerm.param(0)), Value.bound(STerm.param(1)))
@@ -290,4 +499,4 @@ def test_basic_return():
 
 
 if __name__ == "__main__":
-    testme()
+    test_me()
