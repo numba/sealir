@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <style>
+    /* <!-- [TEMPLATE.STYLE] --> */
+    </style>
+</head>
+<div class="bottom-toolbox">
+    <p>
+        Click term to select. Once selected, key 'f' to focus; key 'v' to toggle
+        visibility. Enter op name in box to filter out.
+    </p>
+    <div style="margin-top: 10px; display: flex; gap: 10px;">
+        <button onclick="convertToDropdown(document.querySelector('.activated').closest('.eclass'))">Show Term
+            Selector</button>
+        <button onclick="revertDropdowns()">Show All Terms</button>
+    </div>
+    <input type="text" class="bottom-textbox" placeholder="op names to hide">
+</div>
+<div id="hidden"></div>
+<div id="main">
+    <!-- [TEMPLATE.BODY] -->
+</div>
+
+<script>
+/* <!-- [TEMPLATE.SCRIPT] --> */
+</script>
+</html>

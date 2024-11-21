@@ -112,7 +112,20 @@ def VApp(f: Value, x: Value) -> Value: ...
 def VRet(f: Value, x: Value) -> Value: ...
 @function
 def VUnpack(i: i64, x: Value) -> Value: ...
+@function
+def VFunc(fname: String) -> Value: ...
 
+def vcall(fn: Value, *args: Value) -> Value:
+    expr = fn
+    for arg in args:
+        expr = VApp(expr, arg)
+    return expr
+
+@function
+def is_pure(call: Value) -> Value: ...
+
+@function
+def VBinOp(opname: String, lhs: Value, rhs: Value) -> Value: ...
 
 @dataclass(frozen=True)
 class EnvCtx:
@@ -192,10 +205,13 @@ def convert_tuple_to_egglog(root):
         env2: Env,
         scope: Scope,
         x: Value,
+        y: Value,
+        z: Value,
         i: i64,
         j: i64,
         m: i64,
         n: i64,
+        text: String,
     ):
         from egglog import birewrite, rewrite, set_, rule, eq, ne, union, set_
 
@@ -250,6 +266,39 @@ def convert_tuple_to_egglog(root):
             VUnpack(i, eval(env, val))
         )
 
+        # --- VFunc ---
+        yield rewrite(
+            eval(env, STerm.func(text))
+        ).to(
+            VFunc(text)
+        )
+
+        # --- VCall ---
+        call = vcall(VFunc("PyBinOp::+"), x, y, z)
+        yield rewrite(
+            VUnpack(0, call)
+        ).to(
+            x,
+            # given
+            is_pure(call)
+        )
+        yield rewrite(
+            VUnpack(1, call)
+        ).to(
+            VBinOp("+", y, z),
+            # given
+            is_pure(call)
+        )
+
+
+
+        # Assumptions (TBD)
+        yield rule(
+            vcall(VFunc("PyBinOp::+"), x, y, z)
+        ).then(
+            is_pure(vcall(VFunc("PyBinOp::+"), x, y, z))
+        )
+
 
     env = Env.nil()
 
@@ -277,173 +326,16 @@ def saturate(egraph, limit=1_000):
 
 def serialize_to_viz(egraph):
     from sealir.egg_utils import extract_eclasses, ECTree
+    from sealir.eggview import write_page
     ecdata = extract_eclasses(egraph)
 
     ectree = ECTree(ecdata)
-    pprint(ectree._parent_eclasses)
-    print("Roots")
-    roots = ectree.root_eclasses()
-    pprint(roots)
-    [root] = roots
-    with ectree.write_html_root(root) as buf:
+
+    with ectree.write_html_root() as buf:
         with open("ectree.html", "w") as fout:
-            write_style(fout)
-
-            fout.write("<div id='hidden' >")
-            fout.write("</div>")
-            fout.write("<div id='main' >")
-            fout.write(buf.getvalue())
-            fout.write("</div>")
-
-def write_style(fout):
-    def println(*args):
-        print(*args, file=fout)
-
-    println("""
-<style>
-body {
-    padding-bottom: 5em;
-}
-
-#hidden {
-    display: none;
-}
-
-div.eclass {
-    border: 1px solid #ccc;
-    padding: 2px;
-    margin: 1px;
-    padding-right: 0;
-    margin-right: 0;
-    background-color: #eee;
-    display: flex;
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: 5px;
-}
-div.term {
-    border: 1px solid #ccc;
-    padding: 1px;
-    margin: 1px;
-    background-color: #fff;
-    flex: 0 1 auto;
-}
-
-.activated:not(:has(.activated))  {
-    background-color: green;
-
-}
-
-.toolbutton {
-    cursor: pointer;
-}
-
-.eclass_name  {
-    font-size: 0.8em;
-    color: #666;
-}
-.bottom-toolbox {
-    position: fixed;
-    bottom: 0;
-    width: 100%;
-    background-color: rgba(255, 255, 255, 0.5);
-    padding: 10px;
-    box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.1);
-    z-index: 9999;
-}
+            write_page(fout, buf.getvalue())
 
 
-.bottom-textbox {
-    width: 90%;
-    padding: 8px;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    font-size: 16px;
-    margin: 0 auto;
-    display: block;
-}
-</style>
-<script>
-
-document.addEventListener('click', (e) => {
-
-    if (e.target.classList.contains("term")) {
-        e.stopPropagation();
-
-        document.querySelectorAll('.activated').forEach(term => {
-            term.classList.remove('activated');
-        });
-
-        e.target.classList.add('activated');
-    }
-});
-
-/* JS to copy HTML element of the referenced eclass */
-document.addEventListener('click', function(e) {
-    if (e.target.classList.contains('eclass_name')) {
-        const ec = e.target.dataset.eclass;
-        const targetContent = document.querySelector(`div[data-eclass="${ec}"]`);
-        if (targetContent) {
-            e.target.parentElement.innerHTML = targetContent.innerHTML;
-        }
-        e.preventDefault();
-    }
-});
-</script>
-
-<div class="bottom-toolbox">
-    <p>
-    Click term to select. Once selected, key 'f' to focus; key 'v' to toggle
-    visibility. Enter op name in box to filter out.
-    </p>
-    <input type="text" class="bottom-textbox" placeholder="op names to hide">
-</div>
-<script>
-const filterBox = document.querySelector('.bottom-textbox');
-
-filterBox.addEventListener('input', function() {
-    const hideOps = this.value.split(',').map(s => s.trim());
-    const allTerms = document.querySelectorAll('div.term[data-term-op]');
-
-    allTerms.forEach(term => {
-        const opname = term.getAttribute('data-term-op');
-        if (hideOps.includes(opname)) {
-            term.style.display = 'none';
-        } else {
-            term.style.display = 'block';
-        }
-    });
-});
-
-
-
-document.addEventListener('keydown', function(e) {
-    const termDiv = document.querySelector("div.activated");
-    if (!termDiv) return;
-
-    if (e.key == 'f' ) {
-        const mainDiv = document.getElementById('main');
-        mainDiv.innerHTML = termDiv.innerHTML;
-        e.preventDefault();
-    } else if (e.key == 'v') {
-        const op = termDiv.dataset.termOp;
-        const terms = document.querySelectorAll(`div[data-term-op="${op}"] > div.content`);
-        terms.forEach(term => {
-            term.style.display = term.style.display === 'none' ? 'block' : 'none';
-        });
-        e.preventDefault();
-    }
-});
-
-
-document.addEventListener('DOMContentLoaded', function(e) {
-    /* copy original state */
-    const mainDiv = document.getElementById('main');
-    const hiddenDiv = document.getElementById('hidden');
-    hiddenDiv.innerHTML = mainDiv.innerHTML;
-});
-</script>
-""")
 
 def run(udt, checks):
     from egglog import eq
@@ -490,7 +382,7 @@ def test_basic_return_2():
 
 def test_me():
     def udt(a, b):
-        return a + b
+        return a + b + a
 
     checks = [
         VRet(Value.bound(STerm.param(0)), Value.bound(STerm.param(1)))
