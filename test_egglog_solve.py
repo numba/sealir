@@ -153,7 +153,7 @@ class EggConvState(ase.TraverseState):
     context: EnvCtx
 
 
-def convert_tuple_to_egglog(root):
+def convert_tuple_to_egglog(root, assume):
     def conversion(expr: ase.BasicSExpr, state: EggConvState):
         ctx = state.context
         match expr:
@@ -273,7 +273,7 @@ def convert_tuple_to_egglog(root):
             VFunc(text)
         )
 
-        # --- VCall ---
+        # --- PyBinOp ---
         call = vcall(VFunc("PyBinOp::+"), x, y, z)
         yield rewrite(
             VUnpack(0, call)
@@ -290,18 +290,10 @@ def convert_tuple_to_egglog(root):
             is_pure(call)
         )
 
-
-
-        # Assumptions (TBD)
-        yield rule(
-            vcall(VFunc("PyBinOp::+"), x, y, z)
-        ).then(
-            is_pure(vcall(VFunc("PyBinOp::+"), x, y, z))
-        )
-
+    if assume:
+        assume(egraph)
 
     env = Env.nil()
-
     rootexpr = egraph.let("root", eval(env, sterm))
     print(str(sterm).replace("STerm.", ""))
 
@@ -337,7 +329,7 @@ def serialize_to_viz(egraph):
 
 
 
-def run(udt, checks):
+def run(udt, checks, *, assume=None, debug_eggview=False):
     from egglog import eq
 
     sexpr = rvsdg.restructure_source(udt)
@@ -349,10 +341,10 @@ def run(udt, checks):
         grm, sexpr, *[grm.write(rvsdg.BindArg(x)) for x in args]
     )
     pprint(ase.as_tuple(sexpr, depth=-1))
-    egraph, rootexpr, out = convert_tuple_to_egglog(sexpr)
+    egraph, rootexpr, out = convert_tuple_to_egglog(sexpr, assume)
 
-    serialize_to_viz(egraph)
-
+    if debug_eggview:
+        serialize_to_viz(egraph)
 
     # Check
     facts = [eq(rootexpr).to(x)
@@ -380,14 +372,30 @@ def test_basic_return_2():
     run(udt, checks)
 
 
-def test_me():
+def test_binop_add():
     def udt(a, b):
         return a + b + a
 
+    def assume(egraph):
+        @egraph.register
+        def facts(x: Value, y: Value, z: Value):
+            from egglog import rule
+
+            yield rule(
+                vcall(VFunc("PyBinOp::+"), x, y, z)
+            ).then(
+                is_pure(vcall(VFunc("PyBinOp::+"), x, y, z))
+            )
+
     checks = [
-        VRet(Value.bound(STerm.param(0)), Value.bound(STerm.param(1)))
+        VRet(Value.bound(STerm.param(0)),
+             VBinOp("+",
+                    VBinOp("+",
+                           Value.bound(STerm.param(1)),
+                           Value.bound(STerm.param(2))),
+                           Value.bound(STerm.param(1))))
     ]
-    run(udt, checks)
+    run(udt, checks, assume=assume)
 
 
 if __name__ == "__main__":
