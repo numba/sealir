@@ -35,6 +35,12 @@ class Value(Expr):
     def bound(cls, val: STerm) -> Value:
         pass
 
+    @classmethod
+    def true(cls) -> Value:
+        pass
+    @classmethod
+    def false(cls) -> Value:
+        pass
 
 class Scope(Expr):
     def __init__(self, uid: i64): ...
@@ -67,6 +73,9 @@ class STerm(Expr):
     @classmethod
     def func(cls, name: String) -> STerm: ...
 
+    @classmethod
+    def if_else(cls, test: STerm, then: STerm, orelse: STerm) -> STerm: ...
+
 
 def make_call(fn, *args):
     for arg in args:
@@ -76,6 +85,10 @@ def make_call(fn, *args):
 
 def PyBinop(opname: String, iostate: STerm, lhs: STerm, rhs: STerm) -> STerm:
     return make_call(STerm.func(f"PyBinOp::{opname}"), iostate, lhs, rhs)
+
+
+def PyCmpop(opname: String, iostate: STerm, lhs: STerm, rhs: STerm) -> STerm:
+    return make_call(STerm.func(f"PyCmpOp::{opname}"), iostate, lhs, rhs)
 
 
 def Pack(*args: STerm) -> STerm:
@@ -112,8 +125,11 @@ def VApp(f: Value, x: Value) -> Value: ...
 def VRet(f: Value, x: Value) -> Value: ...
 @function
 def VUnpack(i: i64, x: Value) -> Value: ...
+
 @function
 def VFunc(fname: String) -> Value: ...
+@function
+def VBranch(cond: Value, then: Value, orelse: Value) -> Value: ...
 
 def vcall(fn: Value, *args: Value) -> Value:
     expr = fn
@@ -154,9 +170,12 @@ class EggConvState(ase.TraverseState):
 
 
 def convert_tuple_to_egglog(root, assume):
+    from egglog import birewrite, rewrite, set_, rule, eq, ne, union, set_
+
     def conversion(expr: ase.BasicSExpr, state: EggConvState):
         ctx = state.context
         match expr:
+            # Basic Lambda Calculus
             case lam.Lam(body):
                 with ctx.bind_lam(expr, Scope(expr._handle)) as env:
                     return STerm.lam(env, (yield body))
@@ -172,6 +191,14 @@ def convert_tuple_to_egglog(root, assume):
                 for arg in args:
                     elems.append((yield arg))
                 return Pack(*elems)
+            case rvsdg.Return(iostate=iostate, retval=retval):
+                return STerm.ret((yield iostate), (yield retval))
+            case rvsdg.BindArg(val):
+                return STerm.param(val)
+            # SCFG extensions
+            case rvsdg.Scfg_If(test=test, then=then, orelse=orelse):
+                return STerm.if_else((yield test), (yield then), (yield orelse))
+            # Py extensions
             case rvsdg.Py_BinOp(
                 opname=str(op),
                 iostate=iostate,
@@ -179,10 +206,13 @@ def convert_tuple_to_egglog(root, assume):
                 rhs=rhs,
             ):
                 return PyBinop(op, (yield iostate), (yield lhs), (yield rhs))
-            case rvsdg.Return(iostate=iostate, retval=retval):
-                return STerm.ret((yield iostate), (yield retval))
-            case rvsdg.BindArg(val):
-                return STerm.param(val)
+            case rvsdg.Py_Compare(
+                opname=str(op),
+                iostate=iostate,
+                lhs=lhs,
+                rhs=rhs,
+            ):
+                return PyCmpop(op, (yield iostate), (yield lhs), (yield rhs))
             case _:
                 raise ValueError(f"? {expr}")
 
@@ -192,29 +222,19 @@ def convert_tuple_to_egglog(root, assume):
     egraph = EGraph()
 
     @egraph.register
-    def _custom(
-        lam: STerm,
+    def _nbe(
         expr: STerm,
-        expr2: STerm,
-        expr3: STerm,
         term: STerm,
         val: STerm,
         val2: STerm,
-        exprVec: Vec[STerm],
         env: Env,
-        env2: Env,
         scope: Scope,
         x: Value,
-        y: Value,
-        z: Value,
         i: i64,
-        j: i64,
-        m: i64,
-        n: i64,
         text: String,
+        vec_terms: Vec[STerm],
+        vec_vals: Vec[Value],
     ):
-        from egglog import birewrite, rewrite, set_, rule, eq, ne, union, set_
-
         # Uses NbE logic from https://github.com/egraphs-good/egglog/pull/28
 
         Var = STerm.var
@@ -265,7 +285,13 @@ def convert_tuple_to_egglog(root, assume):
         yield rewrite(eval(env, STerm.unpack(i, val))).to(
             VUnpack(i, eval(env, val))
         )
-
+        # --- Pack ---
+        # eval of (pack vec...)
+        yield rewrite(
+            VUnpack(i, eval(env, STerm.pack(vec_terms)))
+        ).to(
+            eval(env, vec_terms[i])
+        )
         # --- VFunc ---
         yield rewrite(
             eval(env, STerm.func(text))
@@ -273,22 +299,69 @@ def convert_tuple_to_egglog(root, assume):
             VFunc(text)
         )
 
+    @egraph.register
+    def _nbe_scfg_extension(
+        expr: STerm,
+        expr2: STerm,
+        term: STerm,
+        val: STerm,
+        val2: STerm,
+        env: Env,
+        scope: Scope,
+        x: Value,
+        y: Value,
+        i: i64,
+        text: String,
+    ):
+        # --- if_else ---
+        yield rewrite(
+            eval(env, STerm.if_else(val, expr, expr2))
+        ).to(
+            VBranch(eval(env, val), eval(env, expr), eval(env, expr2))
+        )
+        # simplify true
+        yield rewrite(
+            VBranch(Value.true(), eval(env, expr), eval(env, expr2))
+        ).to(
+            eval(env, expr)
+        )
+        # simplify false
+        yield rewrite(
+            VBranch(Value.false(), eval(env, expr), eval(env, expr2))
+        ).to(
+            eval(env, expr2)
+        )
+
+
+
+    @egraph.register
+    def _py(
+        x: Value,
+        y: Value,
+        z: Value,
+    ):
+        def binop_rewrite(prefix: str, opname: str):
+            call = vcall(VFunc(f"{prefix}::{opname}"), x, y, z)
+            yield rewrite(
+                VUnpack(0, call)
+            ).to(
+                x,
+                # given
+                is_pure(call)
+            )
+            yield rewrite(
+                VUnpack(1, call)
+            ).to(
+                VBinOp(opname, y, z),
+                # given
+                is_pure(call)
+            )
+
         # --- PyBinOp ---
-        call = vcall(VFunc("PyBinOp::+"), x, y, z)
-        yield rewrite(
-            VUnpack(0, call)
-        ).to(
-            x,
-            # given
-            is_pure(call)
-        )
-        yield rewrite(
-            VUnpack(1, call)
-        ).to(
-            VBinOp("+", y, z),
-            # given
-            is_pure(call)
-        )
+        yield from binop_rewrite("PyBinOp", "+")
+        # --- PyCmpOp ---
+        yield from binop_rewrite("PyCmpOp", ">")
+
 
     if assume:
         assume(egraph)
@@ -301,6 +374,9 @@ def convert_tuple_to_egglog(root, assume):
     print("output".center(80, "-"))
 
     out = egraph.simplify(rootexpr, 1)
+
+    # for extracted in egraph.extract_multiple(rootexpr, 10):
+    #     print("---", extracted)
     print(str(out).replace("STerm.", ""))
 
     return egraph, rootexpr, out
@@ -398,5 +474,61 @@ def test_binop_add():
     run(udt, checks, assume=assume)
 
 
+def test_max_if_else():
+    def udt(x, y):
+        # scalar max
+        if x > y:
+            return x
+        else:
+            return y
+
+    def assume(egraph):
+        @egraph.register
+        def facts(x: Value, y: Value, z: Value):
+            from egglog import rewrite, rule
+
+            yield rule(
+                vcall(VFunc("PyCmpOp::>"), x, y, z)
+            ).then(
+                is_pure(vcall(VFunc("PyCmpOp::>"), x, y, z))
+            )
+
+            yield rewrite(
+                VBinOp(">", x, y)
+            ).to(
+                Value.true()
+            )
+
+    checks = [
+        VRet(Value.bound(STerm.param(0)),
+             Value.bound(STerm.param(1)))
+    ]
+    run(udt, checks, assume=assume)
+
+    def assume(egraph):
+        @egraph.register
+        def facts(x: Value, y: Value, z: Value):
+            from egglog import rewrite, rule
+
+            yield rule(
+                vcall(VFunc("PyCmpOp::>"), x, y, z)
+            ).then(
+                is_pure(vcall(VFunc("PyCmpOp::>"), x, y, z))
+            )
+
+            yield rewrite(
+                VBinOp(">", x, y)
+            ).to(
+                Value.false()
+            )
+
+    checks = [
+        VRet(Value.bound(STerm.param(0)),
+             Value.bound(STerm.param(2)))
+    ]
+    run(udt, checks, assume=assume)
+
+
+test_me = test_max_if_else
 if __name__ == "__main__":
     test_me()
