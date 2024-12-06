@@ -6,6 +6,7 @@ import html
 from io import StringIO
 from collections import defaultdict
 from dataclasses import dataclass
+from typing import Iterator
 
 from egglog import EGraph
 
@@ -17,7 +18,7 @@ class Term:
     key: str
     type: str
     op: str
-    children: tuple[TermRef, ...]
+    children: tuple[str, ...]
     eclass: str
     cost: int
 
@@ -25,34 +26,38 @@ class Term:
     def literal(self) -> int | str:
         return self.op
 
-    def ref(self) -> TermRef:
-        return TermRef(self.key, self.type, self.op, self.eclass)
+    def __repr__(self):
+        cls = self.__class__.__name__
+        key = self.key
+        type = self.type
+        op = self.op
+        eclass = self.eclass
+        return f"{cls}({key}, {type}, {op}, {eclass})"
 
 
 @dataclass(frozen=True)
-class TermRef:
+class _TermRef:
     key: str
     type: str
     op: str
     eclass: str
 
-
 class EClassData:
     _terms: dict[str, Term]
-    _eclasses: dict[str, set[TermRef]]
+    _eclasses: dict[str, set[Term]]
 
     def __init__(self, terms: dict[str, Term]):
         self._terms = terms
         self._eclasses = defaultdict(set)
         for term in terms.values():
-            self._eclasses[term.eclass].add(term.ref())
+            self._eclasses[term.eclass].add(term)
 
     @property
     def terms(self) -> dict[str, Term]:
         return self._terms
 
     @property
-    def eclasses(self) -> dict[str, set[TermRef]]:
+    def eclasses(self) -> dict[str, set[Term]]:
         return self._eclasses
 
 
@@ -77,13 +82,13 @@ def reconstruct(
         typ = class_data[eclass]["type"]
         op = node_data["op"].strip('"')
 
-        key_to_termref[key] = TermRef(key=key, type=typ, op=op, eclass=eclass)
+        key_to_termref[key] = _TermRef(key=key, type=typ, op=op, eclass=eclass)
 
     # Second pass map keys to Terms
     for key, termref in key_to_termref.items():
         node_data = nodes[key]
         cost = node_data["cost"]
-        children = tuple(key_to_termref[x] for x in node_data["children"])
+        children = tuple(node_data["children"])
         done[key] = Term(
             key, termref.type, termref.op, children, termref.eclass, cost
         )
@@ -148,9 +153,9 @@ class ECTree:
         parent_ecmap = self._parent_eclasses
 
         for term in self._ecdata.terms.values():
-            for child in term.children:
-                parentmap[self._ecdata.terms[child.key]].add(term)
-                parent_ecmap[child.eclass].add(term.eclass)
+            for childkey in term.children:
+                parentmap[self._ecdata.terms[childkey]].add(term)
+                parent_ecmap[self._ecdata.terms[childkey].eclass].add(term.eclass)
 
     def root_eclasses(self) -> set[str]:
         """Find root eclasses
@@ -198,7 +203,7 @@ class ECTree:
             terms = [ecd.terms[termref.key] for termref in ecd.eclasses[ec]]
             depthmap = self._depthmap
             def child_depth(term: Term):
-                return max([0, *(depthmap[ch.eclass] for ch in term.children)])
+                return max([0, *(depthmap[ecd.terms[ch].eclass] for ch in term.children)])
             for term in sorted(terms, key=child_depth):
                 write_term(term)
             buf.write("</div>")
@@ -211,7 +216,7 @@ class ECTree:
             buf.write(f"<div class='content'>")
 
             for child in term.children:
-                write_eclass(child.eclass, ref_only=True)
+                write_eclass(ecd.terms[child].eclass, ref_only=True)
             buf.write("</div>")
             buf.write("</div>")
 

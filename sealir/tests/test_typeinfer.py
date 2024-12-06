@@ -525,13 +525,13 @@ class TypeInferData:
 
         # build map of typevar to eclass
         typevar_to_eclass = {}
-        TermRef = egg_utils.TermRef
+        Term = egg_utils.Term
         for ec, members in eclass_data.eclasses.items():
             for each in members:
                 match each:
-                    case TermRef(key, _, "TypeInfo.typevar"):
+                    case Term(key=key, op="TypeInfo.typevar"):
                         term = eclass_data.terms[key]
-                        tvid = eclass_data.terms[term.children[0].key].op
+                        tvid = eclass_data.terms[term.children[0]].op
                         typevar_to_eclass[tvid] = ec
         self.typevar_to_eclass = typevar_to_eclass
 
@@ -558,12 +558,10 @@ class TypeInferData:
         typevar_to_proof_eclass = {}
 
         for ec, members in eclass_data.eclasses.items():
-            proofs = [
-                eclass_data.terms[x.key] for x in members if x.op == "f_proof"
-            ]
+            proofs = [x for x in members if x.op == "f_proof"]
             for proof in proofs:
                 [child] = proof.children
-                tv_eclass = child.eclass
+                tv_eclass = eclass_data.terms[child].eclass
                 for k in eclass_to_typevar[tv_eclass]:
                     typevar_to_proof_eclass[k] = proof.eclass
         self.typevar_to_proof_eclass = typevar_to_proof_eclass
@@ -624,48 +622,46 @@ class TypeInferData:
 
     def pretty(self, ty: egg_utils.Term, namer, *, use_trait) -> str:
         pp = partial(self.prettyprint_eclass, namer=namer, use_trait=use_trait)
-
+        ecd = self.eclass_data
         match ty.op:
             case "TypeInfo.type":
                 [arg] = ty.children
-                return arg.op
+                return ecd.terms[arg].op
             case "TypeInfo.arrow":
-                [ec_arg, ec_res] = map(lambda x: x.eclass, ty.children)
+                [ec_arg, ec_res] = map(lambda x: ecd.terms[x].eclass, ty.children)
                 return f"{pp(ec_arg)}->{pp(ec_res)}"
             case "TypeInfo.tuple":
                 [args] = ty.children
                 eclasses = [
-                    x.eclass for x in self.eclass_data.terms[args.key].children
+                    ecd.terms[x].eclass for x in ecd.terms[args].children
                 ]
                 parts = ", ".join(pp(x) for x in eclasses)
                 return f"tuple[{parts}]"
             case "TypeInfo.typevar":
                 [arg] = ty.children
-                ident = arg.op
+                ident = ecd.terms[arg].op
                 return namer.get(ident)
             case "TypeInfo.merge":
-                [cond, args] = ty.children
+                [cond, args] = [ecd.terms[x] for x in ty.children]
                 # args must be a Vec
                 eclasses = [
-                    x.eclass for x in self.eclass_data.terms[args.key].children
+                    x.eclass for x in ecd.terms[args.key].children
                 ]
                 parts = ", ".join(pp(x) for x in eclasses)
                 return f"Merge({pp(cond)}, {parts})"
             case "TypeProof.trait":
-                [op, args] = ty.children
+                [op, args] = [ecd.terms[x] for x in ty.children]
                 # args must be a Vec
-                eclasses = [
-                    x.eclass for x in self.eclass_data.terms[args.key].children
-                ]
+                eclasses = [ecd.terms[x].eclass for x in args.children]
                 return f"(!{op.op} {' '.join(map(pp, eclasses))})"
             case "TypeProof.isa":
-                [lhs, rhs] = ty.children
+                [lhs, rhs] = [ecd.terms[x] for x in ty.children]
                 return f"(isa {namer.get(lhs.eclass)} {pp(rhs.eclass)})"
             case "TypeProof.arrow":
-                [arg, res] = ty.children
+                [arg, res] = [ecd.terms[x] for x in ty.children]
                 return f"{pp(arg.eclass)}->{pp(res.eclass)}"
             case "TypeProof.or_":
-                [lhs, rhs] = ty.children
+                [lhs, rhs] = [ecd.terms[x] for x in ty.children]
                 return f"{pp(lhs.eclass)}+{pp(rhs.eclass)}"
             case x:
                 assert False, x
