@@ -60,6 +60,42 @@ class EClassData:
     def eclasses(self) -> dict[str, set[Term]]:
         return self._eclasses
 
+    def children_of(self, term: Term) -> list[Term]:
+        return [self.terms[k] for k in term.children]
+
+    def find(self, opname: str) -> Iterator[Term]:
+        term: Term
+        for term in self._terms.values():
+            if term.op == opname:
+                yield term
+
+    def to_networkx(self, root_term: Term, ignore_types=frozenset()):
+        import networkx as nx
+
+        G = nx.DiGraph()
+        seen = set()
+        todos = [root_term.eclass]
+        while todos:
+            eclass = todos.pop()
+            if eclass in seen:
+                continue
+            seen.add(eclass)
+            members = self.eclasses[eclass]
+
+            G.add_node(eclass)
+
+            for term in members:
+                G.add_node(term.key)
+                G.add_edge(eclass, term.key)
+
+                if term.type not in ignore_types:
+                    for child in self.children_of(term):
+                        child_ec = child.eclass
+                        G.add_edge(term.key, child_ec)
+                        todos.append(child_ec)
+
+        return G
+
 
 def extract_eclasses(egraph: EGraph) -> EClassData:
     serialized = egraph._egraph.serialize([])
