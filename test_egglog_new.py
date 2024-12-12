@@ -542,8 +542,6 @@ def _LoopAnalysis(
 
 
 
-
-
 @ruleset
 def _Eval_Term_Literals(
     env: Env,
@@ -591,16 +589,17 @@ def run(root, *, checks=[], assume=None):
 
     """
 
-    egraph = EGraph()
+    egraph = EGraph() #save_egglog_string=True)
     egraph.let("root", root)
 
-    schedule = make_rules().saturate()
+    ruleset = make_rules()
 
     if assume is not None:
         assume(egraph)
 
-    saturate(egraph, schedule)
-    out = egraph.simplify(root, schedule)
+    saturate(egraph, ruleset)
+    out = egraph.simplify(root, ruleset.saturate())
+    # print(egraph.as_egglog_string)
     print("simplified output".center(80, "-"))
     print(out)
     print("=" * 80)
@@ -620,11 +619,32 @@ def region_builder(nin: int):
     return wrapped
 
 
-def saturate(egraph: EGraph, schedule):
+def saturate(egraph: EGraph, ruleset):
+    reports = []
     if DEBUG:
-        egraph.saturate(schedule, n_inline_leaves=1)
+        # Borrowed from egraph.saturate(schedule)
+
+        from pprint import pprint
+        from egglog.visualizer_widget import VisualizerWidget
+
+        def to_json() -> str:
+            return egraph._serialize().to_json()
+
+        egraphs = [to_json()]
+        while True:
+            report = egraph.run(ruleset)
+            reports.append(report)
+            egraphs.append(to_json())
+            # pprint({k: v for k, v in report.num_matches_per_rule.items()
+            #         if v > 0})
+            if not report.updated:
+                break
+        VisualizerWidget(egraphs=egraphs).display_or_open()
+
     else:
-        egraph.run(schedule)
+        report = egraph.run(ruleset.saturate())
+        reports.append(report)
+    return reports
 
 
 def test_straight_line_basic():
@@ -685,6 +705,14 @@ def test_max_if_else():
 
 
 def test_sum_loop():
+    # Equivalent source:
+    #     In [1]: def thesum(init, n):
+    #    ...:     c = init
+    #    ...:     for i in range(n):
+    #    ...:         c += i
+    #    ...:     return c
+    # Target:
+    #   c = sum(range(n))
     @region_builder(2)
     def main(region, ins):
         init = ins.get(0)
@@ -707,13 +735,18 @@ def test_sum_loop():
         loop = Term.Loop(termlist(i, n, c), body)
 
         # Return
-        return [loop.getPort(2)]
+        return [loop.getPort(2)]  # sum(range())
 
     # Eval with Env
     env = Env.nil()
-    env = env.nest(valuelist(Value.ConstI64(0), Value.ConstI64(10)))
+    # env = env.nest(valuelist(Value.ConstI64(0), Value.ConstI64(10)))
+    env = env.nest(valuelist(Value.Param(0), Value.Param(1)))
     root = Eval(env, main)
 
+    # FIXME:
+    # This is printing
+    #   VSum(Value.ConstI64(0), Value.Param(1), Value.ConstI64(1))
+    # But missing adjustment to initial offset
     checks = [
         # eq(root).to(valuelist(Value.ConstI64(1)).toValue()),
     ]
