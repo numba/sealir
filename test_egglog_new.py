@@ -18,10 +18,19 @@ from egglog import (
     StringLike,
     EGraph,
     function,
+    method,
 )
 from egglog import eq, ne, rule, rewrite, set_, union, ruleset
 
-DEBUG = bool(os.environ.get("DEBUG", ""))
+def read_env(v: str):
+    if v:
+        return int(v)
+    else:
+        return 0
+
+
+
+DEBUG = read_env(os.environ.get("DEBUG", ""))
 
 
 class RegionDef(Expr):
@@ -107,6 +116,13 @@ class TermList(Expr):
     def mapValue(self: TermList, fn: Callable[[Term], Value]) -> ValueList: ...
 
 
+class Debug(Expr):
+
+    @method(unextractable=True)
+    @classmethod
+    def ValueOf(cls, term: Term) -> Value: ...
+
+
 def termlist(*args: Term) -> TermList:
     return TermList(Vec(*args))
 
@@ -177,10 +193,12 @@ class LVA(Expr):
     ...
 
 @function
-def LVAnalysis(v: Value) -> LVA: ...
+def LVAnalysis(phi: Value) -> LVA:
+    """LVAnalysis always apply to the phi node"""
+    ...
 
 @function
-def LoopIncremented(op: StringLike, phi: Value, init: Value, step: Value) -> LVA: ...
+def LoopIncremented(op: StringLike, phi: Value, init: Value, step: Value, res: Value) -> LVA: ...
 @function
 def LoopIndVar(op: StringLike, start: Value, stop: Value, step: Value) -> LVA: ...
 @function
@@ -440,6 +458,16 @@ def _EvalMap_to_ValueList(
         vec_terms.length() > i64(0),
     )
 
+@ruleset
+def _Debug_Eval(term: Term, env: Env, val: Value):
+    yield rule(
+        Debug.ValueOf(term),
+        eq(val).to(Eval(env, term)),
+    ).then(
+        union(Debug.ValueOf(term)).with_(val)
+    )
+
+
 
 @ruleset
 def _EnvEnter_EvalMap(terms: TermList, env: Env):
@@ -512,7 +540,7 @@ def _LoopAnalysis(
         eq(vc).to(va | vb),
         eq(va).to(VBinOp(op, vc, vby)),
     ).then(
-        union(LVAnalysis(va)).with_(LoopIncremented(op, vc, vb, vby))
+        union(LVAnalysis(vc)).with_(LoopIncremented(op, vc, vb, vby, va))
     )
     # Match LoopIncrement() < n as LoopIndVar if cond used by VLoop
     yield rule(
@@ -520,14 +548,14 @@ def _LoopAnalysis(
         eq(vcond).to(vs[0]),  # the condition
         eq(vcond).to(VBinOp("Lt", vc, vn)),
         vphis.contains(va),
-        eq(LVAnalysis(vc)).to(LoopIncremented(op, va, vb, vby)),
+        eq(LVAnalysis(va)).to(LoopIncremented(op, va, vb, vby, vc)),
         eq(i64(1) + vphis.length()).to(vs.length()), # wellformed
     ).then(
         union(LVAnalysis(va)).with_(LoopIndVar(op, vb, vn, vby))
     )
     # Match accumulator c += vstep
     yield rule(
-        eq(LVAnalysis(va)).to(LoopIncremented(op, vb, vc, vby)),
+        eq(LVAnalysis(vb)).to(LoopIncremented(op, vb, vc, vby, va)),
         eq(LVAnalysis(vby)).to(LoopIndVar(op2, vstart, vstop, vstep))
     ).then(
         union(LVAnalysis(vb)).with_(LoopAccumIndVar(op,
@@ -597,11 +625,12 @@ def make_rules():
         | _VBinOp_assoc
         | _VBinOp_Lt
         | _VBinOp_Add
+        | _Debug_Eval
         | _LoopAnalysis
     )
 
 
-def run(root, *, checks=[], assume=None):
+def run(root, *, checks=[], assume=None, debug_points=None):
     """
     Example assume
     --------------
@@ -621,6 +650,10 @@ def run(root, *, checks=[], assume=None):
 
     ruleset = make_rules()
 
+    if debug_points:
+        for k, v in debug_points.items():
+            egraph.let(f'debug_point_{k}', v)
+
     if assume is not None:
         assume(egraph)
 
@@ -631,8 +664,19 @@ def run(root, *, checks=[], assume=None):
     print(out)
     print("=" * 80)
     if checks:
-        egraph.check(*checks)
-    return out
+        try:
+            egraph.check(*checks)
+        except Exception:
+            if debug_points:
+                for k, v in debug_points.items():
+                    print(f"debug {k}".center(80, '-'))
+                    for each in egraph.extract_multiple(v, 5):
+                        print(each)
+                        print('-=-')
+
+
+            raise
+    return egraph
 
 
 def region_builder(nin: int):
@@ -730,6 +774,35 @@ def test_max_if_else():
     ]
     run(root, checks=checks)
 
+def test_loop_analysis():
+    debug_points = {}
+    @region_builder(2)
+    def loop(region, ins):
+        a, b = ins.get(0), ins.get(1)
+
+        debug_points['a'] = LVAnalysis(Debug.ValueOf(a))
+
+        na = Term.Add(a, Term.LiteralI64(1))
+        cond = Term.Lt(na, b)
+        return [cond, na, b]
+
+    @region_builder(2)
+    def main(region, ins):
+        return [Term.Loop(termlist(ins.get(0), ins.get(1)), loop)]
+
+    # Eval with Env
+    env = Env.nil()
+    env = env.nest(valuelist(Value.Param(0), Value.Param(1)))
+    root = Eval(env, main)
+
+    run(
+        root,
+        checks=[
+            eq(debug_points['a']).to(LoopIndVar("Add", Value.Param(0), Value.Param(1), Value.ConstI64(1))),
+        ],
+        debug_points=debug_points,
+    )
+
 
 def test_sum_loop():
     # Equivalent source:
@@ -740,6 +813,9 @@ def test_sum_loop():
     #    ...:     return c
     # Target:
     #   c = sum(range(n))
+
+    debug_points = {}
+
     @region_builder(2)
     def main(region, ins):
         init = ins.get(0)
@@ -752,6 +828,8 @@ def test_sum_loop():
             i = ins.get(0)
             n = ins.get(1)
             c = ins.get(2)
+
+            debug_points['i'] = Debug.ValueOf(i)
 
             c = Term.Add(c, i)
             i = Term.Add(i, Term.LiteralI64(1))
@@ -785,9 +863,9 @@ def test_sum_loop():
             ).toValue()
         ),
     ]
-    run(root, checks=checks)
+    run(root, checks=checks, debug_points=debug_points)
 
 
 if __name__ == "__main__":
-    test_sum_loop()
+    test_loop_analysis()
 
