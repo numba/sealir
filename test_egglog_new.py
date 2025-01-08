@@ -184,7 +184,7 @@ def LoopIncremented(op: StringLike, phi: Value, init: Value, step: Value) -> LVA
 @function
 def LoopIndVar(op: StringLike, start: Value, stop: Value, step: Value) -> LVA: ...
 @function
-def LoopAccumIndVar(op: StringLike, start: Value, stop: Value, step: Value) -> LVA: ...
+def LoopAccumIndVar(op: StringLike, init: Value, start: Value, stop: Value, step: Value) -> LVA: ...
 
 @function
 def IsLoopInVariant(v: Value) -> Bool: ...
@@ -243,6 +243,7 @@ def _VLoop(
     phis: ValueList,
     va: Value,
     vb: Value,
+    i: i64,
 ):
     # VLoop
     yield rewrite(
@@ -287,6 +288,13 @@ def _VLoop(
         ValueList(vec_va.remove(0)).map(VFix)
     )
 
+    # VFix of Param
+    yield rewrite(
+        VFix(Value.Param(i))
+    ).to(
+        Value.Param(i)
+    )
+
     # PhiMap
     yield rewrite(
         PhiMap(vl, vl2)
@@ -295,7 +303,7 @@ def _VLoop(
     )
 
     # Phi
-    yield rewrite(VPhi(va, vb)).to(va|vb)
+    yield rewrite(VPhi(va, vb), subsume=True).to(va|vb)
 
 
 @ruleset
@@ -346,7 +354,10 @@ def _ValueList_rules(
     fn: Callable[[Value], Value],
     merge_fn: Callable[[Value, Value], Value],
 ):
-    yield rewrite(ValueList(vs1).append(ValueList(vs2))).to(
+    yield rewrite(
+        ValueList(vs1).append(ValueList(vs2)),
+        subsume=True,
+    ).to(
         ValueList(vs1.append(vs2))
     )
     # Simplify ValueList
@@ -364,14 +375,18 @@ def _ValueList_rules(
         # given
         eq(i64(0)).to(vs1.length()),
     )
-    yield rewrite(ValueList(vs1).map(fn)).to(
+    yield rewrite(
+        ValueList(vs1).map(fn),
+        subsume=True,
+    ).to(
         valuelist(fn(vs1[0])).append(ValueList(vs1.remove(0)).map(fn)),
         # given
         vs1.length() > i64(0),
     )
     # Merge
     yield rewrite(
-        ValueList.Merge(merge_fn, ValueList(vs1), ValueList(vs2))
+        ValueList.Merge(merge_fn, ValueList(vs1), ValueList(vs2)),
+        subsume=True,
     ).to(
         ValueList(Vec(merge_fn(vs1[0], vs2[0]))).append(
             ValueList.Merge(merge_fn, ValueList(vs1.remove(0)), ValueList(vs2.remove(0)))
@@ -381,7 +396,8 @@ def _ValueList_rules(
         vs2.length() > i64(0),
     )
     yield rewrite(
-        ValueList.Merge(merge_fn, ValueList(Vec[Value].empty()), ValueList(Vec[Value].empty()))
+        ValueList.Merge(merge_fn, ValueList(Vec[Value].empty()), ValueList(Vec[Value].empty())),
+        subsume=True,
     ).to(
         ValueList(Vec[Value].empty())
     )
@@ -474,6 +490,7 @@ def _LoopAnalysis(
     va: Value,
     vb: Value,
     vc: Value,
+    vinit: Value,
     vstart: Value,
     vstop: Value,
     vstep: Value,
@@ -513,7 +530,11 @@ def _LoopAnalysis(
         eq(LVAnalysis(va)).to(LoopIncremented(op, vb, vc, vby)),
         eq(LVAnalysis(vby)).to(LoopIndVar(op2, vstart, vstop, vstep))
     ).then(
-        union(LVAnalysis(vb)).with_(LoopAccumIndVar(op, vstart, vstop, vstep))
+        union(LVAnalysis(vb)).with_(LoopAccumIndVar(op,
+                                                    init=vc,
+                                                    start=vstart,
+                                                    stop=vstop,
+                                                    step=vstep))
     )
 
     # Help find the phi node
@@ -523,21 +544,27 @@ def _LoopAnalysis(
     ).then(
         _MapLoopPhiOf(ValueList(vphis), ValueList(vs.remove(0))),
     )
-    yield rewrite(_MapLoopPhiOf(ValueList(vphis), ValueList(vs))).to(
+    yield rewrite(_MapLoopPhiOf(
+        ValueList(vphis), ValueList(vs)),
+        subsume=True,
+    ).to(
         valuelist(_LoopPhiOf(vphis[0], vs[0])).append(_MapLoopPhiOf(ValueList(vphis.remove(0)), ValueList(vs.remove(0)))),
         # given
         vphis.length() > 0
     )
-    yield rewrite(_MapLoopPhiOf(valuelist(), valuelist())).to(valuelist())
+    yield rewrite(
+        _MapLoopPhiOf(valuelist(), valuelist()),
+        subsume=True,
+    ).to(valuelist())
 
     # Match VFix(v) and LVAnalysis(v) is LoopAccumIndVar
     yield rewrite(
         VFix(va)
     ).to(
-        VSum(vstart, vstop, vstep),
+        VBinOp("Add", vinit, VSum(vstart, vstop, vstep)),
         # given
         _LoopPhiOf(vb, va),
-        eq(LVAnalysis(vb)).to(LoopAccumIndVar("Add", vstart, vstop, vstep))
+        eq(LVAnalysis(vb)).to(LoopAccumIndVar("Add", vinit, vstart, vstop, vstep))
     )
 
 
@@ -598,7 +625,7 @@ def run(root, *, checks=[], assume=None):
         assume(egraph)
 
     saturate(egraph, ruleset)
-    out = egraph.simplify(root, ruleset.saturate())
+    out = egraph.extract(root)
     # print(egraph.as_egglog_string)
     print("simplified output".center(80, "-"))
     print(out)
@@ -735,20 +762,28 @@ def test_sum_loop():
         loop = Term.Loop(termlist(i, n, c), body)
 
         # Return
-        return [loop.getPort(2)]  # sum(range())
+        return [loop.getPort(1), loop.getPort(2)]  # sum(range())
 
     # Eval with Env
     env = Env.nil()
-    # env = env.nest(valuelist(Value.ConstI64(0), Value.ConstI64(10)))
     env = env.nest(valuelist(Value.Param(0), Value.Param(1)))
     root = Eval(env, main)
 
-    # FIXME:
-    # This is printing
-    #   VSum(Value.ConstI64(0), Value.Param(1), Value.ConstI64(1))
-    # But missing adjustment to initial offset
     checks = [
-        # eq(root).to(valuelist(Value.ConstI64(1)).toValue()),
+        eq(root).to(
+            valuelist(
+                Value.Param(1),
+                VBinOp(
+                    "Add",
+                    Value.Param(0),
+                    VSum(
+                        Value.ConstI64(0),
+                        Value.Param(1),
+                        Value.ConstI64(1),
+                    ),
+                ),
+            ).toValue()
+        ),
     ]
     run(root, checks=checks)
 
