@@ -570,6 +570,11 @@ def traverse(
                 return True, stack.pop()
             else:
                 return False, (None, None, None)
+        except Exception as exc:
+            if hasattr(exc, "add_note"):
+                for _, head, *_ in stack:
+                    exc.add_note(f" * during handling of: {head}")
+            raise
         else:
             return True, (coro, cur_node, item)
 
