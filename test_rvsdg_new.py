@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import ast
@@ -14,14 +13,22 @@ from dataclasses import dataclass, field
 from functools import reduce
 from pprint import pformat, pprint
 from textwrap import dedent
-from typing import Any, Iterable, Iterator, NamedTuple, Sequence, TypeAlias, cast
+from typing import (
+    Any,
+    Iterable,
+    Iterator,
+    NamedTuple,
+    Sequence,
+    TypeAlias,
+    cast,
+)
 
 from sealir import ase, grammar, lam
 from sealir.rewriter import TreeRewriter
 
 from sealir import rvsdg
 
-_DEBUG=True
+_DEBUG = True
 
 SExpr: TypeAlias = ase.SExpr
 
@@ -30,6 +37,7 @@ from numba_rvsdg.core.datastructures.ast_transforms import (
     SCFG2ASTTransformer,
     unparse_code,
 )
+
 
 def pp(expr: SExpr):
     if _DEBUG:
@@ -104,10 +112,8 @@ def restructure_source(function):
     # return lam_node
 
 
-
 class _Root(grammar.Rule):
     pass
-
 
 
 class Args(_Root):
@@ -118,10 +124,12 @@ class RegionBegin(_Root):
     ins: str
     ports: tuple[SExpr, ...]
 
+
 class RegionEnd(_Root):
     begin: RegionBegin
     outs: str
     ports: tuple[SExpr, ...]
+
 
 class Func(_Root):
     fname: str
@@ -135,39 +143,53 @@ class IfElse(_Root):
     orelse: SExpr
     outs: str
 
-class DoWhile(_Root):
+
+class Loop(_Root):
     body: SExpr
     outs: str
+    loopvar: str
+
 
 class IO(_Root):
     pass
+
 
 class ArgSpec(_Root):
     name: str
     annotation: SExpr
 
+
 class Return(_Root):
     io: SExpr
     val: SExpr
 
-class PyNone(_Root):
-    ...
+
+class PyNone(_Root): ...
+
 
 class PyInt(_Root):
     value: int
 
+
+class PyBool(_Root):
+    value: bool
+
+
 class PyStr(_Root):
     value: str
+
 
 class PyCall(_Root):
     func: SExpr
     io: SExpr
     args: tuple[SExpr]
 
+
 class PyUnaryOp(_Root):
     op: str
     io: SExpr
     operand: SExpr
+
 
 class PyBinOp(_Root):
     op: str
@@ -182,23 +204,29 @@ class PyInplaceBinOp(_Root):
     lhs: SExpr
     rhs: SExpr
 
+
 class PyLoadGlobal(_Root):
     io: SExpr
     name: str
 
+
 class Var(_Root):
     name: str
 
+
 class Undef(_Root):
     name: str
+
 
 class Unpack(_Root):
     val: SExpr
     idx: int
 
+
 class ArgRef(_Root):
     idx: int
     name: str
+
 
 class Grammar(grammar.Grammar):
     start = _Root
@@ -213,6 +241,7 @@ class RvsdgizeState(ase.TraverseState):
 class Scope:
     kind: str
     varmap: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class RvsdgizeCtx:
@@ -260,7 +289,7 @@ class RvsdgizeCtx:
 
     def load_var(self, name: str) -> SExpr:
         scope = self.scope
-        if v:=scope.varmap.get(name):
+        if v := scope.varmap.get(name):
             return v
         else:
             # Treat as global
@@ -299,7 +328,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
     grm = ctx.grm
 
     def prep_varnames(d) -> str:
-        return ' '.join(d)
+        return " ".join(d)
 
     def fixup(regend, updated_vars):
         updated = prep_varnames(updated_vars)
@@ -308,65 +337,95 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             return regend
         else:
             oldports = dict(zip(regend.outs.split(), regend.ports))
-            ports = tuple(oldports[k] if k in oldports else grm.write(Undef(k))
-                            for k in updated_vars)
-            return grm.write(RegionEnd(begin=regend.begin, outs=updated, ports=ports))
+            ports = tuple(
+                oldports[k] if k in oldports else grm.write(Undef(k))
+                for k in updated_vars
+            )
+            return grm.write(
+                RegionEnd(begin=regend.begin, outs=updated, ports=ports)
+            )
+
+    def extract_name_load(var_load: SExpr) -> str:
+        match var_load._head, var_load._args:
+            case "PyAst_Name", (str(name), "load", _):
+                return name
+        raise NotImplementedError(var_load)
 
     match (expr._head, expr._args):
         case ("PyAst_FunctionDef", (str(fname), args, body, loc)):
             with ctx.new_function(expr):
-                return grm.write(Func(fname=fname, args=(yield args), body=(yield body)))
+                return grm.write(
+                    Func(fname=fname, args=(yield args), body=(yield body))
+                )
         case ("PyAst_arg", (str(name), annotation, loc)):
             return grm.write(ArgSpec(name=name, annotation=(yield annotation)))
         case ("PyAst_arguments", args):
             arg_done = []
             for i, arg in enumerate(args):
-                x = (yield arg)
+                x = yield arg
                 arg_done.append(x)
                 ctx.add_argument(i, x.name)
             return grm.write(Args(tuple(arg_done)))
         case ("PyAst_block", body):
 
-            begin = grm.write(RegionBegin(ins=prep_varnames(ctx.scope.varmap),
-                                          ports=ctx.load_vars(ctx.scope.varmap)))
+            begin = grm.write(
+                RegionBegin(
+                    ins=prep_varnames(sorted(ctx.scope.varmap)),
+                    ports=ctx.load_vars(ctx.scope.varmap),
+                )
+            )
             with ctx.new_block(expr) as scope:
                 ctx.initialize_scope(begin)
                 for expr in body:
                     (yield expr)
                 vars = sorted(scope.varmap)
                 ports = ctx.load_vars(vars)
-            return grm.write(RegionEnd(begin=begin,
-                                       outs=prep_varnames(vars),
-                                       ports=ports))
+            return grm.write(
+                RegionEnd(begin=begin, outs=prep_varnames(vars), ports=ports)
+            )
 
         case ("PyAst_If", (test, body, orelse, loc)):
-            cond = (yield test)
-            br_true = (yield body)
-            br_false = (yield orelse)
-            updated_vars = ctx.updated_vars([ctx.scope_map[body], ctx.scope_map[orelse]])
+            cond = yield test
+            br_true = yield body
+            br_false = yield orelse
+            updated_vars = ctx.updated_vars(
+                [ctx.scope_map[body], ctx.scope_map[orelse]]
+            )
             # fixup mismatching updated vars
             br_true = fixup(br_true, updated_vars)
             br_false = fixup(br_false, updated_vars)
 
-            swt = grm.write(IfElse(cond=cond, body=br_true, orelse=br_false, outs=' '.join(updated_vars)))
+            swt = grm.write(
+                IfElse(
+                    cond=cond,
+                    body=br_true,
+                    orelse=br_false,
+                    outs=" ".join(updated_vars),
+                )
+            )
             # update scope
             for i, k in enumerate(updated_vars):
                 ctx.store_var(k, grm.write(Unpack(val=swt, idx=i)))
 
-        case ("PyAst_While", (_alwaystrue, body, loc)):
-            loopbody = (yield body)
+        case ("PyAst_While", (loopcondvar, body, loc)):
+            loopbody = yield body
+            loopvar = extract_name_load(loopcondvar)
             updated_vars = ctx.updated_vars([ctx.scope_map[body]])
-            dow = grm.write(DoWhile(body=loopbody, outs=' '.join(updated_vars)))
+            dow = grm.write(
+                Loop(
+                    body=loopbody, outs=" ".join(updated_vars), loopvar=loopvar
+                )
+            )
             # update scope
             for i, k in enumerate(updated_vars):
                 ctx.store_var(k, grm.write(Unpack(val=dow, idx=i)))
 
         case ("PyAst_Return", (value, loc)):
-            v = (yield value)
+            v = yield value
             ctx.store_var(_internal_prefix("ret"), v)
 
         case ("PyAst_Assign", (rval, *targets, loc)):
-            res = (yield rval)
+            res = yield rval
             tar: SExpr
             for tar in targets:
                 assert tar._head == "PyAst_Name", tar
@@ -381,38 +440,44 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                 case _:
                     raise AssertionError(target)
             lhs = ctx.load_var(varname)
-            rhs = (yield rhs)
+            rhs = yield rhs
             res = PyInplaceBinOp(op=op, io=ctx.load_io(), lhs=lhs, rhs=rhs)
             return ctx.insert_io_node(res)
 
         case ("PyAst_UnaryOp", (str(op), operand, loc)):
-            res = PyUnaryOp(op=op, io=ctx.load_io(),
-                            operand=(yield operand))
+            res = PyUnaryOp(op=op, io=ctx.load_io(), operand=(yield operand))
             return ctx.insert_io_node(res)
 
         case ("PyAst_BinOp", (str(op), lhs, rhs, loc)):
-            res = PyBinOp(op=op, io=ctx.load_io(),
-                          lhs=(yield lhs), rhs=(yield rhs))
+            res = PyBinOp(
+                op=op, io=ctx.load_io(), lhs=(yield lhs), rhs=(yield rhs)
+            )
             return ctx.insert_io_node(res)
 
         case ("PyAst_Compare", (str(op), lhs, rhs, loc)):
-            res =  PyBinOp(op=op, io=ctx.load_io(),
-                           lhs=(yield lhs), rhs=(yield rhs))
+            res = PyBinOp(
+                op=op, io=ctx.load_io(), lhs=(yield lhs), rhs=(yield rhs)
+            )
             return ctx.insert_io_node(res)
 
-        case ("PyAst_Call", (SExpr() as func , SExpr() as posargs, loc)):
+        case ("PyAst_Call", (SExpr() as func, SExpr() as posargs, loc)):
             proc_args = []
             for arg in posargs._args:
                 proc_args.append((yield arg))
 
-            call = PyCall(func=(yield func), io=ctx.load_io(), args=tuple(proc_args))
-            return  ctx.insert_io_node(call)
+            call = PyCall(
+                func=(yield func), io=ctx.load_io(), args=tuple(proc_args)
+            )
+            return ctx.insert_io_node(call)
 
         case ("PyAst_Name", (str(name), "load", loc)):
             return ctx.load_var(name)
 
         case ("PyAst_Constant_int", (int(value), loc)):
             return grm.write(PyInt(value))
+
+        case ("PyAst_Constant_bool", (bool(value), loc)):
+            return grm.write(PyBool(value))
 
         case ("PyAst_Constant_str", (str(value), loc)):
             return grm.write(PyStr(value))
@@ -423,7 +488,6 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             return
         case _:
             raise NotImplementedError(expr)
-
 
 
 def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
@@ -451,7 +515,7 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
             indentlevel -= 1
 
     def put(text: str):
-        prefix = ' ' * indentlevel * 2
+        prefix = " " * indentlevel * 2
         buffer.append(prefix + text)
 
     def formatter(expr: SExpr, state: ase.TraverseState):
@@ -464,7 +528,9 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 for port in ports:
                     inports.append((yield port))
                 name = fresh_name()
-                fmtins = starmap(lambda x, y: f"{x}={y}", zip(ins.split(), inports))
+                fmtins = starmap(
+                    lambda x, y: f"{x}={y}", zip(ins.split(), inports)
+                )
                 put(f"{name} = Region <- {' '.join(fmtins)}")
                 return name
             case RegionEnd(begin=begin, outs=str(outs), ports=ports):
@@ -474,10 +540,12 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 with indent():
                     for port in ports:
                         outrefs.append((yield port))
-                fmtoutports = starmap(lambda x, y: f"{y}={x}", zip(outrefs, outs.split()))
+                fmtoutports = starmap(
+                    lambda x, y: f"{y}={x}", zip(outrefs, outs.split())
+                )
                 put(f"}} -> {' '.join(fmtoutports)}")
             case IfElse(cond, body, orelse, outs):
-                condref = (yield cond)
+                condref = yield cond
                 name = fresh_name()
                 put(f"{name} = If {condref} ")
                 with indent():
@@ -487,8 +555,16 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 put(f"Endif -> {outs}")
                 return name
 
+            case Loop(body, outs, loopvar):
+                name = fresh_name()
+                put(f"{name} = Loop #{loopvar}")
+                with indent():
+                    (yield body)
+                put(f"EndLoop -> {outs}")
+                return name
+
             case Unpack(val=source, idx=int(idx)):
-                ref = (yield source)
+                ref = yield source
                 return f"{ref}[{idx}]"
             case ArgRef(idx=int(idx), name=str(name)):
                 return f"(ArgRef {idx} {name})"
@@ -501,27 +577,74 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 put(f"{name} = Undef {k}")
                 return name
 
+            case PyNone():
+                name = fresh_name()
+                put(f"{name} = PyNone")
+                return name
+
+            case PyBool(bool(v)):
+                name = fresh_name()
+                put(f"{name} = PyBool {v}")
+                return name
             case PyInt(int(v)):
                 name = fresh_name()
                 put(f"{name} = PyInt {v}")
                 return name
+            case PyStr(str(v)):
+                name = fresh_name()
+                put(f"{name} = PyStr {v!r}")
+                return name
 
             case PyBinOp(op, io, lhs, rhs):
-                ioref = (yield io)
-                lhsref = (yield lhs)
-                rhsref = (yield rhs)
+                ioref = yield io
+                lhsref = yield lhs
+                rhsref = yield rhs
                 name = fresh_name()
-                put(f"{name} = PyBinOp {op} {ioref}, {lhsref}, {rhsref}")
+                put(f"{name} = PyBinOp {op} {ioref} {lhsref}, {rhsref}")
                 return name
+
+            case PyInplaceBinOp(op, io, lhs, rhs):
+                ioref = yield io
+                lhsref = yield lhs
+                rhsref = yield rhs
+                name = fresh_name()
+                put(
+                    f"{name} = PyInplaceBinOp {op} {ioref}, {lhsref}, {rhsref}"
+                )
+                return name
+
+            case PyUnaryOp(op, io, operand):
+                ioref = yield io
+                operandref = yield operand
+                name = fresh_name()
+                put(f"{name} = PyUnaryOp {op} {ioref} {operand}")
+                return name
+
+            case PyCall(func, io, args):
+                funcref = yield func
+                ioref = yield io
+                argrefs = []
+                for arg in args:
+                    argrefs.append((yield arg))
+                fmtargs = ", ".join(argrefs)
+                name = fresh_name()
+                put(f"{name} = PyCall {funcref} {ioref} {fmtargs}")
+                return name
+
+            case PyLoadGlobal(io, str(varname)):
+                ioref = yield io
+                name = fresh_name()
+                put(f"{name} = PyLoadGlobal {ioref} {varname!r}")
+                return name
+
             case _:
                 print("----debug")
-                print('\n'.join(buffer))
+                print("\n".join(buffer))
                 raise NotImplementedError(expr)
-
 
     ase.traverse(prgm, formatter)
 
-    return'\n'.join(buffer)
+    return "\n".join(buffer)
 
 
 def convert_to_rvsdg(grm: Grammar, prgm: SExpr):
@@ -538,7 +661,6 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr):
     print(format_rvsdg(grm, out))
 
 
-
 def test_if_else():
 
     def udt(c):
@@ -548,20 +670,21 @@ def test_if_else():
         else:
             pass
         return b + 1
+
     restructure_source(udt)
 
 
-def main():
+def test_for_loop():
 
     def udt(n):
         c = 0
         for i in range(n):
-            c += 1
+            c += i
         return c
 
     restructure_source(udt)
 
 
 if __name__ == "__main__":
-    # main()
-    test_if_else()
+    test_for_loop()
+    # test_if_else()

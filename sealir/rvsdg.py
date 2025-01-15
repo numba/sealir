@@ -242,6 +242,12 @@ class ConvertToSExpr(ast.NodeTransformer):
     def visit_Constant(self, node: ast.Constant) -> SExpr:
         if node.kind is None:
             match node.value:
+                case bool():
+                    return self._tape.expr(
+                        "PyAst_Constant_bool",
+                        node.value,
+                        self.get_loc(node),
+                    )
                 case int():
                     return self._tape.expr(
                         "PyAst_Constant_int",
