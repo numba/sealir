@@ -448,6 +448,10 @@ class Py_Int(_Root):
     value: int
 
 
+class Py_Bool(_Root):
+    value: bool
+
+
 class Py_Complex(_Root):
     real: float
     imag: float
@@ -761,6 +765,11 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
             self, orig: ase.BasicSExpr, *args: SExpr
         ) -> SExpr:
             return grm.write(Py_Args(args))
+
+        def rewrite_PyAst_Constant_bool(
+            self, orig: ase.BasicSExpr, val: bool, loc: SExpr
+        ) -> SExpr:
+            return grm.write(Py_Bool(val))
 
         def rewrite_PyAst_Constant_int(
             self, orig: ase.BasicSExpr, val: int, loc: SExpr
@@ -1147,6 +1156,8 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr, varinfo: VariableInfo):
                     match defn:
                         case Py_Int(1):
                             break
+                        case Py_Bool(True):
+                            break
                         case _:
                             raise AssertionError(
                                 f"unsupported loop: {cur}\ndefn {defn}"
@@ -1260,7 +1271,14 @@ def convert_to_lambda(prgm: SExpr, varinfo: VariableInfo):
                 if name not in parameters:
                     return grm.write(Py_Undef())
                 else:
-                    return grm.write(lam.Arg(len(parameters) - parameters.index(name) - 1 + depth))
+                    return grm.write(
+                        lam.Arg(
+                            len(parameters)
+                            - parameters.index(name)
+                            - 1
+                            + depth
+                        )
+                    )
             return grm.write(lam.Arg(depth))
 
         def rewrite_Let(
@@ -1494,6 +1512,8 @@ def lambda_evaluation(expr: ase.BasicSExpr, state: EvalLamState):
             case Py_None():
                 return None
             case Py_Int(int(ival)):
+                return ival
+            case Py_Bool(bool(ival)):
                 return ival
             case Py_Complex(real=float(freal), imag=float(fimag)):
                 return complex(freal, fimag)

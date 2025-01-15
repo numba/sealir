@@ -236,7 +236,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             gv.initializer = byte_string
             gv.linkage = "internal"
             return pyapi.string_from_string(builder.bitcast(gv, pyapi.cstring))
-        case rvsdg.Py_Int(int(ival)):
+        case rvsdg.Py_Int(int(ival)) | rvsdg.Py_Bool(int(ival)):
             const = ir.Constant(pyapi.py_ssize_t, int(ival))
             return pyapi.long_from_ssize_t(const)
         case rvsdg.Py_Tuple(args):
