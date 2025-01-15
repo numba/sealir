@@ -51,7 +51,9 @@ def _intercept_cells(grm, fn, arity):
             if val._head == "Arg":
                 # increase de Lruijn index
                 [idx] = val._args
-                new_closure.append(types.CellType(grm.write(Arg(arity - 1 - idx + 1))))
+                new_closure.append(
+                    types.CellType(grm.write(Arg(arity - 1 - idx + 1)))
+                )
                 changed = True
             elif val._head != "Lam":
                 # cannot refer to Expr by freevars

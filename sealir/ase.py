@@ -545,6 +545,7 @@ def traverse(
     self: SExpr,
     corofunc: Callable[[SExpr, TraverseState], Coroutine[SExpr, T, T]],
     state: TraverseState | None = None,
+    init_memo: dict | None = None,
 ) -> dict[SExpr, T]:
     """Traverses the expression tree rooted at the current node, applying
     the provided coroutine function to each node in a depth-first order.
@@ -556,6 +557,8 @@ def traverse(
     stack: list[tuple[Coroutine[SExpr, T, T], SExpr, SExpr]]
     stack = []
     memo = {}
+    if init_memo is not None:
+        memo.update(init_memo)
     cur_node = self
     state = state or TraverseState()
     coro = corofunc(cur_node, state)

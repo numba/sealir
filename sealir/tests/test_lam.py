@@ -74,8 +74,8 @@ def test_curry():
         out = app_func(grm, lam1, grm.write(Num(1)), grm.write(Num(2)))
         print(ase.pretty_str(out))
         assert (
-            ase.pretty_str(out) ==
-            "(App (Num 2) (App (Num 1) (Lam (Lam (Arg 1)))))"
+            ase.pretty_str(out)
+            == "(App (Num 2) (App (Num 1) (Lam (Lam (Arg 1)))))"
         )
 
         @lam_func(grm)
@@ -85,10 +85,9 @@ def test_curry():
         out = app_func(grm, lam2, grm.write(Num(1)), grm.write(Num(2)))
         print(ase.pretty_str(out))
         assert (
-            ase.pretty_str(out) ==
-            "(App (Num 2) (App (Num 1) (Lam (Lam (Arg 0)))))"
+            ase.pretty_str(out)
+            == "(App (Num 2) (App (Num 1) (Lam (Lam (Arg 0)))))"
         )
-
 
 
 def test_lam():
@@ -99,7 +98,6 @@ def test_lam():
             c = grm.write(Add(lhs=a, rhs=b))
             d = grm.write(Sub(lhs=a, rhs=a))
             return grm.write(Tuple((c, d)))
-
 
         out = app_func(grm, lam1, grm.write(Num(1)), grm.write(Num(2)))
 

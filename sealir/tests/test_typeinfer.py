@@ -628,7 +628,9 @@ class TypeInferData:
                 [arg] = ty.children
                 return ecd.terms[arg].op
             case "TypeInfo.arrow":
-                [ec_arg, ec_res] = map(lambda x: ecd.terms[x].eclass, ty.children)
+                [ec_arg, ec_res] = map(
+                    lambda x: ecd.terms[x].eclass, ty.children
+                )
                 return f"{pp(ec_arg)}->{pp(ec_res)}"
             case "TypeInfo.tuple":
                 [args] = ty.children
@@ -644,9 +646,7 @@ class TypeInferData:
             case "TypeInfo.merge":
                 [cond, args] = [ecd.terms[x] for x in ty.children]
                 # args must be a Vec
-                eclasses = [
-                    x.eclass for x in ecd.terms[args.key].children
-                ]
+                eclasses = [x.eclass for x in ecd.terms[args.key].children]
                 parts = ", ".join(pp(x) for x in eclasses)
                 return f"Merge({pp(cond)}, {parts})"
             case "TypeProof.trait":
