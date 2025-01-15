@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import inspect
+import builtins
 from string import Formatter
 import logging
 import operator
@@ -21,6 +22,7 @@ from typing import (
     Sequence,
     TypeAlias,
     cast,
+    Type,
 )
 
 from sealir import ase, grammar, lam
@@ -84,6 +86,7 @@ def restructure_source(function):
     grm = Grammar(prgm._tape)
 
     rvsdg_out = convert_to_rvsdg(grm, prgm)
+    return rvsdg_out
 
     # _logger.debug("convert_to_rvsdg", time.time() - t_start)
 
@@ -223,6 +226,11 @@ class Unpack(_Root):
     idx: int
 
 
+class DbgValue(_Root):
+    name: str
+    value: SExpr
+
+
 class ArgRef(_Root):
     idx: int
     name: str
@@ -336,7 +344,9 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
         if updated == regend.outs:
             return regend
         else:
-            oldports = dict(zip(regend.outs.split(), regend.ports))
+            oldports = dict(
+                zip(regend.outs.split(), regend.ports, strict=True)
+            )
             ports = tuple(
                 oldports[k] if k in oldports else grm.write(Undef(k))
                 for k in updated_vars
@@ -368,10 +378,11 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             return grm.write(Args(tuple(arg_done)))
         case ("PyAst_block", body):
 
+            vars = sorted(ctx.scope.varmap)
             begin = grm.write(
                 RegionBegin(
-                    ins=prep_varnames(sorted(ctx.scope.varmap)),
-                    ports=ctx.load_vars(ctx.scope.varmap),
+                    ins=prep_varnames(vars),
+                    ports=ctx.load_vars(vars),
                 )
             )
             with ctx.new_block(expr) as scope:
@@ -430,6 +441,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             for tar in targets:
                 assert tar._head == "PyAst_Name", tar
                 name = tar._args[0]
+                res = grm.write(DbgValue(name=name, value=res))
                 ctx.store_var(name, res)
             return
 
@@ -442,8 +454,8 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             lhs = ctx.load_var(varname)
             rhs = yield rhs
             res = PyInplaceBinOp(op=op, io=ctx.load_io(), lhs=lhs, rhs=rhs)
-            return ctx.insert_io_node(res)
-
+            ctx.store_var(varname, ctx.insert_io_node(res))
+            return
         case ("PyAst_UnaryOp", (str(op), operand, loc)):
             res = PyUnaryOp(op=op, io=ctx.load_io(), operand=(yield operand))
             return ctx.insert_io_node(res)
@@ -523,13 +535,14 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
             case Func(fname=str(fname), args=args, body=body):
                 put(f"{fname} = Func {ase.pretty_str(args)}")
                 (yield body)
-            case RegionBegin(ins, ports):
+            case RegionBegin(ins=ins, ports=ports):
                 inports = []
                 for port in ports:
                     inports.append((yield port))
                 name = fresh_name()
                 fmtins = starmap(
-                    lambda x, y: f"{x}={y}", zip(ins.split(), inports)
+                    lambda x, y: f"{x}={y}",
+                    zip(ins.split(), inports, strict=True),
                 )
                 put(f"{name} = Region <- {' '.join(fmtins)}")
                 return name
@@ -541,10 +554,11 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                     for port in ports:
                         outrefs.append((yield port))
                 fmtoutports = starmap(
-                    lambda x, y: f"{y}={x}", zip(outrefs, outs.split())
+                    lambda x, y: f"{y}={x}",
+                    zip(outrefs, outs.split(), strict=True),
                 )
                 put(f"}} -> {' '.join(fmtoutports)}")
-            case IfElse(cond, body, orelse, outs):
+            case IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
                 condref = yield cond
                 name = fresh_name()
                 put(f"{name} = If {condref} ")
@@ -555,7 +569,7 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 put(f"Endif -> {outs}")
                 return name
 
-            case Loop(body, outs, loopvar):
+            case Loop(body=body, outs=outs, loopvar=loopvar):
                 name = fresh_name()
                 put(f"{name} = Loop #{loopvar}")
                 with indent():
@@ -577,6 +591,12 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 put(f"{name} = Undef {k}")
                 return name
 
+            case DbgValue(name=str(varname), value=value):
+                valref = yield value
+                name = fresh_name()
+                put(f"{name} = DbgValue {varname!r} {valref}")
+                return name
+
             case PyNone():
                 name = fresh_name()
                 put(f"{name} = PyNone")
@@ -595,7 +615,7 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 put(f"{name} = PyStr {v!r}")
                 return name
 
-            case PyBinOp(op, io, lhs, rhs):
+            case PyBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
                 ioref = yield io
                 lhsref = yield lhs
                 rhsref = yield rhs
@@ -613,14 +633,14 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 )
                 return name
 
-            case PyUnaryOp(op, io, operand):
+            case PyUnaryOp(op=op, io=io, operand=operand):
                 ioref = yield io
                 operandref = yield operand
                 name = fresh_name()
-                put(f"{name} = PyUnaryOp {op} {ioref} {operand}")
+                put(f"{name} = PyUnaryOp {op} {ioref} {operandref}")
                 return name
 
-            case PyCall(func, io, args):
+            case PyCall(func=func, io=io, args=args):
                 funcref = yield func
                 ioref = yield io
                 argrefs = []
@@ -631,7 +651,7 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 put(f"{name} = PyCall {funcref} {ioref} {fmtargs}")
                 return name
 
-            case PyLoadGlobal(io, str(varname)):
+            case PyLoadGlobal(io=io, name=str(varname)):
                 ioref = yield io
                 name = fresh_name()
                 put(f"{name} = PyLoadGlobal {ioref} {varname!r}")
@@ -659,19 +679,248 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr):
     pp(out)
 
     print(format_rvsdg(grm, out))
+    return out
+
+
+@dataclass(frozen=True)
+class EvalPorts:
+    parent: SExpr
+    values: tuple[Any, ...]
+
+    def __getitem__(self, key: int) -> Any:
+        return self.values[key]
+
+    def get_by_name(self, k: str) -> Any:
+        return self[self.get_port_names().index(k)]
+
+    def get_port_names(self) -> Sequence[str]:
+        match self.parent:
+            case RegionBegin(ins=str(ins)):
+                names = ins.split()
+            case RegionEnd(outs=str(outs)):
+                names = outs.split()
+            case _:
+                raise ValueError(
+                    f"get_port_names() not supported for parent={self.parent!r}"
+                )
+        return names
+
+    def update_scope(self, scope: dict[str, Any]):
+        scope.update(zip(self.get_port_names(), self.values, strict=True))
+
+    def replace(self, ports: EvalPorts) -> EvalPorts:
+        repl = []
+        for k in self.get_port_names():
+            repl.append(ports.get_by_name(k))
+        return EvalPorts(self.parent, tuple(repl))
+
+
+def execute(
+    prgm: SExpr,
+    callargs: tuple,
+    callkwargs: dict,
+    *,
+    init_scope: dict | None = None,
+    init_state: ase.TraverseState | None = None,
+    init_memo: dict | None = None,
+):
+    stack: list[dict[str, Any]] = [{}]
+    glbs = builtins.__dict__
+
+    if init_scope is not None:
+        stack[-1].update(init_scope)
+
+    @contextmanager
+    def push():
+        stack.append(ChainMap({}, scope()))
+        try:
+            yield
+        finally:
+            stack.pop()
+
+    def scope() -> dict[str, Any]:
+        return stack[-1]
+
+    def ensure_io(expect_io: Any) -> Type[IO]:
+        assert expect_io is IO, expect_io
+        return expect_io
+
+    def runner(expr: SExpr, state: ase.TraverseState):
+        match expr:
+            case Func(fname=str(fname), args=funcargs, body=body):
+                # assume we always evaluate a function
+                assert isinstance(funcargs, Args)
+                params = []
+                for arg in funcargs.arguments:
+                    assert isinstance(arg, ArgSpec)
+                    params.append(
+                        inspect.Parameter(
+                            arg.name,
+                            kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                        )
+                    )
+                sig = inspect.Signature(params)
+                ba = sig.bind(*callargs, **callkwargs)
+                scope().update(ba.arguments)
+                with push():
+                    ports = yield body
+                return ports.get_by_name("!ret")
+            case RegionBegin(ins=ins, ports=ports):
+                paired = zip(ins.split(), ports, strict=True)
+                ports = []
+                for k, v in paired:
+                    val = yield v
+                    ports.append(val)
+                    scope()[k] = val
+                return EvalPorts(parent=expr, values=tuple(ports))
+
+            case RegionEnd(begin=begin, outs=str(outs), ports=ports):
+                inports = yield begin
+                with push():
+                    inports.update_scope(scope())
+                    print("in region", dict(scope()))
+                    outvals = []
+                    for port in ports:
+                        outvals.append((yield port))
+                    return EvalPorts(expr, tuple(outvals))
+
+            case IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
+                condval = yield cond
+                if condval:
+                    ports = yield body
+                else:
+                    ports = yield orelse
+                ports.update_scope(scope())
+                print("end if", dict(scope()))
+                return EvalPorts(expr, ports.values)
+
+            case Loop(body=body, outs=outs, loopvar=loopvar):
+                cond = True
+                assert isinstance(body, RegionEnd)
+                begin = body.begin
+                memo = {}
+                memo[begin] = yield begin
+
+                while cond:
+                    ports = execute(
+                        body, (), {}, init_scope=scope(), init_memo=memo
+                    )
+                    ports.update_scope(scope())
+                    cond = ports.get_by_name(loopvar)
+                    print("after loop iterator", dict(scope()))
+                    memo[begin] = memo[begin].replace(ports)
+                return ports
+
+            case Unpack(val=source, idx=int(idx)):
+                ports = yield source
+                return ports[idx]
+
+            case ArgRef(idx=int(idx), name=str(name)):
+                return scope()[name]
+
+            case IO():
+                return IO
+
+            case Undef(str(name)):
+                return Undef(name)
+
+            case DbgValue(name=str(varname), value=value):
+                val = yield value
+                print("assign", varname, "=", val)
+                scope()[varname] = val
+                return val
+
+            case PyNone():
+                return None
+
+            case PyBool(bool(v)):
+                return v
+
+            case PyInt(int(v)):
+                return v
+
+            case PyStr(str(v)):
+                return v
+
+            case PyUnaryOp(op=op, io=io, operand=operand):
+                ioval = ensure_io((yield io))
+                operandval = yield operand
+                match op:
+                    case "not":
+                        res = not operandval
+                    case _:
+                        raise NotImplementedError(op)
+                return EvalPorts(expr, (ioval, res))
+
+            case PyBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
+                ioval = ensure_io((yield io))
+                lhsval = yield lhs
+                rhsval = yield rhs
+                match op:
+                    case "+":
+                        res = lhsval + rhsval
+                    case "-":
+                        res = lhsval - rhsval
+                    case "<":
+                        res = lhsval < rhsval
+                    case "!=":
+                        res = lhsval != rhsval
+                    case _:
+                        raise NotImplementedError(op)
+                return EvalPorts(expr, (ioval, res))
+
+            case PyInplaceBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
+                ioval = ensure_io((yield io))
+                lhsval = yield lhs
+                rhsval = yield rhs
+                match op:
+                    case "+":
+                        res = operator.iadd(lhsval, rhsval)
+                    case _:
+                        raise NotImplementedError(op)
+                return EvalPorts(expr, (ioval, res))
+
+            case PyCall(func=func, io=io, args=args):
+                funcval = yield func
+                ioval = ensure_io((yield io))
+                argvals = []
+                for arg in args:
+                    argvals.append((yield arg))
+                out = funcval(*argvals)
+                return EvalPorts(expr, values=tuple([ioval, out]))
+
+            case PyLoadGlobal(io=io, name=str(varname)):
+                ioval = ensure_io((yield io))
+                return glbs[varname]
+            case _:
+                raise NotImplementedError(expr)
+
+    try:
+        memo = ase.traverse(
+            prgm, runner, state=init_state, init_memo=init_memo
+        )
+    finally:
+        print("-----debug-----")
+        pprint(dict(scope()))
+    return memo[prgm]
 
 
 def test_if_else():
 
     def udt(c):
-        a = c + 1
+        a = c - 1
         if a < c:
-            b = a + 1
+            b = a + 2
         else:
             pass
-        return b + 1
+        return b + 3
 
-    restructure_source(udt)
+    rvsdg_ir = restructure_source(udt)
+    args = (10,)
+    kwargs = {}
+    res = execute(rvsdg_ir, args, kwargs)
+    print("res =", res)
+    assert res == udt(*args, **kwargs)
 
 
 def test_for_loop():
@@ -682,7 +931,12 @@ def test_for_loop():
             c += i
         return c
 
-    restructure_source(udt)
+    rvsdg_ir = restructure_source(udt)
+    args = (10,)
+    kwargs = {}
+    res = execute(rvsdg_ir, args, kwargs)
+    print("res =", res)
+    assert res == udt(*args, **kwargs)
 
 
 if __name__ == "__main__":
