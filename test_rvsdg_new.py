@@ -7,7 +7,7 @@ from string import Formatter
 import logging
 import operator
 import time
-import textwrap
+from itertools import starmap
 from collections import ChainMap
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -434,50 +434,62 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
             yield c
             c += 1
 
+    buffer = []
+    indentlevel = 0
     counter = _inf_counter()
 
     def fresh_name() -> str:
         return f"${next(counter)}"
 
-    def indent(text: str) -> str:
-        return textwrap.indent(text, ' ' * 4)
+    @contextmanager
+    def indent():
+        nonlocal indentlevel
+        indentlevel += 1
+        try:
+            yield
+        finally:
+            indentlevel -= 1
 
-    buffer = []
+    def put(text: str):
+        prefix = ' ' * indentlevel * 2
+        buffer.append(prefix + text)
 
     def formatter(expr: SExpr, state: ase.TraverseState):
         match expr:
             case Func(fname=str(fname), args=args, body=body):
-                buffer.append(f"{fname} = Func {ase.pretty_str(args)}")
+                put(f"{fname} = Func {ase.pretty_str(args)}")
                 (yield body)
             case RegionBegin(ins, ports):
                 inports = []
                 for port in ports:
                     inports.append((yield port))
                 name = fresh_name()
-                buffer.append(f"{name} = Region {ins} <- {' '.join(inports)}")
+                fmtins = starmap(lambda x, y: f"{x}={y}", zip(ins.split(), inports))
+                put(f"{name} = Region <- {' '.join(fmtins)}")
                 return name
             case RegionEnd(begin=begin, outs=str(outs), ports=ports):
                 (yield begin)
-                buffer.append("{")
-                for port in ports:
-                    (yield port)
-                buffer.append(f"}} -> {outs}")
-                # name = fresh_name()
-                # buffer.append(f"=> {name}")
-                # return name
+                put("{")
+                outrefs = []
+                with indent():
+                    for port in ports:
+                        outrefs.append((yield port))
+                fmtoutports = starmap(lambda x, y: f"{y}={x}", zip(outrefs, outs.split()))
+                put(f"}} -> {' '.join(fmtoutports)}")
             case IfElse(cond, body, orelse, outs):
                 condref = (yield cond)
                 name = fresh_name()
-                buffer.append(f"{name} = If {condref} ")
-                (yield body)
-                buffer.append("Else")
-                (yield orelse)
-                buffer.append(f"Endif -> {outs}")
+                put(f"{name} = If {condref} ")
+                with indent():
+                    (yield body)
+                    put("Else")
+                    (yield orelse)
+                put(f"Endif -> {outs}")
                 return name
 
             case Unpack(val=source, idx=int(idx)):
                 ref = (yield source)
-                return f"({ref}:{idx})"
+                return f"{ref}[{idx}]"
             case ArgRef(idx=int(idx), name=str(name)):
                 return f"(ArgRef {idx} {name})"
 
@@ -486,12 +498,12 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
 
             case Undef(str(k)):
                 name = fresh_name()
-                buffer.append(f"{name} = Undef {k}")
+                put(f"{name} = Undef {k}")
                 return name
 
             case PyInt(int(v)):
                 name = fresh_name()
-                buffer.append(f"{name} = PyInt {v}")
+                put(f"{name} = PyInt {v}")
                 return name
 
             case PyBinOp(op, io, lhs, rhs):
@@ -499,7 +511,7 @@ def format_rvsdg(grm: Grammar, prgm: SExpr) -> str:
                 lhsref = (yield lhs)
                 rhsref = (yield rhs)
                 name = fresh_name()
-                buffer.append(f"{name} = PyBinOp {op} {ioref}, {lhsref}, {rhsref}")
+                put(f"{name} = PyBinOp {op} {ioref}, {lhsref}, {rhsref}")
                 return name
             case _:
                 print("----debug")
