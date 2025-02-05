@@ -321,7 +321,6 @@ class ConvertToSExpr(ast.NodeTransformer):
             node.col_offset,
             self._first_line + node.end_lineno,
             node.end_col_offset,
-            None,
         )
 
 

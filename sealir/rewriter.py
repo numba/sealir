@@ -20,12 +20,12 @@ def insert_metadata(rewriter: str, repl: ase.SExpr, orig: ase.SExpr):
     tp.expr(".md.rewrite", *MdRewriteLayout(rewriter, repl, orig))
 
 
-def insert_metadata_map(memo: dict[ase.SExpr, ase.SExpr]):
+def insert_metadata_map(memo: dict[ase.SExpr, ase.SExpr], rewriter_name: str):
     """Helper to write metadata from a memo dictionary."""
     for orig, repl in memo.items():
         if isinstance(repl, ase.SExpr):
             insert_metadata(
-                ".md.rewrite",
+                rewriter_name,
                 repl,
                 orig,
             )
