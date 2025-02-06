@@ -41,6 +41,11 @@ def pp(expr: SExpr):
         # print(pformat(expr.as_dict()))
 
 
+def _internal_prefix(name: str) -> str:
+    # "!" will always sort to the front of all visible characters.
+    return "!" + name
+
+
 class ConvertToSExpr(ast.NodeTransformer):
     _tape: ase.Tape
     _first_line: int
@@ -116,8 +121,9 @@ class ConvertToSExpr(ast.NodeTransformer):
         return self._tape.expr(
             "PyAst_Assign",
             self.visit(node.value),
+            # "!_" is a special name for unused variable
             self._tape.expr(
-                "PyAst_Name", ".void", "store", self.get_loc(node)
+                "PyAst_Name", _internal_prefix("_"), "store", self.get_loc(node)
             ),
             self.get_loc(node),
         )

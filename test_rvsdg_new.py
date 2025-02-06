@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import sys
+import os
+import re
 import ast
 import inspect
+import pathlib
 import builtins
 from string import Formatter
 import logging
@@ -23,12 +27,15 @@ from typing import (
     TypeAlias,
     cast,
     Type,
+    TypedDict
 )
 
 from sealir import ase, grammar, lam
-from sealir.rewriter import TreeRewriter
+from sealir.rewriter import insert_metadata_map
 
 from sealir import rvsdg
+from sealir.rvsdg import _internal_prefix
+from sealir.prettyformat.html_format import find_source_md
 
 _DEBUG = True
 
@@ -41,6 +48,9 @@ from numba_rvsdg.core.datastructures.ast_transforms import (
 )
 
 
+re_loc_directive = re.compile(r"(?P<line>\d+):(?P<col_offset>\d+)-(?P<end_line>\d+):(?P<end_col_offset>\d+)")
+
+
 def pp(expr: SExpr):
     if _DEBUG:
         print(
@@ -51,13 +61,70 @@ def pp(expr: SExpr):
         # print(pformat(expr.as_dict()))
 
 
-def _internal_prefix(name: str) -> str:
-    # "!" will always sort to the front of all visible characters.
-    return "!" + name
+
+class BakeInLocAsStr(ast.NodeTransformer):
+    """
+    A class that bake-in source location into
+      the AST as a string preceding
+    each statement.
+    """
+    srcfile: str
+    srclineoffset: int
+    coloffset: int
+
+    def __init__(self, srcfile: str, srclineoffset: int, coloffset: int):
+        self.srcfile = srcfile
+        self.srclineoffset = srclineoffset
+        self.coloffset = coloffset
+
+    def generic_visit(self, node):
+        if hasattr(node, "body"):
+            stmt : ast.stmt
+            offset = self.srclineoffset
+            coloffset = self.coloffset
+            newbody = []
+            for i, stmt in enumerate(node.body):
+                if i == 0 and isinstance(node, ast.FunctionDef):
+                    newbody.append(ast.Expr(ast.Constant(f"#file: {self.srcfile}")))
+
+
+                begin = f"{stmt.lineno + offset}:{coloffset + stmt.col_offset}"
+                end = f"{stmt.end_lineno + offset}:{coloffset + stmt.end_col_offset}"
+                newbody.append(ast.Expr(ast.Constant(f"#loc: {begin}-{end}")))
+                newbody.append(self.visit(stmt))
+            node.body = newbody
+            return node
+        else:
+            return super().generic_visit(node)
 
 
 def restructure_source(function):
-    ast2scfg_transformer = AST2SCFGTransformer(function)
+    # TODO: a lot of duplication here
+    # Get source info
+    srcfile = pathlib.Path(inspect.getsourcefile(function)).relative_to(os.getcwd())
+    srclineoffset = (min(ln for _, _, ln in function.__code__.co_lines()))
+
+    #   Get column offset
+    lines, line_offset = inspect.getsourcelines(function)
+    re_space = re.compile(r"\s*")
+    def count_space(sub):
+        if sub.strip() == "":
+            return 0
+        m = re_space.match(sub)
+        return len(m.group())
+
+    col_offset = min(map(count_space, lines))
+    print('col_offset', col_offset)
+
+    # Bake in the source location into the AST as dangling strings
+    # (like docstrings)
+    [raw_tree] = unparse_code(function)
+
+    raw_tree = BakeInLocAsStr(srcfile, srclineoffset - 1, col_offset).visit(raw_tree)
+    # print(ast.unparse(raw_tree))
+
+    # SCF
+    ast2scfg_transformer = AST2SCFGTransformer([raw_tree])
     astcfg = ast2scfg_transformer.transform_to_ASTCFG()
     scfg = astcfg.to_SCFG()
     scfg.restructure()
@@ -67,8 +134,11 @@ def restructure_source(function):
 
     transformed_ast = ast.fix_missing_locations(transformed_ast)
 
+    # source_text = ast.unparse(transformed_ast)
+    # print(source_text)
+    # breakpoint()
+
     srclines, firstline = inspect.getsourcelines(function)
-    firstline = 0
 
     source_text = dedent("".join(srclines))
 
@@ -117,6 +187,13 @@ def restructure_source(function):
 
 class _Root(grammar.Rule):
     pass
+
+class Loc(_Root):
+    filename: str
+    line_first: int
+    line_last: int
+    col_first: int
+    col_last: int
 
 
 class Args(_Root):
@@ -229,6 +306,10 @@ class Unpack(_Root):
 class DbgValue(_Root):
     name: str
     value: SExpr
+    srcloc: Loc
+    "Loc for original source"
+    interloc: Loc
+    "Loc for intermediate form (SCFG)"
 
 
 class ArgRef(_Root):
@@ -251,11 +332,40 @@ class Scope:
     varmap: dict[str, Any] = field(default_factory=dict)
 
 
+class LocDirective(TypedDict):
+    line: str
+    end_line: str
+    col_offset: str
+    end_col_offset: str
+
+
+class LocTracker:
+    """Track source location in RvsdgizeCtx
+
+    Tracks inline string that encode `#file` and `#loc` directives
+    """
+    file: str
+    lineinfos: LocDirective
+
+    def __init__(self):
+        self.file = "unknown"
+        self.lineinfos = {}
+
+    def get_loc(self) -> Loc:
+        li = self.lineinfos
+        return Loc(filename=self.file,
+                   line_first=int(li["line"]),
+                   line_last=int(li["end_line"]),
+                   col_first=int(li["col_offset"]),
+                   col_last=int(li["end_col_offset"]))
+
+
 @dataclass(frozen=True)
 class RvsdgizeCtx:
     grm: Grammar
     scope_stack: list[Scope] = field(default_factory=list)
     scope_map: dict[SExpr, Scope] = field(default_factory=dict)
+    loc_tracker: LocTracker = field(default_factory=LocTracker)
 
     @property
     def scope(self) -> Scope:
@@ -296,6 +406,7 @@ class RvsdgizeCtx:
         scope.varmap[name] = self.grm.write(ArgRef(idx=i, name=name))
 
     def load_var(self, name: str) -> SExpr:
+        assert name != _internal_prefix("_")
         scope = self.scope
         if v := scope.varmap.get(name):
             return v
@@ -304,8 +415,12 @@ class RvsdgizeCtx:
             return self.grm.write(PyLoadGlobal(io=self.load_io(), name=name))
 
     def store_var(self, name: str, value: SExpr) -> None:
-        scope = self.scope
-        scope.varmap[name] = value
+        if name == _internal_prefix("_"):
+            # A store to unused name
+            pass
+        else:
+            scope = self.scope
+            scope.varmap[name] = value
 
     def store_io(self, value: SExpr) -> None:
         self.store_var(_internal_prefix("io"), value)
@@ -329,6 +444,51 @@ class RvsdgizeCtx:
         io, res = (grm.write(Unpack(val=written, idx=i)) for i in range(2))
         self.store_io(io)
         return res
+
+    def read_directive(self, directive: Directive) -> None:
+        match directive.kind:
+            case "#file":
+                self.loc_tracker.file = directive.content
+            case "#loc":
+                m = re_loc_directive.match(directive.content)
+                assert m, "invalid #loc directive"
+                self.loc_tracker.lineinfos.update(m.groupdict())
+            case _:
+                raise ValueError(f"unknown directive: {directive}")
+
+    def write_src_loc(self):
+        return self.grm.write(self.loc_tracker.get_loc())
+
+def unpack_pystr(sexpr: SExpr) -> str:
+    match sexpr:
+        case PyStr(text):
+            return text
+        case _:
+            raise ValueError(f"expecting PyStr but got {sexpr._head}")
+
+
+def unpack_pyast_name(sexpr: SExpr) -> str:
+    assert sexpr._head == "PyAst_Name"
+    return cast(str, sexpr._args[0])
+
+def is_directive(text: str) -> str:
+    return text.startswith("#file:") or text.startswith("#loc:")
+
+
+def parse_directive(text: str) -> Directive | None:
+    if not is_directive(text):
+        return
+    def cleanup(s: str) -> str:
+        return s.strip()
+    kind, content = map(cleanup, text.split(':', 1))
+    return Directive(kind=kind, content=content)
+
+
+@dataclass(frozen=True)
+class Directive:
+    kind: str
+    content: str
+
 
 
 def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
@@ -361,13 +521,21 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                 return name
         raise NotImplementedError(var_load)
 
+    def write_loc(pyloc: SExpr) -> SExpr:
+        line_first, col_first, line_last, col_last = pyloc._args
+        print('????', pyloc._args)
+        return grm.write(Loc(filename='', line_first=line_first,
+                             line_last=line_last, col_first=col_first,
+                             col_last=col_last))
+
+
     match (expr._head, expr._args):
-        case ("PyAst_FunctionDef", (str(fname), args, body, loc)):
+        case ("PyAst_FunctionDef", (str(fname), args, body, interloc)):
             with ctx.new_function(expr):
                 return grm.write(
                     Func(fname=fname, args=(yield args), body=(yield body))
                 )
-        case ("PyAst_arg", (str(name), annotation, loc)):
+        case ("PyAst_arg", (str(name), annotation, interloc)):
             return grm.write(ArgSpec(name=name, annotation=(yield annotation)))
         case ("PyAst_arguments", args):
             arg_done = []
@@ -395,7 +563,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                 RegionEnd(begin=begin, outs=prep_varnames(vars), ports=ports)
             )
 
-        case ("PyAst_If", (test, body, orelse, loc)):
+        case ("PyAst_If", (test, body, orelse, interloc)):
             cond = yield test
             br_true = yield body
             br_false = yield orelse
@@ -418,7 +586,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             for i, k in enumerate(updated_vars):
                 ctx.store_var(k, grm.write(Unpack(val=swt, idx=i)))
 
-        case ("PyAst_While", (loopcondvar, body, loc)):
+        case ("PyAst_While", (loopcondvar, body, interloc)):
             loopbody = yield body
             loopvar = extract_name_load(loopcondvar)
             updated_vars = ctx.updated_vars([ctx.scope_map[body]])
@@ -431,21 +599,35 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             for i, k in enumerate(updated_vars):
                 ctx.store_var(k, grm.write(Unpack(val=dow, idx=i)))
 
-        case ("PyAst_Return", (value, loc)):
+        case ("PyAst_Return", (value, interloc)):
             v = yield value
             ctx.store_var(_internal_prefix("ret"), v)
 
-        case ("PyAst_Assign", (rval, *targets, loc)):
+        case ("PyAst_Assign", (rval, *targets, interloc)):
             res = yield rval
             tar: SExpr
+
+            if (len(targets) == 1 and
+                    unpack_pyast_name(targets[0]) == _internal_prefix("_") and
+                    (directive := parse_directive(unpack_pystr(res)))):
+                ctx.read_directive(directive)
+                return # end early
+
             for tar in targets:
-                assert tar._head == "PyAst_Name", tar
-                name = tar._args[0]
-                res = grm.write(DbgValue(name=name, value=res))
-                ctx.store_var(name, res)
+                name = unpack_pyast_name(tar)
+                ctx.store_var(name,
+                    grm.write(
+                        DbgValue(
+                            name=name,
+                            value=res,
+                            srcloc=ctx.write_src_loc(),
+                            interloc=write_loc(interloc),
+                        )
+                    )
+                )
             return
 
-        case ("PyAst_AugAssign", (str(op), target, rhs, loc)):
+        case ("PyAst_AugAssign", (str(op), target, rhs, interloc)):
             match target._head, target._args:
                 case ("PyAst_Name", (str(varname), "store", _)):
                     pass
@@ -456,23 +638,23 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             res = PyInplaceBinOp(op=op, io=ctx.load_io(), lhs=lhs, rhs=rhs)
             ctx.store_var(varname, ctx.insert_io_node(res))
             return
-        case ("PyAst_UnaryOp", (str(op), operand, loc)):
+        case ("PyAst_UnaryOp", (str(op), operand, interloc)):
             res = PyUnaryOp(op=op, io=ctx.load_io(), operand=(yield operand))
             return ctx.insert_io_node(res)
 
-        case ("PyAst_BinOp", (str(op), lhs, rhs, loc)):
+        case ("PyAst_BinOp", (str(op), lhs, rhs, interloc)):
             res = PyBinOp(
                 op=op, io=ctx.load_io(), lhs=(yield lhs), rhs=(yield rhs)
             )
             return ctx.insert_io_node(res)
 
-        case ("PyAst_Compare", (str(op), lhs, rhs, loc)):
+        case ("PyAst_Compare", (str(op), lhs, rhs, interloc)):
             res = PyBinOp(
                 op=op, io=ctx.load_io(), lhs=(yield lhs), rhs=(yield rhs)
             )
             return ctx.insert_io_node(res)
 
-        case ("PyAst_Call", (SExpr() as func, SExpr() as posargs, loc)):
+        case ("PyAst_Call", (SExpr() as func, SExpr() as posargs, interloc)):
             proc_args = []
             for arg in posargs._args:
                 proc_args.append((yield arg))
@@ -482,21 +664,21 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             )
             return ctx.insert_io_node(call)
 
-        case ("PyAst_Name", (str(name), "load", loc)):
+        case ("PyAst_Name", (str(name), "load", interloc)):
             return ctx.load_var(name)
 
-        case ("PyAst_Constant_int", (int(value), loc)):
+        case ("PyAst_Constant_int", (int(value), interloc)):
             return grm.write(PyInt(value))
 
-        case ("PyAst_Constant_bool", (bool(value), loc)):
+        case ("PyAst_Constant_bool", (bool(value), interloc)):
             return grm.write(PyBool(value))
 
-        case ("PyAst_Constant_str", (str(value), loc)):
+        case ("PyAst_Constant_str", (str(value), interloc)):
             return grm.write(PyStr(value))
 
-        case ("PyAst_None", (loc,)):
+        case ("PyAst_None", (interloc,)):
             return grm.write(PyNone())
-        case ("PyAst_Pass", (loc,)):
+        case ("PyAst_Pass", (interloc,)):
             return
         case _:
             raise NotImplementedError(expr)
@@ -671,7 +853,9 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr):
     pp(prgm)
 
     state = RvsdgizeState(RvsdgizeCtx(grm=grm))
-    out = ase.traverse(prgm, rvsdgization, state)[prgm]
+    memo = ase.traverse(prgm, rvsdgization, state)
+    insert_metadata_map(memo, 'rvsdgization')
+    out = memo[prgm]
 
     # out._tape.render_dot(only_reachable=True).view()
 
@@ -714,6 +898,47 @@ class EvalPorts:
             repl.append(ports.get_by_name(k))
         return EvalPorts(self.parent, tuple(repl))
 
+class SourceInfoDebugger:
+
+    def __init__(self, source_info, stream=None):
+        self._source_info = source_info
+        if stream is None:
+            stream = sys.stderr
+        self.stream = stream
+
+    def set_src_loc(self, srcloc):
+        self._srcloc = srcloc
+
+    def set_inter_loc(self, interloc):
+        self._interloc = interloc
+
+    def show_source_lines(self):
+        loc = self._srcloc
+        first = loc.line_first
+        last = loc.line_last
+        self.print(f'At source {loc.filename!r} {first}:{last}'.center(80, '-'))
+        # self.print(ase.as_tuple(loc))
+        for lineno in range(first, last + 1):
+            linetext = self._source_info[lineno].rstrip()
+            self.print(linetext)
+            marker = " " * loc.col_first + "^" * (loc.col_last - loc.col_first)
+            self.print(marker)
+
+    @contextmanager
+    def setup(self, srcloc=None, interloc=None):
+        if srcloc:
+            self.set_src_loc(srcloc)
+        if interloc:
+            self.set_inter_loc(interloc)
+        self.show_source_lines()
+        try:
+            yield
+        finally:
+            self.print('=' * 80)
+
+    def print(self, *args, **kwargs):
+        print(">", *args, **kwargs, file=self.stream)
+
 
 def execute(
     prgm: SExpr,
@@ -723,6 +948,7 @@ def execute(
     init_scope: dict | None = None,
     init_state: ase.TraverseState | None = None,
     init_memo: dict | None = None,
+    source_info: list| None,
 ):
     stack: list[dict[str, Any]] = [{}]
     glbs = builtins.__dict__
@@ -745,7 +971,11 @@ def execute(
         assert expect_io is IO, expect_io
         return expect_io
 
+    debugger = SourceInfoDebugger(source_info)
+
     def runner(expr: SExpr, state: ase.TraverseState):
+
+
         match expr:
             case Func(fname=str(fname), args=funcargs, body=body):
                 # assume we always evaluate a function
@@ -778,7 +1008,7 @@ def execute(
                 inports = yield begin
                 with push():
                     inports.update_scope(scope())
-                    print("in region", dict(scope()))
+                    debugger.print("In region", dict(scope()))
                     outvals = []
                     for port in ports:
                         outvals.append((yield port))
@@ -791,7 +1021,7 @@ def execute(
                 else:
                     ports = yield orelse
                 ports.update_scope(scope())
-                print("end if", dict(scope()))
+                debugger.print("end if", dict(scope()))
                 return EvalPorts(expr, ports.values)
 
             case Loop(body=body, outs=outs, loopvar=loopvar):
@@ -803,11 +1033,12 @@ def execute(
 
                 while cond:
                     ports = execute(
-                        body, (), {}, init_scope=scope(), init_memo=memo
+                        body, (), {}, init_scope=scope(), init_memo=memo,
+                        source_info=source_info,
                     )
                     ports.update_scope(scope())
                     cond = ports.get_by_name(loopvar)
-                    print("after loop iterator", dict(scope()))
+                    debugger.print("after loop iterator", dict(scope()))
                     memo[begin] = memo[begin].replace(ports)
                 return ports
 
@@ -824,9 +1055,10 @@ def execute(
             case Undef(str(name)):
                 return Undef(name)
 
-            case DbgValue(name=str(varname), value=value):
+            case DbgValue(name=str(varname), value=value, srcloc=srcloc, interloc=interloc):
                 val = yield value
-                print("assign", varname, "=", val)
+                with debugger.setup(srcloc=srcloc, interloc=interloc):
+                    debugger.print("assign", varname, "=", val)
                 scope()[varname] = val
                 return val
 
@@ -899,10 +1131,17 @@ def execute(
         memo = ase.traverse(
             prgm, runner, state=init_state, init_memo=init_memo
         )
-    finally:
+    except:
         print("-----debug-----")
         pprint(dict(scope()))
+        raise
     return memo[prgm]
+
+
+def get_source_info(function):
+    lines, offset = inspect.getsourcelines(function)
+    lines = {i + offset: ln for i, ln in enumerate(lines)}
+    return lines
 
 
 def test_if_else():
@@ -918,7 +1157,7 @@ def test_if_else():
     rvsdg_ir = restructure_source(udt)
     args = (10,)
     kwargs = {}
-    res = execute(rvsdg_ir, args, kwargs)
+    res = execute(rvsdg_ir, args, kwargs, source_info=get_source_info(udt))
     print("res =", res)
     assert res == udt(*args, **kwargs)
 
@@ -934,11 +1173,11 @@ def test_for_loop():
     rvsdg_ir = restructure_source(udt)
     args = (10,)
     kwargs = {}
-    res = execute(rvsdg_ir, args, kwargs)
+    res = execute(rvsdg_ir, args, kwargs, source_info=get_source_info(udt))
     print("res =", res)
     assert res == udt(*args, **kwargs)
 
 
 if __name__ == "__main__":
-    test_for_loop()
-    # test_if_else()
+    # test_for_loop()
+    test_if_else()
