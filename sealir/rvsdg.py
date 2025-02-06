@@ -123,7 +123,10 @@ class ConvertToSExpr(ast.NodeTransformer):
             self.visit(node.value),
             # "!_" is a special name for unused variable
             self._tape.expr(
-                "PyAst_Name", _internal_prefix("_"), "store", self.get_loc(node)
+                "PyAst_Name",
+                _internal_prefix("_"),
+                "store",
+                self.get_loc(node),
             ),
             self.get_loc(node),
         )
@@ -323,9 +326,9 @@ class ConvertToSExpr(ast.NodeTransformer):
     def get_loc(self, node: ast.AST) -> SExpr:
         return self._tape.expr(
             "PyAst_loc",
-            self._first_line + node.lineno,
+            node.lineno,
             node.col_offset,
-            self._first_line + node.end_lineno,
+            node.end_lineno,
             node.end_col_offset,
         )
 

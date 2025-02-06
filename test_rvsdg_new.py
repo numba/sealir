@@ -13,7 +13,7 @@ import operator
 import time
 from itertools import starmap
 from collections import ChainMap
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from dataclasses import dataclass, field
 from functools import reduce
 from pprint import pformat, pprint
@@ -27,8 +27,9 @@ from typing import (
     TypeAlias,
     cast,
     Type,
-    TypedDict
+    TypedDict,
 )
+import tempfile
 
 from sealir import ase, grammar, lam
 from sealir.rewriter import insert_metadata_map
@@ -48,7 +49,9 @@ from numba_rvsdg.core.datastructures.ast_transforms import (
 )
 
 
-re_loc_directive = re.compile(r"(?P<line>\d+):(?P<col_offset>\d+)-(?P<end_line>\d+):(?P<end_col_offset>\d+)")
+re_loc_directive = re.compile(
+    r"(?P<line>\d+):(?P<col_offset>\d+)-(?P<end_line>\d+):(?P<end_col_offset>\d+)"
+)
 
 
 def pp(expr: SExpr):
@@ -61,13 +64,13 @@ def pp(expr: SExpr):
         # print(pformat(expr.as_dict()))
 
 
-
 class BakeInLocAsStr(ast.NodeTransformer):
     """
     A class that bake-in source location into
       the AST as a string preceding
     each statement.
     """
+
     srcfile: str
     srclineoffset: int
     coloffset: int
@@ -79,14 +82,15 @@ class BakeInLocAsStr(ast.NodeTransformer):
 
     def generic_visit(self, node):
         if hasattr(node, "body"):
-            stmt : ast.stmt
+            stmt: ast.stmt
             offset = self.srclineoffset
             coloffset = self.coloffset
             newbody = []
             for i, stmt in enumerate(node.body):
                 if i == 0 and isinstance(node, ast.FunctionDef):
-                    newbody.append(ast.Expr(ast.Constant(f"#file: {self.srcfile}")))
-
+                    newbody.append(
+                        ast.Expr(ast.Constant(f"#file: {self.srcfile}"))
+                    )
 
                 begin = f"{stmt.lineno + offset}:{coloffset + stmt.col_offset}"
                 end = f"{stmt.end_lineno + offset}:{coloffset + stmt.end_col_offset}"
@@ -101,12 +105,15 @@ class BakeInLocAsStr(ast.NodeTransformer):
 def restructure_source(function):
     # TODO: a lot of duplication here
     # Get source info
-    srcfile = pathlib.Path(inspect.getsourcefile(function)).relative_to(os.getcwd())
-    srclineoffset = (min(ln for _, _, ln in function.__code__.co_lines()))
+    srcfile = pathlib.Path(inspect.getsourcefile(function)).relative_to(
+        os.getcwd()
+    )
+    srclineoffset = min(ln for _, _, ln in function.__code__.co_lines())
 
     #   Get column offset
     lines, line_offset = inspect.getsourcelines(function)
     re_space = re.compile(r"\s*")
+
     def count_space(sub):
         if sub.strip() == "":
             return 0
@@ -114,15 +121,15 @@ def restructure_source(function):
         return len(m.group())
 
     col_offset = min(map(count_space, lines))
-    print('col_offset', col_offset)
+    print("col_offset", col_offset)
 
     # Bake in the source location into the AST as dangling strings
     # (like docstrings)
     [raw_tree] = unparse_code(function)
 
-    raw_tree = BakeInLocAsStr(srcfile, srclineoffset - 1, col_offset).visit(raw_tree)
-    # print(ast.unparse(raw_tree))
-
+    raw_tree = BakeInLocAsStr(srcfile, srclineoffset - 1, col_offset).visit(
+        raw_tree
+    )
     # SCF
     ast2scfg_transformer = AST2SCFGTransformer([raw_tree])
     astcfg = ast2scfg_transformer.transform_to_ASTCFG()
@@ -133,60 +140,24 @@ def restructure_source(function):
     transformed_ast = scfg2ast.transform(original=original_ast, scfg=scfg)
 
     transformed_ast = ast.fix_missing_locations(transformed_ast)
+    # Roundtrip it to fix source location
+    inter_source = ast.unparse(transformed_ast)
+    [transformed_ast] = ast.parse(inter_source).body
+    debugger = SourceInfoDebugger(
+        line_offset, lines, inter_source.splitlines()
+    )
 
-    # source_text = ast.unparse(transformed_ast)
-    # print(source_text)
-    # breakpoint()
-
-    srclines, firstline = inspect.getsourcelines(function)
-
-    source_text = dedent("".join(srclines))
-
-    t_start = time.time()
-
-    prgm = rvsdg.convert_to_sexpr(transformed_ast, firstline)
-
-    # _logger.debug("convert_to_sexpr", time.time() - t_start)
-
-    # varinfo = rvsdg.find_variable_info(prgm)
-    # _logger.debug(varinfo)
-
-    # _logger.debug("find_variable_info", time.time() - t_start)
+    prgm = rvsdg.convert_to_sexpr(transformed_ast, line_offset)
 
     grm = Grammar(prgm._tape)
 
     rvsdg_out = convert_to_rvsdg(grm, prgm)
-    return rvsdg_out
-
-    # _logger.debug("convert_to_rvsdg", time.time() - t_start)
-
-    # from sealir.prettyformat import html_format
-
-    # pp(rvsdg)
-
-    # lam_node = convert_to_lambda(rvsdg, varinfo)
-    # _logger.debug("convert_to_lambda", time.time() - t_start)
-    # if _DEBUG:
-    #     pp(lam_node)
-    #     print(ase.pretty_str(lam_node))
-
-    # if _DEBUG_HTML:
-    #     # FIXME: This is currently slow due to inefficient metadata lookup.
-    #     print("writing html...")
-    #     ts = time.time()
-    #     with open("debug.html", "w") as fout:
-    #         html_format.write_html(
-    #             fout,
-    #             html_format.prepare_source(source_text),
-    #             html_format.to_html(rvsdg),
-    #             html_format.to_html(lam_node),
-    #         )
-    #     print("   took", time.time() - ts)
-    # return lam_node
+    return rvsdg_out, debugger
 
 
 class _Root(grammar.Rule):
     pass
+
 
 class Loc(_Root):
     filename: str
@@ -344,6 +315,7 @@ class LocTracker:
 
     Tracks inline string that encode `#file` and `#loc` directives
     """
+
     file: str
     lineinfos: LocDirective
 
@@ -353,11 +325,13 @@ class LocTracker:
 
     def get_loc(self) -> Loc:
         li = self.lineinfos
-        return Loc(filename=self.file,
-                   line_first=int(li["line"]),
-                   line_last=int(li["end_line"]),
-                   col_first=int(li["col_offset"]),
-                   col_last=int(li["end_col_offset"]))
+        return Loc(
+            filename=self.file,
+            line_first=int(li["line"]),
+            line_last=int(li["end_line"]),
+            col_first=int(li["col_offset"]),
+            col_last=int(li["end_col_offset"]),
+        )
 
 
 @dataclass(frozen=True)
@@ -459,6 +433,7 @@ class RvsdgizeCtx:
     def write_src_loc(self):
         return self.grm.write(self.loc_tracker.get_loc())
 
+
 def unpack_pystr(sexpr: SExpr) -> str:
     match sexpr:
         case PyStr(text):
@@ -471,6 +446,7 @@ def unpack_pyast_name(sexpr: SExpr) -> str:
     assert sexpr._head == "PyAst_Name"
     return cast(str, sexpr._args[0])
 
+
 def is_directive(text: str) -> str:
     return text.startswith("#file:") or text.startswith("#loc:")
 
@@ -478,9 +454,11 @@ def is_directive(text: str) -> str:
 def parse_directive(text: str) -> Directive | None:
     if not is_directive(text):
         return
+
     def cleanup(s: str) -> str:
         return s.strip()
-    kind, content = map(cleanup, text.split(':', 1))
+
+    kind, content = map(cleanup, text.split(":", 1))
     return Directive(kind=kind, content=content)
 
 
@@ -488,7 +466,6 @@ def parse_directive(text: str) -> Directive | None:
 class Directive:
     kind: str
     content: str
-
 
 
 def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
@@ -523,11 +500,16 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
 
     def write_loc(pyloc: SExpr) -> SExpr:
         line_first, col_first, line_last, col_last = pyloc._args
-        print('????', pyloc._args)
-        return grm.write(Loc(filename='', line_first=line_first,
-                             line_last=line_last, col_first=col_first,
-                             col_last=col_last))
-
+        print("????", pyloc._args)
+        return grm.write(
+            Loc(
+                filename="",
+                line_first=line_first,
+                line_last=line_last,
+                col_first=col_first,
+                col_last=col_last,
+            )
+        )
 
     match (expr._head, expr._args):
         case ("PyAst_FunctionDef", (str(fname), args, body, interloc)):
@@ -607,15 +589,18 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             res = yield rval
             tar: SExpr
 
-            if (len(targets) == 1 and
-                    unpack_pyast_name(targets[0]) == _internal_prefix("_") and
-                    (directive := parse_directive(unpack_pystr(res)))):
+            if (
+                len(targets) == 1
+                and unpack_pyast_name(targets[0]) == _internal_prefix("_")
+                and (directive := parse_directive(unpack_pystr(res)))
+            ):
                 ctx.read_directive(directive)
-                return # end early
+                return  # end early
 
             for tar in targets:
                 name = unpack_pyast_name(tar)
-                ctx.store_var(name,
+                ctx.store_var(
+                    name,
                     grm.write(
                         DbgValue(
                             name=name,
@@ -623,7 +608,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                             srcloc=ctx.write_src_loc(),
                             interloc=write_loc(interloc),
                         )
-                    )
+                    ),
                 )
             return
 
@@ -854,7 +839,7 @@ def convert_to_rvsdg(grm: Grammar, prgm: SExpr):
 
     state = RvsdgizeState(RvsdgizeCtx(grm=grm))
     memo = ase.traverse(prgm, rvsdgization, state)
-    insert_metadata_map(memo, 'rvsdgization')
+    insert_metadata_map(memo, "rvsdgization")
     out = memo[prgm]
 
     # out._tape.render_dot(only_reachable=True).view()
@@ -898,13 +883,34 @@ class EvalPorts:
             repl.append(ports.get_by_name(k))
         return EvalPorts(self.parent, tuple(repl))
 
+
 class SourceInfoDebugger:
 
-    def __init__(self, source_info, stream=None):
-        self._source_info = source_info
+    def __init__(
+        self,
+        source_offset: int,
+        src_lines: Sequence[str],
+        inter_lines: Sequence[str],
+        stream=None,
+    ):
+        self._source_info = {
+            i: ln.rstrip()
+            for i, ln in enumerate(src_lines, start=source_offset)
+        }
+        self._inter_source_info = dict(enumerate(inter_lines, start=1))
         if stream is None:
             stream = sys.stderr
         self.stream = stream
+
+    def show_sources(self) -> str:
+        buf = []
+        buf.append("original source".center(80, "-"))
+        for lno, text in self._source_info.items():
+            buf.append(f"{lno:4}|{text}")
+        buf.append("inter source".center(80, "-"))
+        for lno, text in self._inter_source_info.items():
+            buf.append(f"{lno:4}|{text}")
+        return "\n".join(buf)
 
     def set_src_loc(self, srcloc):
         self._srcloc = srcloc
@@ -916,10 +922,26 @@ class SourceInfoDebugger:
         loc = self._srcloc
         first = loc.line_first
         last = loc.line_last
-        self.print(f'At source {loc.filename!r} {first}:{last}'.center(80, '-'))
+        self.print(
+            f"At source {loc.filename!r} {first}:{last}".center(80, "-")
+        )
         # self.print(ase.as_tuple(loc))
         for lineno in range(first, last + 1):
             linetext = self._source_info[lineno].rstrip()
+            self.print(linetext)
+            marker = " " * loc.col_first + "^" * (loc.col_last - loc.col_first)
+            self.print(marker)
+
+    def show_inter_source_lines(self):
+        loc = self._interloc
+        first = loc.line_first
+        last = loc.line_last
+        self.print(
+            f"At SCFG source {loc.filename!r} {first}:{last}".center(80, "-")
+        )
+        # self.print(ase.as_tuple(loc))
+        for lineno in range(first, last + 1):
+            linetext = self._inter_source_info[lineno].rstrip()
             self.print(linetext)
             marker = " " * loc.col_first + "^" * (loc.col_last - loc.col_first)
             self.print(marker)
@@ -930,11 +952,12 @@ class SourceInfoDebugger:
             self.set_src_loc(srcloc)
         if interloc:
             self.set_inter_loc(interloc)
-        self.show_source_lines()
         try:
             yield
         finally:
-            self.print('=' * 80)
+            self.show_source_lines()
+            self.show_inter_source_lines()
+            self.print("=" * 80)
 
     def print(self, *args, **kwargs):
         print(">", *args, **kwargs, file=self.stream)
@@ -948,7 +971,7 @@ def execute(
     init_scope: dict | None = None,
     init_state: ase.TraverseState | None = None,
     init_memo: dict | None = None,
-    source_info: list| None,
+    debugger: SourceInfoDebugger,
 ):
     stack: list[dict[str, Any]] = [{}]
     glbs = builtins.__dict__
@@ -971,10 +994,7 @@ def execute(
         assert expect_io is IO, expect_io
         return expect_io
 
-    debugger = SourceInfoDebugger(source_info)
-
     def runner(expr: SExpr, state: ase.TraverseState):
-
 
         match expr:
             case Func(fname=str(fname), args=funcargs, body=body):
@@ -1033,8 +1053,12 @@ def execute(
 
                 while cond:
                     ports = execute(
-                        body, (), {}, init_scope=scope(), init_memo=memo,
-                        source_info=source_info,
+                        body,
+                        (),
+                        {},
+                        init_scope=scope(),
+                        init_memo=memo,
+                        debugger=debugger,
                     )
                     ports.update_scope(scope())
                     cond = ports.get_by_name(loopvar)
@@ -1055,7 +1079,12 @@ def execute(
             case Undef(str(name)):
                 return Undef(name)
 
-            case DbgValue(name=str(varname), value=value, srcloc=srcloc, interloc=interloc):
+            case DbgValue(
+                name=str(varname),
+                value=value,
+                srcloc=srcloc,
+                interloc=interloc,
+            ):
                 val = yield value
                 with debugger.setup(srcloc=srcloc, interloc=interloc):
                     debugger.print("assign", varname, "=", val)
@@ -1138,12 +1167,6 @@ def execute(
     return memo[prgm]
 
 
-def get_source_info(function):
-    lines, offset = inspect.getsourcelines(function)
-    lines = {i + offset: ln for i, ln in enumerate(lines)}
-    return lines
-
-
 def test_if_else():
 
     def udt(c):
@@ -1154,10 +1177,11 @@ def test_if_else():
             pass
         return b + 3
 
-    rvsdg_ir = restructure_source(udt)
+    rvsdg_ir, debugger = restructure_source(udt)
+    print(debugger.show_sources())
     args = (10,)
     kwargs = {}
-    res = execute(rvsdg_ir, args, kwargs, source_info=get_source_info(udt))
+    res = execute(rvsdg_ir, args, kwargs, debugger=debugger)
     print("res =", res)
     assert res == udt(*args, **kwargs)
 
@@ -1170,10 +1194,11 @@ def test_for_loop():
             c += i
         return c
 
-    rvsdg_ir = restructure_source(udt)
+    rvsdg_ir, debugger = restructure_source(udt)
+    print(debugger.show_sources())
     args = (10,)
     kwargs = {}
-    res = execute(rvsdg_ir, args, kwargs, source_info=get_source_info(udt))
+    res = execute(rvsdg_ir, args, kwargs, debugger=debugger)
     print("res =", res)
     assert res == udt(*args, **kwargs)
 
