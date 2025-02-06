@@ -1014,7 +1014,7 @@ def execute(
                 scope().update(ba.arguments)
                 with push():
                     ports = yield body
-                return ports.get_by_name("!ret")
+                return ports.get_by_name(_internal_prefix("ret"))
             case RegionBegin(ins=ins, ports=ports):
                 paired = zip(ins.split(), ports, strict=True)
                 ports = []
