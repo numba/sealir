@@ -1,15 +1,14 @@
 from __future__ import annotations
 
-import sys
-import json
 import html
-from io import StringIO
+import json
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
+from io import StringIO
 from typing import Iterator
 
 from egglog import EGraph
-
 
 MAX = sys.maxsize
 

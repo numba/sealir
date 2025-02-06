@@ -19,7 +19,7 @@ from numba_rvsdg.core.datastructures.ast_transforms import (
 
 from sealir import ase, grammar, rvsdg
 from sealir.rewriter import insert_metadata_map
-from sealir.rvsdg import internal_prefix, pp
+from sealir.rvsdg import _DEBUG, internal_prefix, pp
 
 from . import grammar as rg
 
@@ -110,7 +110,10 @@ def restructure_source(function):
     inter_source = ast.unparse(transformed_ast)
     [transformed_ast] = ast.parse(inter_source).body
     debugger = SourceInfoDebugger(
-        line_offset, lines, inter_source.splitlines()
+        line_offset,
+        lines,
+        inter_source.splitlines(),
+        suppress=not _DEBUG,
     )
 
     prgm = rvsdg.convert_to_sexpr(transformed_ast, line_offset)
@@ -128,7 +131,9 @@ class SourceInfoDebugger:
         source_offset: int,
         src_lines: Sequence[str],
         inter_lines: Sequence[str],
+        *,
         stream=None,
+        suppress: bool = False,
     ):
         self._source_info = {
             i: ln.rstrip()
@@ -138,6 +143,7 @@ class SourceInfoDebugger:
         if stream is None:
             stream = sys.stderr
         self.stream = stream
+        self.suppress = suppress
 
     def show_sources(self) -> str:
         buf = []
@@ -196,7 +202,9 @@ class SourceInfoDebugger:
             self.show_inter_source_lines()
             self.print("=" * 80)
 
-    def print(self, *args, **kwargs):
+    def print(self, *args, **kwargs) -> None:
+        if self.suppress:
+            return
         print(">", *args, **kwargs, file=self.stream)
 
 
@@ -410,7 +418,6 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
 
     def write_loc(pyloc: SExpr) -> SExpr:
         line_first, col_first, line_last, col_last = pyloc._args
-        print("????", pyloc._args)
         return grm.write(
             rg.Loc(
                 filename="",
@@ -751,7 +758,7 @@ def format_rvsdg(grm: rg.Grammar, prgm: SExpr) -> str:
 
 
 def convert_to_rvsdg(grm: rg.Grammar, prgm: SExpr):
-    pp(prgm)
+    # pp(prgm)
 
     state = RvsdgizeState(RvsdgizeCtx(grm=grm))
     memo = ase.traverse(prgm, rvsdgization, state)
@@ -760,8 +767,9 @@ def convert_to_rvsdg(grm: rg.Grammar, prgm: SExpr):
 
     # out._tape.render_dot(only_reachable=True).view()
 
-    print(out._tape.dump())
-    pp(out)
+    # print(out._tape.dump())
+    # pp(out)
 
-    print(format_rvsdg(grm, out))
+    if _DEBUG:
+        print(format_rvsdg(grm, out))
     return out
