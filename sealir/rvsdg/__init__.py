@@ -28,6 +28,7 @@ def internal_prefix(name: str) -> str:
     return "!" + name
 
 
+from .evaluating import evaluate
 from .restructuring import (
     SourceInfoDebugger,
     convert_to_rvsdg,

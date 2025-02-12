@@ -1,13 +1,8 @@
 from collections import ChainMap
 
-from sealir import ase, lam
-from sealir.rvsdg import (
-    EvalCtx,
-    EvalLamState,
-    Grammar,
-    lambda_evaluation,
-    restructure_source,
-)
+from sealir import ase, rvsdg
+from sealir.rvsdg import evaluate
+from sealir.rvsdg import grammar as rg
 
 
 def test_return_arg0():
@@ -276,33 +271,17 @@ def test_f_o_r_t_r_a_n():
 
 
 def run(func, args, *, localscope=None):
+    # Get expected result
     expected = func(*args)
 
-    lam_node = restructure_source(func)
+    rvsdg_ir, debugger = rvsdg.restructure_source(func)
+    print(debugger.show_sources())
 
-    # Prepare run
-    grm = Grammar(lam_node._tape)
+    kwargs = {}
+    got = evaluate(
+        rvsdg_ir, args, kwargs, debugger=debugger, global_ns=localscope
+    )
 
-    if localscope is None:
-        ctx = EvalCtx.from_arguments(*args)
-    else:
-        ctx = EvalCtx.from_arguments_and_locals(args, localscope)
-
-    with grm:
-        app_root = lam.app_func(grm, lam_node, *ctx.make_arg_node(grm))
-
-    # out = ase.pretty_str(app_root)
-    # print(out)
-
-    # import cProfile
-    # prof = cProfile.Profile()
-    # prof.enable()
-    memo = ase.traverse(app_root, lambda_evaluation, EvalLamState(context=ctx))
-    # prof.disable()
-    # prof.print_stats(sort='cumtime')
-    res = memo[app_root]
-    print("result", res)
-    got = res[1]
-
+    print("result", got)
     assert got == expected
     return got

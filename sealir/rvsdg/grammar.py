@@ -74,6 +74,11 @@ class PyInt(_Root):
     value: int
 
 
+class PyComplex(_Root):
+    real: float
+    imag: float
+
+
 class PyBool(_Root):
     value: bool
 
@@ -82,10 +87,30 @@ class PyStr(_Root):
     value: str
 
 
+class PyTuple(_Root):
+    elems: tuple[SExpr]
+
+
+class PyList(_Root):
+    elems: tuple[SExpr]
+
+
 class PyCall(_Root):
     func: SExpr
     io: SExpr
     args: tuple[SExpr]
+
+
+class PyAttr(_Root):
+    io: SExpr
+    value: SExpr
+    attrname: str
+
+
+class PySubscript(_Root):
+    io: SExpr
+    value: SExpr
+    index: SExpr
 
 
 class PyUnaryOp(_Root):

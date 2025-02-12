@@ -57,10 +57,15 @@ def evaluate(
     init_scope: dict | None = None,
     init_state: ase.TraverseState | None = None,
     init_memo: dict | None = None,
+    global_ns: dict | None = None,
     debugger: rvsdg.SourceInfoDebugger,
 ):
     stack: list[dict[str, Any]] = [{}]
-    glbs = builtins.__dict__
+
+    if global_ns is None:
+        global_ns = {}
+
+    glbs = ChainMap(global_ns, builtins.__dict__)
 
     if init_scope is not None:
         stack[-1].update(init_scope)
@@ -114,11 +119,11 @@ def evaluate(
                 inports = yield begin
                 with push():
                     inports.update_scope(scope())
-                    debugger.print("In region", dict(scope()))
-                    outvals = []
+                    portvals = []
                     for port in ports:
-                        outvals.append((yield port))
-                    return EvalPorts(expr, tuple(outvals))
+                        portvals.append((yield port))
+                    debugger.print("In region", dict(scope()))
+                    return EvalPorts(expr, tuple(portvals))
 
             case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
                 condval = yield cond
@@ -144,6 +149,7 @@ def evaluate(
                         {},
                         init_scope=scope(),
                         init_memo=memo,
+                        global_ns=global_ns,
                         debugger=debugger,
                     )
                     ports.update_scope(scope())
@@ -186,6 +192,9 @@ def evaluate(
             case rg.PyInt(int(v)):
                 return v
 
+            case rg.PyComplex(float(real), float(imag)):
+                return complex(real, imag)
+
             case rg.PyStr(str(v)):
                 return v
 
@@ -195,6 +204,8 @@ def evaluate(
                 match op:
                     case "not":
                         res = not operandval
+                    case "-":
+                        res = -operandval
                     case _:
                         raise NotImplementedError(op)
                 return EvalPorts(expr, (ioval, res))
@@ -208,10 +219,20 @@ def evaluate(
                         res = lhsval + rhsval
                     case "-":
                         res = lhsval - rhsval
+                    case "*":
+                        res = lhsval * rhsval
+                    case "/":
+                        res = lhsval / rhsval
+                    case "//":
+                        res = lhsval // rhsval
                     case "<":
                         res = lhsval < rhsval
+                    case ">":
+                        res = lhsval > rhsval
                     case "!=":
                         res = lhsval != rhsval
+                    case "in":
+                        res = lhsval in rhsval
                     case _:
                         raise NotImplementedError(op)
                 return EvalPorts(expr, (ioval, res))
@@ -223,6 +244,14 @@ def evaluate(
                 match op:
                     case "+":
                         res = operator.iadd(lhsval, rhsval)
+                    case "-":
+                        res = operator.isub(lhsval, rhsval)
+                    case "*":
+                        res = operator.imul(lhsval, rhsval)
+                    case "/":
+                        res = operator.itruediv(lhsval, rhsval)
+                    case "//":
+                        res = operator.ifloordiv(lhsval, rhsval)
                     case _:
                         raise NotImplementedError(op)
                 return EvalPorts(expr, (ioval, res))
@@ -239,6 +268,30 @@ def evaluate(
             case rg.PyLoadGlobal(io=io, name=str(varname)):
                 ioval = ensure_io((yield io))
                 return glbs[varname]
+
+            case rg.PyTuple(elems):
+                elemvals = []
+                for el in elems:
+                    elemvals.append((yield el))
+                out = tuple(elemvals)
+                return out
+
+            case rg.PyList(elems):
+                elemvals = []
+                for el in elems:
+                    elemvals.append((yield el))
+                return elemvals
+
+            case rg.PyAttr(io=io, value=value, attrname=str(attr)):
+                ioval = ensure_io((yield io))
+                out = getattr((yield value), attr)
+                return EvalPorts(expr, values=tuple([ioval, out]))
+
+            case rg.PySubscript(io=io, value=value, index=index):
+                ioval = ensure_io((yield io))
+                out = (yield value)[(yield index)]
+                return EvalPorts(expr, values=tuple([ioval, out]))
+
             case _:
                 raise NotImplementedError(expr)
 

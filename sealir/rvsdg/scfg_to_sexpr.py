@@ -284,6 +284,8 @@ class ConvertToSExpr(ast.NodeTransformer):
                 return "//"
             case ast.Not():
                 return "not"
+            case ast.USub():
+                return "-"
             case _:
                 raise NotImplementedError(node)
 

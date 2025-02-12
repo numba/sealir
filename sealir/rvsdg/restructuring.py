@@ -75,19 +75,21 @@ def restructure_source(function):
     srcfile = pathlib.Path(inspect.getsourcefile(function)).relative_to(
         os.getcwd()
     )
-    srclineoffset = min(ln for _, _, ln in function.__code__.co_lines())
-
+    srclineoffset = min(
+        (0xFFFFFFFF if ln is None else ln)
+        for _, _, ln in function.__code__.co_lines()
+    )
     #   Get column offset
     lines, line_offset = inspect.getsourcelines(function)
     re_space = re.compile(r"\s*")
 
     def count_space(sub):
         if sub.strip() == "":
-            return 0
+            return  # to be filtered out
         m = re_space.match(sub)
         return len(m.group())
 
-    col_offset = min(map(count_space, lines))
+    col_offset = min(filter(bool, map(count_space, lines)))
 
     # Bake in the source location into the AST as dangling strings
     # (like docstrings)
@@ -352,12 +354,12 @@ class RvsdgizeCtx:
         return self.grm.write(self.loc_tracker.get_loc())
 
 
-def unpack_pystr(sexpr: SExpr) -> str:
+def unpack_pystr(sexpr: SExpr) -> str | None:
     match sexpr:
         case rg.PyStr(text):
             return text
         case _:
-            raise ValueError(f"expecting PyStr but got {sexpr._head}")
+            return
 
 
 def unpack_pyast_name(sexpr: SExpr) -> str:
@@ -384,6 +386,20 @@ def parse_directive(text: str) -> Directive | None:
 class Directive:
     kind: str
     content: str
+
+
+def get_vars_defined(body: ase.BasicSExpr) -> set[str]:
+    names = set()
+
+    class VarDefined(ase.TreeVisitor):
+        def visit(self, expr: SExpr):
+            match (expr._head, expr._args):
+                case ("PyAst_Name", (str(name), "store", loc)):
+                    if name != internal_prefix("_"):  # ignore unamed assign
+                        names.add(name)
+
+    ase.apply_bottomup(body, VarDefined(), reachable="compute")
+    return names
 
 
 def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
@@ -490,9 +506,16 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                 ctx.store_var(k, grm.write(rg.Unpack(val=swt, idx=i)))
 
         case ("PyAst_While", (loopcondvar, body, interloc)):
+            # Populate variables that are not yet defined but will be defined in
+            # the loop.
+            names = get_vars_defined(body)
+            for k in names - set(ctx.scope.varmap):
+                ctx.store_var(k, grm.write(rg.Undef(k)))
+            # Process the body
             loopbody = yield body
             loopvar = extract_name_load(loopcondvar)
             updated_vars = ctx.updated_vars([ctx.scope_map[body]])
+
             dow = grm.write(
                 rg.Loop(
                     body=loopbody, outs=" ".join(updated_vars), loopvar=loopvar
@@ -513,7 +536,8 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             if (
                 len(targets) == 1
                 and unpack_pyast_name(targets[0]) == internal_prefix("_")
-                and (directive := parse_directive(unpack_pystr(res)))
+                and (pystr := unpack_pystr(res))
+                and (directive := parse_directive(pystr))
             ):
                 ctx.read_directive(directive)
                 return  # end early
@@ -584,10 +608,42 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
         case ("PyAst_Constant_str", (str(value), interloc)):
             return grm.write(rg.PyStr(value))
 
+        case ("PyAst_Constant_complex", (real, imag, interloc)):
+            return grm.write(rg.PyComplex(real=real, imag=imag))
+
         case ("PyAst_None", (interloc,)):
             return grm.write(rg.PyNone())
+
+        case ("PyAst_Tuple", args):
+            *elems, interloc = args
+            proc_elems = []
+            for el in elems:
+                proc_elems.append((yield el))
+            return grm.write(rg.PyTuple(elems=tuple(proc_elems)))
+
+        case ("PyAst_List", args):
+            *elems, interloc = args
+            proc_elems = []
+            for el in elems:
+                proc_elems.append((yield el))
+            return grm.write(rg.PyList(elems=tuple(proc_elems)))
+
+        case ("PyAst_Attribute", (valuexpr, str(attr), interloc)):
+            value = yield valuexpr
+            return ctx.insert_io_node(
+                rg.PyAttr(io=ctx.load_io(), value=value, attrname=attr)
+            )
+
+        case ("PyAst_Subscript", (valuexpr, indexexpr, interloc)):
+            value = yield valuexpr
+            index = yield indexexpr
+            return ctx.insert_io_node(
+                rg.PySubscript(io=ctx.load_io(), value=value, index=index)
+            )
+
         case ("PyAst_Pass", (interloc,)):
             return
+
         case _:
             raise NotImplementedError(expr)
 
@@ -700,9 +756,31 @@ def format_rvsdg(grm: rg.Grammar, prgm: SExpr) -> str:
                 name = fresh_name()
                 put(f"{name} = PyInt {v}")
                 return name
+            case rg.PyComplex(float(real), float(imag)):
+                name = fresh_name()
+                put(f"{name} = PyComplex {real} {imag}")
+                return name
             case rg.PyStr(str(v)):
                 name = fresh_name()
                 put(f"{name} = PyStr {v!r}")
+                return name
+
+            case rg.PyTuple(elems):
+                args = []
+                for el in elems:
+                    args.append((yield el))
+                name = fresh_name()
+                fmt = ", ".join(args)
+                put(f"{name} = PyTuple {fmt}")
+                return name
+
+            case rg.PyList(elems):
+                args = []
+                for el in elems:
+                    args.append((yield el))
+                name = fresh_name()
+                fmt = ", ".join(args)
+                put(f"{name} = PyList {fmt}")
                 return name
 
             case rg.PyBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
@@ -745,6 +823,21 @@ def format_rvsdg(grm: rg.Grammar, prgm: SExpr) -> str:
                 ioref = yield io
                 name = fresh_name()
                 put(f"{name} = PyLoadGlobal {ioref} {varname!r}")
+                return name
+
+            case rg.PyAttr(io=io, value=value, attrname=attr):
+                ioref = yield io
+                valref = yield value
+                name = fresh_name()
+                put(f"{name} = PyAttr {ioref} {valref} {attr!r}")
+                return name
+
+            case rg.PySubscript(io=io, value=value, index=index):
+                ioref = yield io
+                valref = yield value
+                indexref = yield index
+                name = fresh_name()
+                put(f"{name} = PySubscript {ioref} {valref} {indexref}")
                 return name
 
             case _:
