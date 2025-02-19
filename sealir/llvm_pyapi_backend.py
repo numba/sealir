@@ -10,6 +10,8 @@ from llvmlite import binding as llvm
 from llvmlite import ir
 
 from sealir import ase, lam, rvsdg
+from sealir.rvsdg import grammar as rg
+from sealir.rvsdg import internal_prefix
 
 ll_byte = ir.IntType(8)
 ll_pyobject_ptr = ll_byte.as_pointer()
@@ -24,9 +26,10 @@ def llvm_codegen(root: ase.SExpr):
     mod = ir.Module()
 
     # make function
-    arity, bodynode = determine_arity(root)
+    arity = determine_arity(root)
+    bodynode = root.body
     assert arity >= 1
-    actual_num_args = arity - 1  # due to iostate
+    actual_num_args = arity
     fnty = ir.FunctionType(
         ll_pyobject_ptr, [ll_pyobject_ptr] * actual_num_args
     )
@@ -46,14 +49,25 @@ def llvm_codegen(root: ase.SExpr):
         builder=builder,
         pyapi=PythonAPI(builder),
         retval_slot=retval_slot,
+        ports={},
     )
-    ctx.blam_stack.append(BLamIOArg())  # iostate
-    for i in range(actual_num_args):
-        ctx.blam_stack.append(BLamArg(argidx=i))
+    print(fn)
+    # # Setup ports
+    # argidx = 0
+    # for k in bodynode.begin.ins.split():
+    #     if k == internal_prefix("io"):
+    #         ctx.ports[k] = IOState()
+    #     else:
+    #         ctx.ports[k] = ArgValue(argidx)
+    #         argidx += 1
+    # assert argidx == actual_num_args, (argidx, actual_num_args)
 
     memo = ase.traverse(bodynode, _codegen_loop, CodegenState(context=ctx))
 
-    builder.ret(builder.load(retval_slot))
+    # builder.ret(builder.load(retval_slot))
+    outports = dict(zip(bodynode.outs.split(), bodynode.ports, strict=True))
+    retval = memo[outports[internal_prefix("ret")]].value
+    builder.ret(retval)
 
     llvm_ir = str(mod)
     print(llvm_ir)
@@ -95,266 +109,300 @@ class CodegenState(ase.TraverseState):
 
 
 def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
-    if False:
-        (yield None)
-
     ctx = state.context
     builder = ctx.builder
     pyapi = ctx.pyapi
 
     def ensure_io(val):
-        assert isinstance(val, BLamIOArg), val
+        assert isinstance(val, IOState), val
         return val
 
     match expr:
-        case lam.Arg(int(debruijn)):
-            sp = -debruijn - 1
-            sv = ctx.blam_stack[sp]
-            match sv:
-                case BLamIOArg():
-                    return sv
-                case BLamArg(int(idx)):
-                    return builder.function.args[idx]
-                case BLamValue(val=val):
-                    return val
-                case _:
-                    raise NotImplementedError(sv)
-        case lam.App(arg=argval, lam=lam.Lam() as lam_func):
-            with ctx.bind_app(lam_func, (yield argval)):
-                return (yield lam_func.body)
-        # case lam.Lam(body=body):
-        #     return (yield body)
-        case lam.Unpack(idx=int(idx), tup=packed_expr):
-            # handled at compile time
-            packed = yield packed_expr
-            retval = packed[idx]
-            return retval
-        case lam.Pack(args):
-            # handled at compile time
-            elems = []
-            for arg in args:
-                elems.append((yield arg))
-            retval = tuple(elems)
-            return retval
-        case rvsdg.Scfg_If(
-            test=cond,
-            then=br_true,
-            orelse=br_false,
+        case rg.Func():
+            raise TypeError
+        case rg.RegionBegin(ins=ins, ports=ports):
+            portvalues = []
+            for p in ports:
+                ctx.ports[p] = pv = yield p
+                portvalues.append(pv)
+            return PackedValues(portvalues)
+
+        case rg.RegionEnd(
+            begin=rg.RegionBegin() as begin,
+            outs=str(outs),
+            ports=ports,
         ):
-            condval = yield cond
-            # unpack pybool
-            condbit = builder.icmp_unsigned(
-                "!=", pyapi.int32(0), pyapi.object_istrue(condval)
-            )
+            yield begin
+            portvalues = []
+            for p in ports:
+                ctx.ports[p] = pv = yield p
+                portvalues.append(pv)
+            print("end.region", portvalues)
+            return PackedValues(portvalues)
 
-            bb_then = builder.append_basic_block("then")
-            bb_else = builder.append_basic_block("else")
-            bb_endif = builder.append_basic_block("endif")
+        case rg.IO():
+            return IOState()
 
-            builder.cbranch(condbit, bb_then, bb_else)
-            # Then
-            with builder.goto_block(bb_then):
-                value_then = yield br_true
-                builder.branch(bb_endif)
-                bb_then_end = builder.basic_block
-            # Else
-            with builder.goto_block(bb_else):
-                value_else = yield br_false
-                builder.branch(bb_endif)
-                bb_else_end = builder.basic_block
-            # EndIf
-            builder.position_at_end(bb_endif)
-            assert len(value_then) == len(value_else)
-            phis = []
-            for left, right in zip(value_then, value_else, strict=True):
-                if isinstance(left, BLamIOArg) or isinstance(right, BLamIOArg):
-                    # handle iostate
-                    assert isinstance(left, BLamIOArg) and isinstance(
-                        right, BLamIOArg
-                    )
-                    phis.append(left)
-                else:
-                    # otherwise
-                    assert left.type == right.type
-                    phi = builder.phi(left.type)
-                    phi.add_incoming(left, bb_then_end)
-                    phi.add_incoming(right, bb_else_end)
-                    phis.append(phi)
-            return tuple(phis)
-        case rvsdg.Scfg_While(body=loopblk):
-            bb_before = builder.basic_block
-            bb_loopbody = builder.append_basic_block("loopbody")
-            bb_endloop = builder.append_basic_block("endloop")
-            builder.branch(bb_loopbody)
-            # loop body
-            builder.position_at_end(bb_loopbody)
-            # setup phi nodes for loopback variables
-            loopback_pack = ctx.blam_stack[-1]
-            assert isinstance(loopback_pack, BLamValue)
-            phis = []
-            fixups = {}
-            for i, var in enumerate(loopback_pack.val):
-                if isinstance(var, BLamIOArg):
-                    # iostate
-                    phis.append(var)
-                else:
-                    # otherwise
-                    phi = builder.phi(var.type)
-                    phi.add_incoming(var, bb_before)
-                    fixups[i] = phi
-                    phis.append(phi)
-            # replace the top of stack
-            ctx.blam_stack[-1] = replace(loopback_pack, val=tuple(phis))
-            # generate body
-            loopout = yield loopblk
-            # get loop condition
-            loopcond = builder.icmp_unsigned(
-                "!=", pyapi.int32(0), pyapi.object_istrue(loopout[0])
-            )
-            # fix up phis
-            for i, phi in fixups.items():
-                phi.add_incoming(loopout[i], builder.basic_block)
-            # back jump
-            builder.cbranch(loopcond, bb_loopbody, bb_endloop)
-            # end loop
-            builder.position_at_end(bb_endloop)
-            return loopout
+        case rg.ArgRef(idx=int(idx), name=str(name)):
+            return SSAValue(builder.function.args[idx])
 
-        case rvsdg.Py_Undef():
-            return ll_pyobject_ptr(None)
-        case rvsdg.Py_None():
-            return pyapi.make_none()
-        case rvsdg.Py_Str(str(text)):
-            module = builder.module
-            encoded = bytearray(text.encode("utf-8") + b"\x00")
-            byte_string = ir.Constant(
-                ir.ArrayType(ll_byte, len(encoded)), encoded
-            )
-            unique_name = module.get_unique_name("const_string")
-            gv = ir.GlobalVariable(module, byte_string.type, unique_name)
-            gv.global_constant = True
-            gv.initializer = byte_string
-            gv.linkage = "internal"
-            return pyapi.string_from_string(builder.bitcast(gv, pyapi.cstring))
-        case rvsdg.Py_Int(int(ival)) | rvsdg.Py_Bool(int(ival)):
-            const = ir.Constant(pyapi.py_ssize_t, int(ival))
-            return pyapi.long_from_ssize_t(const)
-        case rvsdg.Py_Tuple(args):
-            elems = []
-            for arg in args:
-                elems.append((yield arg))
-            return pyapi.tuple_pack(elems)
-        case rvsdg.Py_UnaryOp(
-            opname=str(opname),
-            iostate=iostate,
-            arg=val,
-        ):
-            ioval = yield iostate
-            val = yield val
-            match opname:
-                case "not":
-                    retval = pyapi.bool_from_bool(pyapi.object_not(val))
-                case _:
-                    raise NotImplementedError(opname)
-            return ioval, retval
-        case rvsdg.Py_BinOp(opname=str(op), iostate=iostate, lhs=lhs, rhs=rhs):
-            ioval = ensure_io((yield iostate))
-            lhsval = yield lhs
-            rhsval = yield rhs
+        case rg.Unpack(val=source, idx=int(idx)):
+            ports: PackedValues = yield source
+            return ports[idx]
+
+        case rg.PyBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
+            ioval = ensure_io((yield io))
+            lhsval = (yield lhs).value
+            rhsval = (yield rhs).value
             match op:
                 case "+":
-                    retval = ctx.pyapi.number_add(lhsval, rhsval)
+                    res = ctx.pyapi.number_add(lhsval, rhsval)
                 case "-":
-                    retval = ctx.pyapi.number_subtract(lhsval, rhsval)
+                    res = ctx.pyapi.number_subtract(lhsval, rhsval)
                 case "*":
-                    retval = ctx.pyapi.number_multiply(lhsval, rhsval)
+                    res = ctx.pyapi.number_multiply(lhsval, rhsval)
                 case "/":
-                    retval = ctx.pyapi.number_truedivide(lhsval, rhsval)
+                    res = ctx.pyapi.number_truedivide(lhsval, rhsval)
                 case "//":
-                    retval = ctx.pyapi.number_floordivide(lhsval, rhsval)
+                    res = ctx.pyapi.number_floordivide(lhsval, rhsval)
+                case "<" | ">" | "==" | "!=":
+                    res = ctx.pyapi.object_richcompare(lhsval, rhsval, op)
                 case _:
                     raise NotImplementedError(op)
-            return ioval, retval
-        case rvsdg.Py_InplaceBinOp(
-            opname=str(op),
-            iostate=iostate,
-            lhs=lhs,
-            rhs=rhs,
-        ):
-            ioval = ensure_io((yield iostate))
-            lhsval = yield lhs
-            rhsval = yield rhs
-            match op:
-                case "+":
-                    res = ctx.pyapi.number_add(lhsval, rhsval, inplace=True)
-                case "*":
-                    res = ctx.pyapi.number_multiply(
-                        lhsval, rhsval, inplace=True
-                    )
-                case _:
-                    raise NotImplementedError(op)
-            return ioval, res
-        case rvsdg.Py_Compare(
-            opname=str(op),
-            iostate=iostate,
-            lhs=lhs,
-            rhs=rhs,
-        ):
-            ioval = ensure_io((yield iostate))
-            lhsval = yield lhs
-            rhsval = yield rhs
-            match op:
-                case "<" | ">" | "!=" | "in":
-                    res = pyapi.object_richcompare(lhsval, rhsval, op)
-                case _:
-                    raise NotImplementedError(op)
-            return ioval, res
-        case rvsdg.Return(iostate=iostate, retval=retval):
-            ensure_io((yield iostate))
-            retval = yield retval
-            builder.store(retval, ctx.retval_slot)
-        case rvsdg.Py_Call(
-            iostate=iostate,
-            callee=callee,
-            args=args,
-        ):
-            ioval = ensure_io((yield iostate))
-            callee = yield callee
-            argvals = []
-            for arg in args:
-                argvals.append((yield arg))
-            retval = pyapi.call_function_objargs(callee, argvals)
-            return ioval, retval
-        case rvsdg.Py_GlobalLoad(str(glbname)):
-            freezeobj = __builtins__[glbname]
-            ptr = pyapi.py_ssize_t(id(freezeobj))
-            obj = builder.inttoptr(
-                ptr, ll_pyobject_ptr, name=f"global.{glbname}"
-            )
-            return obj
+            return PackedValues((ioval, SSAValue(res)))
+
+        case rg.DbgValue(value=value):
+            val = yield value
+            return val
+
+        # case lam.Arg(int(debruijn)):
+        #     sp = -debruijn - 1
+        #     sv = ctx.blam_stack[sp]
+        #     match sv:
+        #         case BLamIOArg():
+        #             return sv
+        #         case BLamArg(int(idx)):
+        #             return builder.function.args[idx]
+        #         case BLamValue(val=val):
+        #             return val
+        #         case _:
+        #             raise NotImplementedError(sv)
+        # case lam.App(arg=argval, lam=lam.Lam() as lam_func):
+        #     with ctx.bind_app(lam_func, (yield argval)):
+        #         return (yield lam_func.body)
+        # # case lam.Lam(body=body):
+        # #     return (yield body)
+        # case lam.Unpack(idx=int(idx), tup=packed_expr):
+        #     # handled at compile time
+        #     packed = yield packed_expr
+        #     retval = packed[idx]
+        #     return retval
+        # case lam.Pack(args):
+        #     # handled at compile time
+        #     elems = []
+        #     for arg in args:
+        #         elems.append((yield arg))
+        #     retval = tuple(elems)
+        #     return retval
+        # case rvsdg.Scfg_If(
+        #     test=cond,
+        #     then=br_true,
+        #     orelse=br_false,
+        # ):
+        #     condval = yield cond
+        #     # unpack pybool
+        #     condbit = builder.icmp_unsigned(
+        #         "!=", pyapi.int32(0), pyapi.object_istrue(condval)
+        #     )
+
+        #     bb_then = builder.append_basic_block("then")
+        #     bb_else = builder.append_basic_block("else")
+        #     bb_endif = builder.append_basic_block("endif")
+
+        #     builder.cbranch(condbit, bb_then, bb_else)
+        #     # Then
+        #     with builder.goto_block(bb_then):
+        #         value_then = yield br_true
+        #         builder.branch(bb_endif)
+        #         bb_then_end = builder.basic_block
+        #     # Else
+        #     with builder.goto_block(bb_else):
+        #         value_else = yield br_false
+        #         builder.branch(bb_endif)
+        #         bb_else_end = builder.basic_block
+        #     # EndIf
+        #     builder.position_at_end(bb_endif)
+        #     assert len(value_then) == len(value_else)
+        #     phis = []
+        #     for left, right in zip(value_then, value_else, strict=True):
+        #         if isinstance(left, BLamIOArg) or isinstance(right, BLamIOArg):
+        #             # handle iostate
+        #             assert isinstance(left, BLamIOArg) and isinstance(
+        #                 right, BLamIOArg
+        #             )
+        #             phis.append(left)
+        #         else:
+        #             # otherwise
+        #             assert left.type == right.type
+        #             phi = builder.phi(left.type)
+        #             phi.add_incoming(left, bb_then_end)
+        #             phi.add_incoming(right, bb_else_end)
+        #             phis.append(phi)
+        #     return tuple(phis)
+        # case rvsdg.Scfg_While(body=loopblk):
+        #     bb_before = builder.basic_block
+        #     bb_loopbody = builder.append_basic_block("loopbody")
+        #     bb_endloop = builder.append_basic_block("endloop")
+        #     builder.branch(bb_loopbody)
+        #     # loop body
+        #     builder.position_at_end(bb_loopbody)
+        #     # setup phi nodes for loopback variables
+        #     loopback_pack = ctx.blam_stack[-1]
+        #     assert isinstance(loopback_pack, BLamValue)
+        #     phis = []
+        #     fixups = {}
+        #     for i, var in enumerate(loopback_pack.val):
+        #         if isinstance(var, BLamIOArg):
+        #             # iostate
+        #             phis.append(var)
+        #         else:
+        #             # otherwise
+        #             phi = builder.phi(var.type)
+        #             phi.add_incoming(var, bb_before)
+        #             fixups[i] = phi
+        #             phis.append(phi)
+        #     # replace the top of stack
+        #     ctx.blam_stack[-1] = replace(loopback_pack, val=tuple(phis))
+        #     # generate body
+        #     loopout = yield loopblk
+        #     # get loop condition
+        #     loopcond = builder.icmp_unsigned(
+        #         "!=", pyapi.int32(0), pyapi.object_istrue(loopout[0])
+        #     )
+        #     # fix up phis
+        #     for i, phi in fixups.items():
+        #         phi.add_incoming(loopout[i], builder.basic_block)
+        #     # back jump
+        #     builder.cbranch(loopcond, bb_loopbody, bb_endloop)
+        #     # end loop
+        #     builder.position_at_end(bb_endloop)
+        #     return loopout
+
+        # case rvsdg.Py_Undef():
+        #     return ll_pyobject_ptr(None)
+        # case rvsdg.Py_None():
+        #     return pyapi.make_none()
+        # case rvsdg.Py_Str(str(text)):
+        #     module = builder.module
+        #     encoded = bytearray(text.encode("utf-8") + b"\x00")
+        #     byte_string = ir.Constant(
+        #         ir.ArrayType(ll_byte, len(encoded)), encoded
+        #     )
+        #     unique_name = module.get_unique_name("const_string")
+        #     gv = ir.GlobalVariable(module, byte_string.type, unique_name)
+        #     gv.global_constant = True
+        #     gv.initializer = byte_string
+        #     gv.linkage = "internal"
+        #     return pyapi.string_from_string(builder.bitcast(gv, pyapi.cstring))
+        # case rvsdg.Py_Int(int(ival)) | rvsdg.Py_Bool(int(ival)):
+        #     const = ir.Constant(pyapi.py_ssize_t, int(ival))
+        #     return pyapi.long_from_ssize_t(const)
+        # case rvsdg.Py_Tuple(args):
+        #     elems = []
+        #     for arg in args:
+        #         elems.append((yield arg))
+        #     return pyapi.tuple_pack(elems)
+        # case rvsdg.Py_UnaryOp(
+        #     opname=str(opname),
+        #     iostate=iostate,
+        #     arg=val,
+        # ):
+        #     ioval = yield iostate
+        #     val = yield val
+        #     match opname:
+        #         case "not":
+        #             retval = pyapi.bool_from_bool(pyapi.object_not(val))
+        #         case _:
+        #             raise NotImplementedError(opname)
+        #     return ioval, retval
+        # case rvsdg.Py_BinOp(opname=str(op), iostate=iostate, lhs=lhs, rhs=rhs):
+        #     ioval = ensure_io((yield iostate))
+        #     lhsval = yield lhs
+        #     rhsval = yield rhs
+        #     match op:
+        #         case "+":
+        #             retval = ctx.pyapi.number_add(lhsval, rhsval)
+        #         case "-":
+        #             retval = ctx.pyapi.number_subtract(lhsval, rhsval)
+        #         case "*":
+        #             retval = ctx.pyapi.number_multiply(lhsval, rhsval)
+        #         case "/":
+        #             retval = ctx.pyapi.number_truedivide(lhsval, rhsval)
+        #         case "//":
+        #             retval = ctx.pyapi.number_floordivide(lhsval, rhsval)
+        #         case _:
+        #             raise NotImplementedError(op)
+        #     return ioval, retval
+        # case rvsdg.Py_InplaceBinOp(
+        #     opname=str(op),
+        #     iostate=iostate,
+        #     lhs=lhs,
+        #     rhs=rhs,
+        # ):
+        #     ioval = ensure_io((yield iostate))
+        #     lhsval = yield lhs
+        #     rhsval = yield rhs
+        #     match op:
+        #         case "+":
+        #             res = ctx.pyapi.number_add(lhsval, rhsval, inplace=True)
+        #         case "*":
+        #             res = ctx.pyapi.number_multiply(
+        #                 lhsval, rhsval, inplace=True
+        #             )
+        #         case _:
+        #             raise NotImplementedError(op)
+        #     return ioval, res
+        # case rvsdg.Py_Compare(
+        #     opname=str(op),
+        #     iostate=iostate,
+        #     lhs=lhs,
+        #     rhs=rhs,
+        # ):
+        #     ioval = ensure_io((yield iostate))
+        #     lhsval = yield lhs
+        #     rhsval = yield rhs
+        #     match op:
+        #         case "<" | ">" | "!=" | "in":
+        #             res = pyapi.object_richcompare(lhsval, rhsval, op)
+        #         case _:
+        #             raise NotImplementedError(op)
+        #     return ioval, res
+        # case rvsdg.Return(iostate=iostate, retval=retval):
+        #     ensure_io((yield iostate))
+        #     retval = yield retval
+        #     builder.store(retval, ctx.retval_slot)
+        # case rvsdg.Py_Call(
+        #     iostate=iostate,
+        #     callee=callee,
+        #     args=args,
+        # ):
+        #     ioval = ensure_io((yield iostate))
+        #     callee = yield callee
+        #     argvals = []
+        #     for arg in args:
+        #         argvals.append((yield arg))
+        #     retval = pyapi.call_function_objargs(callee, argvals)
+        #     return ioval, retval
+        # case rvsdg.Py_GlobalLoad(str(glbname)):
+        #     freezeobj = __builtins__[glbname]
+        #     ptr = pyapi.py_ssize_t(id(freezeobj))
+        #     obj = builder.inttoptr(
+        #         ptr, ll_pyobject_ptr, name=f"global.{glbname}"
+        #     )
+        #     return obj
         case _:
-            raise NotImplementedError(ase.as_tuple(expr, depth=2))
-
-
-@dataclass(frozen=True)
-class BLamBase:
-    pass
-
-
-@dataclass(frozen=True)
-class BLamIOArg(BLamBase):
-    pass
-
-
-@dataclass(frozen=True)
-class BLamArg(BLamBase):
-    argidx: int
-
-
-@dataclass(frozen=True)
-class BLamValue(BLamBase):
-    lam: ase.SExpr
-    val: Any
+            # raise NotImplementedError(ase.as_tuple(expr, depth=2))
+            raise NotImplementedError(expr, type(expr))
 
 
 @dataclass(frozen=True)
@@ -364,29 +412,45 @@ class CodegenCtx:
     builder: ir.IRBuilder
     pyapi: PythonAPI
     retval_slot: ir.Value
-    blam_stack: list[BLamBase] = field(default_factory=list)
 
-    @contextmanager
-    def bind_app(self, lam_expr: ase.SExpr, argval: Any):
-        self.blam_stack.append(BLamValue(lam_expr, argval))
-        try:
-            yield
-        finally:
-            self.blam_stack.pop()
+    ports: dict[str, LLVMValue]
 
 
-def determine_arity(root: ase.SExpr):
+def determine_arity(root: ase.SExpr) -> int:
     node = root
-    arity = 0
-    first_non_lam = None
-    while node:
-        match node:
-            case lam.Lam(body=ase.SExpr() as node):
-                arity += 1
-            case _:
-                first_non_lam = node
-                break
-    return arity, node
+    match node:
+        case rg.Func(args=rg.Args() as args):
+            return len(args.arguments)
+        case _:
+            raise TypeError(node._head)
+
+
+@dataclass(frozen=True)
+class LLVMValue: ...
+
+
+@dataclass(frozen=True)
+class IOState(LLVMValue): ...
+
+
+@dataclass(frozen=True)
+class SSAValue(LLVMValue):
+    value: ir.Value
+
+    def __post_init__(self):
+        assert isinstance(self.value, ir.Value)
+
+
+@dataclass(frozen=True)
+class PackedValues(LLVMValue):
+    values: tuple[SSAValue, ...]
+
+    def __post_init__(self):
+        for v in self.values:
+            assert isinstance(v, (SSAValue, IOState))
+
+    def __getitem__(self, idx) -> SSAValue:
+        return self.values[idx]
 
 
 # Adapted from numba/core/pythonapi/PythonApi

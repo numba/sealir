@@ -217,10 +217,10 @@ def test_for_if_1():
 def run(func, args, *, localscope=None):
     expected = func(*args)
 
-    lam_node = restructure_source(func)
+    func, dbg = restructure_source(func)
 
     assert localscope is None
 
-    cg = llvm_codegen(lam_node)
+    cg = llvm_codegen(func)
     res = cg(*args)
     assert res == expected

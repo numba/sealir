@@ -29,6 +29,7 @@ def internal_prefix(name: str) -> str:
 
 
 from .evaluating import evaluate
+from .grammar import Grammar
 from .restructuring import (
     SourceInfoDebugger,
     convert_to_rvsdg,
