@@ -120,6 +120,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
     match expr:
         case rg.Func():
             raise TypeError
+
         case rg.RegionBegin(ins=ins, ports=ports):
             portvalues = []
             for p in ports:
@@ -137,7 +138,6 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             for p in ports:
                 ctx.ports[p] = pv = yield p
                 portvalues.append(pv)
-            print("end.region", portvalues)
             return PackedValues(portvalues)
 
         case rg.IO():
@@ -171,9 +171,156 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     raise NotImplementedError(op)
             return PackedValues((ioval, SSAValue(res)))
 
+        case rg.PyInplaceBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
+            ioval = ensure_io((yield io))
+            lhsval = (yield lhs).value
+            rhsval = (yield rhs).value
+            match op:
+                case "+":
+                    res = ctx.pyapi.number_add(lhsval, rhsval, inplace=True)
+                case "-":
+                    res = ctx.pyapi.number_subtract(
+                        lhsval, rhsval, inplace=True
+                    )
+                case "*":
+                    res = ctx.pyapi.number_multiply(
+                        lhsval, rhsval, inplace=True
+                    )
+                case "/":
+                    res = ctx.pyapi.number_truedivide(
+                        lhsval, rhsval, inplace=True
+                    )
+                case "//":
+                    res = ctx.pyapi.number_floordivide(
+                        lhsval, rhsval, inplace=True
+                    )
+                case _:
+                    raise NotImplementedError(op)
+            return PackedValues((ioval, SSAValue(res)))
+
+        case rg.PyUnaryOp(op=op, io=io, operand=operand):
+            ioval = ensure_io((yield io))
+            val = (yield operand).value
+            match op:
+                case "not":
+                    retval = pyapi.bool_from_bool(pyapi.object_not(val))
+                case _:
+                    raise NotImplementedError(op)
+            return PackedValues([ioval, SSAValue(retval)])
+
         case rg.DbgValue(value=value):
             val = yield value
             return val
+
+        case rg.PyInt(int(ival)) | rg.PyBool(int(ival)):
+            const = ir.Constant(pyapi.py_ssize_t, int(ival))
+            return SSAValue(pyapi.long_from_ssize_t(const))
+
+        case rg.PyTuple(elems):
+            elts = []
+            for el in elems:
+                elts.append((yield el).value)
+            return SSAValue(pyapi.tuple_pack(elts))
+
+        case rg.Undef():
+            return SSAValue(ll_pyobject_ptr(None))  # null pointer
+
+        case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
+            condval = (yield cond).value
+            # unpack pybool
+            condbit = builder.icmp_unsigned(
+                "!=", pyapi.int32(0), pyapi.object_istrue(condval)
+            )
+
+            bb_then = builder.append_basic_block("then")
+            bb_else = builder.append_basic_block("else")
+            bb_endif = builder.append_basic_block("endif")
+
+            builder.cbranch(condbit, bb_then, bb_else)
+            # Then
+            with builder.goto_block(bb_then):
+                value_then = yield body
+                builder.branch(bb_endif)
+                bb_then_end = builder.basic_block
+            # Else
+            with builder.goto_block(bb_else):
+                value_else = yield orelse
+                builder.branch(bb_endif)
+                bb_else_end = builder.basic_block
+            # EndIf
+            builder.position_at_end(bb_endif)
+            assert len(value_then) == len(value_else)
+            phis: list[LLVMValue] = []
+            for left, right in zip(value_then, value_else, strict=True):
+                if isinstance(left, IOState) or isinstance(right, IOState):
+                    # handle iostate
+                    assert isinstance(left, IOState) and isinstance(
+                        right, IOState
+                    )
+                    phis.append(left)
+                else:
+                    # otherwise
+                    left = left.value
+                    right = right.value
+                    assert left.type == right.type
+                    phi = builder.phi(left.type)
+                    phi.add_incoming(left, bb_then_end)
+                    phi.add_incoming(right, bb_else_end)
+                    phis.append(SSAValue(phi))
+            return PackedValues(phis)
+
+        case rg.Loop(body=body, outs=outs, loopvar=loopvar):
+            begin = body.begin
+            loopentry_values = yield begin
+
+            bb_before = builder.basic_block
+            bb_loopbody = builder.append_basic_block("loopbody")
+            bb_endloop = builder.append_basic_block("endloop")
+            builder.branch(bb_loopbody)
+            # loop body
+            builder.position_at_end(bb_loopbody)
+            # setup phi nodes for loopback variables
+
+            phis = []
+            fixups = {}
+            for i, var in enumerate(loopentry_values.values):
+                if isinstance(var, IOState):
+                    # iostate
+                    phis.append(var)
+                else:
+                    # otherwise
+                    phi = builder.phi(var.value.type)
+                    phi.add_incoming(var.value, bb_before)
+                    fixups[i] = phi
+                    phis.append(SSAValue(phi))
+
+            packed_phis = PackedValues(phis)
+
+            # generate body
+            loopctx = replace(ctx, ports={})
+            loop_memo = {begin: packed_phis}
+            memo = ase.traverse(
+                body,
+                _codegen_loop,
+                CodegenState(context=loopctx),
+                init_memo=loop_memo,
+            )
+
+            loopout_values = memo[body]
+            cond_obj = loopout_values[outs.split().index(loopvar)].value
+
+            # get loop condition
+            loopcond = builder.icmp_unsigned(
+                "!=", pyapi.int32(0), pyapi.object_istrue(cond_obj)
+            )
+            # fix up phis
+            for i, phi in fixups.items():
+                phi.add_incoming(loopout_values[i].value, builder.basic_block)
+            # back jump
+            builder.cbranch(loopcond, bb_loopbody, bb_endloop)
+            # end loop
+            builder.position_at_end(bb_endloop)
+            return packed_phis
 
         # case lam.Arg(int(debruijn)):
         #     sp = -debruijn - 1
@@ -443,14 +590,17 @@ class SSAValue(LLVMValue):
 
 @dataclass(frozen=True)
 class PackedValues(LLVMValue):
-    values: tuple[SSAValue, ...]
+    values: tuple[LLVMValue, ...]
 
     def __post_init__(self):
         for v in self.values:
-            assert isinstance(v, (SSAValue, IOState))
+            assert isinstance(v, (SSAValue, IOState)), type(v)
 
     def __getitem__(self, idx) -> SSAValue:
         return self.values[idx]
+
+    def __len__(self) -> int:
+        return len(self.values)
 
 
 # Adapted from numba/core/pythonapi/PythonApi
