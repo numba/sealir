@@ -1,5 +1,4 @@
-# S-Expression And Lambda Intermediate Representation (SEALIR)
-
+# S-Expression Array for Lightweight Immutable Representation (SealIR)
 
 
 ## Append-only Array-based Storage for S-Expression
