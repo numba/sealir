@@ -26,7 +26,7 @@ from egglog import (
 
 
 class RegionDef(Expr):
-    def __init__(self, uid: String, nin: i64Like): ...
+    def __init__(self, uid: StringLike, nin: i64Like): ...
 
     def begin(self) -> InputPorts: ...
 
@@ -48,6 +48,9 @@ class Env(Expr):
 class Value(Expr):
     @classmethod
     def Param(cls, i: i64Like) -> Value: ...
+
+    @classmethod
+    def IOState(cls) -> Value: ...
 
     @classmethod
     def BoolTrue(cls) -> Value: ...
@@ -463,8 +466,9 @@ def _EnvEnter_EvalMap(terms: TermList, env: Env):
 
 
 @ruleset
-def _VBinOp_assoc(op: String, va: Value, vb: Value):
-    yield rewrite(VBinOp(op, va, vb)).to(VBinOp(op, vb, va))
+def _VBinOp_communtativity(va: Value, vb: Value):
+    for op in ["Add"]:
+        yield rewrite(VBinOp(op, va, vb)).to(VBinOp(op, vb, va))
 
 
 @ruleset
@@ -603,7 +607,7 @@ def make_rules():
         | _EvalMap_to_ValueList
         | _ValueList_rules
         | _EnvEnter_EvalMap
-        | _VBinOp_assoc
+        # | _VBinOp_communtativity
         | _VBinOp_Lt
         | _VBinOp_Add
         | _Debug_Eval
