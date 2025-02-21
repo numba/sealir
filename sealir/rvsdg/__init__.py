@@ -33,6 +33,7 @@ from .grammar import Grammar
 from .restructuring import (
     SourceDebugInfo,
     convert_to_rvsdg,
+    format_rvsdg,
     restructure_source,
 )
 from .scfg_to_sexpr import convert_to_sexpr
