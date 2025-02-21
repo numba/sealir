@@ -48,10 +48,6 @@ class WrapTerm:
         return self.term.getPort(idx)
 
 
-def TODO(msg: str) -> None:
-    print(f"!!!TODO: {msg}", file=sys.stderr)
-
-
 def egraph_conversion(root: SExpr):
 
     def region_uid(expr: SExpr) -> str:
@@ -109,8 +105,7 @@ def egraph_conversion(root: SExpr):
                 rhsterm = yield rhs
                 match op:
                     case "<":
-                        TODO("handle io")
-                        res = eg.Term.Lt(lhsterm, rhsterm)
+                        res = eg.Term.LtIO(ioterm, lhsterm, rhsterm)
 
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")

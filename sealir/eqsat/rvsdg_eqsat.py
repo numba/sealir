@@ -97,6 +97,8 @@ class Term(Expr):
     @classmethod
     def Lt(cls, a: Term, b: Term) -> Term: ...
     @classmethod
+    def LtIO(cls, io: Term, a: Term, b: Term) -> Term: ...
+    @classmethod
     def Add(cls, a: Term, b: Term) -> Term: ...
     @classmethod
     def LiteralI64(cls, val: i64) -> Term: ...
@@ -121,6 +123,12 @@ class Debug(Expr):
 
 def termlist(*args: Term) -> TermList:
     return TermList(Vec(*args))
+
+
+@function
+def has_pure_type(v: Value) -> Bool:
+    """Type of value is pure such that all operations on it has no side effects."""
+    ...
 
 
 @function
@@ -171,6 +179,12 @@ def VLoop(phis: ValueList, body: Value) -> Value: ...
 
 @function
 def VBinOp(opname: StringLike, lhs: Value, rhs: Value) -> Value: ...
+
+
+@function
+def VBinOpIO(
+    opname: StringLike, io: Value, lhs: Value, rhs: Value
+) -> Value: ...
 
 
 @function
@@ -472,10 +486,16 @@ def _VBinOp_communtativity(va: Value, vb: Value):
 
 
 @ruleset
-def _VBinOp_Lt(env: Env, ta: Term, tb: Term, i: i64, j: i64):
+def _VBinOp_Lt(
+    env: Env, ta: Term, tb: Term, io: Term, i: i64, j: i64, op: String
+):
     yield rewrite(Eval(env, Term.Lt(ta, tb))).to(
         VBinOp("Lt", Eval(env, ta), Eval(env, tb))
     )
+    yield rewrite(Eval(env, Term.LtIO(io, ta, tb))).to(
+        VBinOpIO("Lt", Eval(env, io), Eval(env, ta), Eval(env, tb))
+    )
+
     # Constant I64
     yield rewrite(VBinOp("Lt", Value.ConstI64(i), Value.ConstI64(j))).to(
         Value.BoolTrue(),
@@ -487,6 +507,27 @@ def _VBinOp_Lt(env: Env, ta: Term, tb: Term, i: i64, j: i64):
         # given
         i >= j,
     )
+
+
+@ruleset
+def _VBinOp_Pure(
+    ta: Value,
+    tb: Value,
+    io: Value,
+    op: String,
+    i: i64,
+):
+    # Constant I64 is pure
+    yield rewrite(VBinOpIO(op, io, ta, tb)).to(
+        VBinOp(op, ta, tb),
+        # given
+        has_pure_type(ta),
+        has_pure_type(tb),
+    )
+
+    yield rule(
+        eq(ta).to(Value.ConstI64(i)),
+    ).then(set_(has_pure_type(ta)).to(True))
 
 
 @ruleset
@@ -607,6 +648,7 @@ def make_rules():
         | _EvalMap_to_ValueList
         | _ValueList_rules
         | _EnvEnter_EvalMap
+        | _VBinOp_Pure
         # | _VBinOp_communtativity
         | _VBinOp_Lt
         | _VBinOp_Add
