@@ -648,7 +648,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             raise NotImplementedError(expr)
 
 
-def format_rvsdg(grm: rg.Grammar, prgm: SExpr) -> str:
+def format_rvsdg(prgm: SExpr) -> str:
 
     def _inf_counter():
         c = 0
@@ -690,7 +690,7 @@ def format_rvsdg(grm: rg.Grammar, prgm: SExpr) -> str:
                     lambda x, y: f"{x}={y}",
                     zip(ins.split(), inports, strict=True),
                 )
-                put(f"{name} = Region <- {' '.join(fmtins)}")
+                put(f"{name} = Region[{expr._handle}] <- {' '.join(fmtins)}")
                 return name
             case rg.RegionEnd(begin=begin, outs=str(outs), ports=ports):
                 (yield begin)
@@ -703,7 +703,7 @@ def format_rvsdg(grm: rg.Grammar, prgm: SExpr) -> str:
                     lambda x, y: f"{y}={x}",
                     zip(outrefs, outs.split(), strict=True),
                 )
-                put(f"}} -> {' '.join(fmtoutports)}")
+                put(f"}} [{expr._handle}] -> {' '.join(fmtoutports)}")
             case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
                 condref = yield cond
                 name = fresh_name()
@@ -717,7 +717,7 @@ def format_rvsdg(grm: rg.Grammar, prgm: SExpr) -> str:
 
             case rg.Loop(body=body, outs=outs, loopvar=loopvar):
                 name = fresh_name()
-                put(f"{name} = Loop #{loopvar}")
+                put(f"{name} = Loop [{expr._handle}] #{loopvar}")
                 with indent():
                     (yield body)
                 put(f"EndLoop -> {outs}")
@@ -864,5 +864,5 @@ def convert_to_rvsdg(grm: rg.Grammar, prgm: SExpr):
     # pp(out)
 
     if _DEBUG:
-        print(format_rvsdg(grm, out))
+        print(format_rvsdg(out))
     return out

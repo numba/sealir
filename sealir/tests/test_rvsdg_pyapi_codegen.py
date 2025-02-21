@@ -215,9 +215,13 @@ def test_for_if_1():
 
 
 def run(func, args, *, localscope=None):
+    from sealir.rvsdg.restructuring import format_rvsdg
+
     expected = func(*args)
 
     func, dbg = restructure_source(func)
+
+    print(format_rvsdg(func))
 
     assert localscope is None
 
