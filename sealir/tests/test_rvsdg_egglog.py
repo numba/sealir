@@ -3,31 +3,37 @@
 from __future__ import annotations
 
 import os
-from typing import Callable
 from functools import partial
+from typing import Callable
 
 from egglog import (
-    Expr,
-    i64,
-    i64Like,
     Bool,
     BoolLike,
-    Vec,
+    EGraph,
+    Expr,
     Set,
     String,
     StringLike,
-    EGraph,
+    Vec,
+    eq,
     function,
+    i64,
+    i64Like,
     method,
+    ne,
+    rewrite,
+    rule,
+    ruleset,
+    set_,
+    union,
 )
-from egglog import eq, ne, rule, rewrite, set_, union, ruleset
+
 
 def read_env(v: str):
     if v:
         return int(v)
     else:
         return 0
-
 
 
 DEBUG = read_env(os.environ.get("DEBUG", ""))
@@ -83,11 +89,12 @@ class ValueList(Expr):
     def map(self, fn: Callable[[Value], Value]) -> ValueList: ...
 
     @classmethod
-    def Merge(cls,
-              merge_fn: Callable[[Value, Value], Value],
-              vas: ValueList,
-              vbs: ValueList) -> ValueList: ...
-
+    def Merge(
+        cls,
+        merge_fn: Callable[[Value, Value], Value],
+        vas: ValueList,
+        vbs: ValueList,
+    ) -> ValueList: ...
 
 
 class Term(Expr):
@@ -134,8 +141,10 @@ def Eval(env: Env, term: Term) -> Value: ...
 @function
 def EvalMap(env: Env, terms: TermList) -> ValueList: ...
 
+
 @function
 def VFix(v: Value) -> Value: ...
+
 
 @function
 def VGetPort(vs: ValueList, idx: i64) -> Value: ...
@@ -144,22 +153,28 @@ def VGetPort(vs: ValueList, idx: i64) -> Value: ...
 @function
 def VBranch(cond: Value, then: Value, orelse: Value) -> Value: ...
 
+
 @function(unextractable=True)
 def _LoopTemp(outs: ValueList) -> Value: ...
+
 
 @function
 def _LoopBack(phis: ValueList, body: Term) -> ValueList: ...
 
+
 @function
 def _LoopDropCond(outs: Value) -> ValueList: ...
 
+
 @function
 def _LoopOutputs(v: Value) -> ValueList: ...
+
 
 @function
 def _LoopPhiOf(phi: Value, loopback: Value) -> Value: ...
 @function
 def _MapLoopPhiOf(phis: ValueList, loopbacks: ValueList) -> ValueList: ...
+
 
 @function
 def VLoop(phis: ValueList, body: Value) -> Value: ...
@@ -184,31 +199,44 @@ def EnvLoop(vs: ValueList) -> Env: ...
 @function
 def PhiMap(left: ValueList, right: ValueList) -> ValueList: ...
 
+
 @function
 def VPhi(a: Value, b: Value) -> Value: ...
 
 
 class LVA(Expr):
     """Loop Variable Analysis"""
+
     ...
+
 
 @function
 def LVAnalysis(phi: Value) -> LVA:
     """LVAnalysis always apply to the phi node"""
     ...
 
+
 @function
-def LoopIncremented(op: StringLike, phi: Value, init: Value, step: Value, res: Value) -> LVA: ...
+def LoopIncremented(
+    op: StringLike, phi: Value, init: Value, step: Value, res: Value
+) -> LVA: ...
 @function
-def LoopIndVar(op: StringLike, start: Value, stop: Value, step: Value) -> LVA: ...
+def LoopIndVar(
+    op: StringLike, start: Value, stop: Value, step: Value
+) -> LVA: ...
 @function
-def LoopAccumIndVar(op: StringLike, init: Value, start: Value, stop: Value, step: Value) -> LVA: ...
+def LoopAccumIndVar(
+    op: StringLike, init: Value, start: Value, stop: Value, step: Value
+) -> LVA: ...
+
 
 @function
 def IsLoopInVariant(v: Value) -> Bool: ...
 
+
 @function
 def VSum(vstart: Value, vstop: Value, vstep: Value) -> Value: ...
+
 
 @ruleset
 def _propagate_RegionDef_from_the_end(
@@ -266,62 +294,44 @@ def _VLoop(
     # VLoop
     yield rewrite(
         Eval(env, Term.Loop(input_terms, body_term)),
-    ).to(
-        _LoopTemp(_LoopBack(EvalMap(env, input_terms), body_term))
-    )
+    ).to(_LoopTemp(_LoopBack(EvalMap(env, input_terms), body_term)))
 
     yield rule(
         eq(vl).to(_LoopBack(phis, body_term)),
     ).then(
         union(_LoopTemp(vl)).with_(
-            VLoop(_pm:=PhiMap(phis, vl),
-                  _inner:=Eval(EnvLoop(_pm), body_term))
+            VLoop(
+                _pm := PhiMap(phis, vl),
+                _inner := Eval(EnvLoop(_pm), body_term),
+            )
         ),
-        union(vl).with_(
-            _LoopDropCond(_inner)
-        )
+        union(vl).with_(_LoopDropCond(_inner)),
     )
 
     yield rewrite(VLoop(vl, va)).to(_LoopOutputs(va).toValue())
 
     # EnvLoop
-    yield rewrite(
-        EnvLoop(phis)
-    ).to(
-        Env.nil().nest(phis)
-    )
+    yield rewrite(EnvLoop(phis)).to(Env.nil().nest(phis))
     # _LoopDropCond
-    yield rewrite(
-        _LoopDropCond(ValueList(vec_va).toValue())
-    ).to(
+    yield rewrite(_LoopDropCond(ValueList(vec_va).toValue())).to(
         # Drop the loop condition
         ValueList(vec_va.remove(0))
     )
 
     # _LoopOutputs
-    yield rewrite(
-        _LoopOutputs(ValueList(vec_va).toValue())
-    ).to(
+    yield rewrite(_LoopOutputs(ValueList(vec_va).toValue())).to(
         # Drop the loop condition
         ValueList(vec_va.remove(0)).map(VFix)
     )
 
     # VFix of Param
-    yield rewrite(
-        VFix(Value.Param(i))
-    ).to(
-        Value.Param(i)
-    )
+    yield rewrite(VFix(Value.Param(i))).to(Value.Param(i))
 
     # PhiMap
-    yield rewrite(
-        PhiMap(vl, vl2)
-    ).to(
-        ValueList.Merge(VPhi, vl, vl2)
-    )
+    yield rewrite(PhiMap(vl, vl2)).to(ValueList.Merge(VPhi, vl, vl2))
 
     # Phi
-    yield rewrite(VPhi(va, vb), subsume=True).to(va|vb)
+    yield rewrite(VPhi(va, vb), subsume=True).to(va | vb)
 
 
 @ruleset
@@ -345,22 +355,19 @@ def _VGetPort(i: i64, vec_vals: Vec[Value], env: Env, term: Term):
         i < vec_vals.length(),
     )
 
+
 @ruleset
 def _Value_rules(a: Value, b: Value):
     # __or__ associativity
-    yield rewrite( a | b ).to( b | a)
+    yield rewrite(a | b).to(b | a)
 
     # merge phis
-    yield rewrite( a | a ).to( a )
+    yield rewrite(a | a).to(a)
     # merge loop back phis
-    yield rule(
-        eq(a).to(a | b)
-    ).then(
+    yield rule(eq(a).to(a | b)).then(
         union(b).with_(a),
         set_(IsLoopInVariant(a)).to(Bool(True)),
     )
-
-
 
 
 @ruleset
@@ -375,9 +382,7 @@ def _ValueList_rules(
     yield rewrite(
         ValueList(vs1).append(ValueList(vs2)),
         subsume=True,
-    ).to(
-        ValueList(vs1.append(vs2))
-    )
+    ).to(ValueList(vs1.append(vs2)))
     # Simplify ValueList
     yield rewrite(vl.toValue().toList()).to(vl)
     yield rewrite(
@@ -407,32 +412,30 @@ def _ValueList_rules(
         subsume=True,
     ).to(
         ValueList(Vec(merge_fn(vs1[0], vs2[0]))).append(
-            ValueList.Merge(merge_fn, ValueList(vs1.remove(0)), ValueList(vs2.remove(0)))
+            ValueList.Merge(
+                merge_fn, ValueList(vs1.remove(0)), ValueList(vs2.remove(0))
+            )
         ),
         # given
         vs1.length() > i64(0),
         vs2.length() > i64(0),
     )
     yield rewrite(
-        ValueList.Merge(merge_fn, ValueList(Vec[Value].empty()), ValueList(Vec[Value].empty())),
+        ValueList.Merge(
+            merge_fn,
+            ValueList(Vec[Value].empty()),
+            ValueList(Vec[Value].empty()),
+        ),
         subsume=True,
-    ).to(
-        ValueList(Vec[Value].empty())
-    )
+    ).to(ValueList(Vec[Value].empty()))
     # toSet
-    yield rewrite(
-        ValueList(vs1).toSet()
-    ).to(
+    yield rewrite(ValueList(vs1).toSet()).to(
         Set(vs1[0]) | ValueList(vs1.remove(0)).toSet(),
         # given
         vs1.length() > i64(0),
     )
 
-    yield rewrite(
-        ValueList(Vec[Value]()).toSet()
-    ).to(
-        Set[Value].empty()
-    )
+    yield rewrite(ValueList(Vec[Value]()).toSet()).to(Set[Value].empty())
 
 
 @ruleset
@@ -458,27 +461,25 @@ def _EvalMap_to_ValueList(
         vec_terms.length() > i64(0),
     )
 
+
 @ruleset
 def _Debug_Eval(term: Term, env: Env, val: Value):
     yield rule(
         Debug.ValueOf(term),
         eq(val).to(Eval(env, term)),
-    ).then(
-        union(Debug.ValueOf(term)).with_(val)
-    )
-
+    ).then(union(Debug.ValueOf(term)).with_(val))
 
 
 @ruleset
 def _EnvEnter_EvalMap(terms: TermList, env: Env):
     # EnvEnter
-    yield rewrite(EnvEnter(env, terms)).to(
-        Env.nil().nest(EvalMap(env, terms))
-    )
+    yield rewrite(EnvEnter(env, terms)).to(Env.nil().nest(EvalMap(env, terms)))
+
 
 @ruleset
 def _VBinOp_assoc(op: String, va: Value, vb: Value):
     yield rewrite(VBinOp(op, va, vb)).to(VBinOp(op, vb, va))
+
 
 @ruleset
 def _VBinOp_Lt(env: Env, ta: Term, tb: Term, i: i64, j: i64):
@@ -532,16 +533,12 @@ def _LoopAnalysis(
     _a: Value,
     _b: Value,
     _c: Value,
-
-
 ):
     # Match i += consti64 as LoopIncremented()
     yield rule(
         eq(vc).to(va | vb),
         eq(va).to(VBinOp(op, vc, vby)),
-    ).then(
-        union(LVAnalysis(vc)).with_(LoopIncremented(op, vc, vb, vby, va))
-    )
+    ).then(union(LVAnalysis(vc)).with_(LoopIncremented(op, vc, vb, vby, va)))
     # Match LoopIncrement() < n as LoopIndVar if cond used by VLoop
     yield rule(
         VLoop(ValueList(vphis), ValueList(vs).toValue()),
@@ -549,20 +546,16 @@ def _LoopAnalysis(
         eq(vcond).to(VBinOp("Lt", vc, vn)),
         vphis.contains(va),
         eq(LVAnalysis(va)).to(LoopIncremented(op, va, vb, vby, vc)),
-        eq(i64(1) + vphis.length()).to(vs.length()), # wellformed
-    ).then(
-        union(LVAnalysis(va)).with_(LoopIndVar(op, vb, vn, vby))
-    )
+        eq(i64(1) + vphis.length()).to(vs.length()),  # wellformed
+    ).then(union(LVAnalysis(va)).with_(LoopIndVar(op, vb, vn, vby)))
     # Match accumulator c += vstep
     yield rule(
         eq(LVAnalysis(vb)).to(LoopIncremented(op, vb, vc, vby, va)),
-        eq(LVAnalysis(vby)).to(LoopIndVar(op2, vstart, vstop, vstep))
+        eq(LVAnalysis(vby)).to(LoopIndVar(op2, vstart, vstop, vstep)),
     ).then(
-        union(LVAnalysis(vb)).with_(LoopAccumIndVar(op,
-                                                    init=vc,
-                                                    start=vstart,
-                                                    stop=vstop,
-                                                    step=vstep))
+        union(LVAnalysis(vb)).with_(
+            LoopAccumIndVar(op, init=vc, start=vstart, stop=vstop, step=vstep)
+        )
     )
 
     # Help find the phi node
@@ -572,13 +565,15 @@ def _LoopAnalysis(
     ).then(
         _MapLoopPhiOf(ValueList(vphis), ValueList(vs.remove(0))),
     )
-    yield rewrite(_MapLoopPhiOf(
-        ValueList(vphis), ValueList(vs)),
+    yield rewrite(
+        _MapLoopPhiOf(ValueList(vphis), ValueList(vs)),
         subsume=True,
     ).to(
-        valuelist(_LoopPhiOf(vphis[0], vs[0])).append(_MapLoopPhiOf(ValueList(vphis.remove(0)), ValueList(vs.remove(0)))),
+        valuelist(_LoopPhiOf(vphis[0], vs[0])).append(
+            _MapLoopPhiOf(ValueList(vphis.remove(0)), ValueList(vs.remove(0)))
+        ),
         # given
-        vphis.length() > 0
+        vphis.length() > 0,
     )
     yield rewrite(
         _MapLoopPhiOf(valuelist(), valuelist()),
@@ -586,15 +581,14 @@ def _LoopAnalysis(
     ).to(valuelist())
 
     # Match VFix(v) and LVAnalysis(v) is LoopAccumIndVar
-    yield rewrite(
-        VFix(va)
-    ).to(
+    yield rewrite(VFix(va)).to(
         VBinOp("Add", vinit, VSum(vstart, vstop, vstep)),
-        # given
+        # given
         _LoopPhiOf(vb, va),
-        eq(LVAnalysis(vb)).to(LoopAccumIndVar("Add", vinit, vstart, vstop, vstep))
+        eq(LVAnalysis(vb)).to(
+            LoopAccumIndVar("Add", vinit, vstart, vstop, vstep)
+        ),
     )
-
 
 
 @ruleset
@@ -603,6 +597,7 @@ def _Eval_Term_Literals(
     i: i64,
 ):
     yield rewrite(Eval(env, Term.LiteralI64(i))).to(Value.ConstI64(i))
+
 
 def valuelist(*args: Value) -> ValueList:
     if not args:
@@ -645,14 +640,14 @@ def run(root, *, checks=[], assume=None, debug_points=None):
 
     """
 
-    egraph = EGraph() #save_egglog_string=True)
+    egraph = EGraph()  # save_egglog_string=True)
     egraph.let("root", root)
 
     ruleset = make_rules()
 
     if debug_points:
         for k, v in debug_points.items():
-            egraph.let(f'debug_point_{k}', v)
+            egraph.let(f"debug_point_{k}", v)
 
     if assume is not None:
         assume(egraph)
@@ -669,11 +664,10 @@ def run(root, *, checks=[], assume=None, debug_points=None):
         except Exception:
             if debug_points:
                 for k, v in debug_points.items():
-                    print(f"debug {k}".center(80, '-'))
+                    print(f"debug {k}".center(80, "-"))
                     for each in egraph.extract_multiple(v, 5):
                         print(each)
-                        print('-=-')
-
+                        print("-=-")
 
             raise
     return egraph
@@ -696,6 +690,7 @@ def saturate(egraph: EGraph, ruleset):
         # Borrowed from egraph.saturate(schedule)
 
         from pprint import pprint
+
         from egglog.visualizer_widget import VisualizerWidget
 
         def to_json() -> str:
@@ -774,13 +769,15 @@ def test_max_if_else():
     ]
     run(root, checks=checks)
 
+
 def test_loop_analysis():
     debug_points = {}
+
     @region_builder(2)
     def loop(region, ins):
         a, b = ins.get(0), ins.get(1)
 
-        debug_points['a'] = LVAnalysis(Debug.ValueOf(a))
+        debug_points["a"] = LVAnalysis(Debug.ValueOf(a))
 
         na = Term.Add(a, Term.LiteralI64(1))
         cond = Term.Lt(na, b)
@@ -798,7 +795,11 @@ def test_loop_analysis():
     run(
         root,
         checks=[
-            eq(debug_points['a']).to(LoopIndVar("Add", Value.Param(0), Value.Param(1), Value.ConstI64(1))),
+            eq(debug_points["a"]).to(
+                LoopIndVar(
+                    "Add", Value.Param(0), Value.Param(1), Value.ConstI64(1)
+                )
+            ),
         ],
         debug_points=debug_points,
     )
@@ -829,7 +830,7 @@ def test_sum_loop():
             n = ins.get(1)
             c = ins.get(2)
 
-            debug_points['i'] = Debug.ValueOf(i)
+            debug_points["i"] = Debug.ValueOf(i)
 
             c = Term.Add(c, i)
             i = Term.Add(i, Term.LiteralI64(1))
@@ -868,4 +869,3 @@ def test_sum_loop():
 
 if __name__ == "__main__":
     test_loop_analysis()
-
