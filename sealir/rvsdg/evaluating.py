@@ -58,7 +58,7 @@ def evaluate(
     init_state: ase.TraverseState | None = None,
     init_memo: dict | None = None,
     global_ns: dict | None = None,
-    debugger: rvsdg.SourceInfoDebugger,
+    dbginfo: rvsdg.SourceDebugInfo,
 ):
     stack: list[dict[str, Any]] = [{}]
 
@@ -122,7 +122,7 @@ def evaluate(
                     portvals = []
                     for port in ports:
                         portvals.append((yield port))
-                    debugger.print("In region", dict(scope()))
+                    dbginfo.print("In region", dict(scope()))
                     return EvalPorts(expr, tuple(portvals))
 
             case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
@@ -132,7 +132,7 @@ def evaluate(
                 else:
                     ports = yield orelse
                 ports.update_scope(scope())
-                debugger.print("end if", dict(scope()))
+                dbginfo.print("end if", dict(scope()))
                 return EvalPorts(expr, ports.values)
 
             case rg.Loop(body=body, outs=outs, loopvar=loopvar):
@@ -150,11 +150,11 @@ def evaluate(
                         init_scope=scope(),
                         init_memo=memo,
                         global_ns=global_ns,
-                        debugger=debugger,
+                        dbginfo=dbginfo,
                     )
                     ports.update_scope(scope())
                     cond = ports.get_by_name(loopvar)
-                    debugger.print("after loop iterator", dict(scope()))
+                    dbginfo.print("after loop iterator", dict(scope()))
                     memo[begin] = memo[begin].replace(ports)
                 return ports
 
@@ -178,8 +178,8 @@ def evaluate(
                 interloc=interloc,
             ):
                 val = yield value
-                with debugger.setup(srcloc=srcloc, interloc=interloc):
-                    debugger.print("assign", varname, "=", val)
+                with dbginfo.setup(srcloc=srcloc, interloc=interloc):
+                    dbginfo.print("assign", varname, "=", val)
                 scope()[varname] = val
                 return val
 

@@ -219,7 +219,7 @@ def run(func, args, *, localscope=None):
 
     expected = func(*args)
 
-    func, dbg = restructure_source(func)
+    func, _dbginfo = restructure_source(func)
 
     print(format_rvsdg(func))
 

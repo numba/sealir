@@ -274,12 +274,12 @@ def run(func, args, *, localscope=None):
     # Get expected result
     expected = func(*args)
 
-    rvsdg_ir, debugger = rvsdg.restructure_source(func)
-    print(debugger.show_sources())
+    rvsdg_ir, dbginfo = rvsdg.restructure_source(func)
+    print(dbginfo.show_sources())
 
     kwargs = {}
     got = evaluate(
-        rvsdg_ir, args, kwargs, debugger=debugger, global_ns=localscope
+        rvsdg_ir, args, kwargs, dbginfo=dbginfo, global_ns=localscope
     )
 
     print("result", got)

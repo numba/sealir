@@ -14,11 +14,11 @@ def test_if_else():
             pass
         return b + 3
 
-    rvsdg_ir, debugger = rvsdg.restructure_source(udt)
-    print(debugger.show_sources())
+    rvsdg_ir, dbginfo = rvsdg.restructure_source(udt)
+    print(dbginfo.show_sources())
     args = (10,)
     kwargs = {}
-    res = evaluate(rvsdg_ir, args, kwargs, debugger=debugger)
+    res = evaluate(rvsdg_ir, args, kwargs, dbginfo=dbginfo)
     print("res =", res)
     assert res == udt(*args, **kwargs)
 
@@ -31,11 +31,11 @@ def test_for_loop():
             c += i
         return c
 
-    rvsdg_ir, debugger = rvsdg.restructure_source(udt)
-    print(debugger.show_sources())
+    rvsdg_ir, dbginfo = rvsdg.restructure_source(udt)
+    print(dbginfo.show_sources())
     args = (10,)
     kwargs = {}
-    res = evaluate(rvsdg_ir, args, kwargs, debugger=debugger)
+    res = evaluate(rvsdg_ir, args, kwargs, dbginfo=dbginfo)
     print("res =", res)
     assert res == udt(*args, **kwargs)
 

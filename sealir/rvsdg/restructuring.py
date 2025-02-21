@@ -111,7 +111,7 @@ def restructure_source(function):
     # Roundtrip it to fix source location
     inter_source = ast.unparse(transformed_ast)
     [transformed_ast] = ast.parse(inter_source).body
-    debugger = SourceInfoDebugger(
+    debugger = SourceDebugInfo(
         line_offset,
         lines,
         inter_source.splitlines(),
@@ -126,7 +126,7 @@ def restructure_source(function):
     return rvsdg_out, debugger
 
 
-class SourceInfoDebugger:
+class SourceDebugInfo:
 
     def __init__(
         self,
