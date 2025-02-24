@@ -8,7 +8,16 @@ from egglog import EGraph, eq
 
 from sealir import ase, rvsdg
 from sealir.eqsat.rvsdg_convert import egraph_conversion
-from sealir.eqsat.rvsdg_eqsat import Env, Eval, Value, make_rules, valuelist
+from sealir.eqsat.rvsdg_eqsat import (
+    Env,
+    Eval,
+    GraphRoot,
+    PartialEvaluated,
+    Value,
+    make_rules,
+    valuelist,
+)
+from sealir.eqsat.rvsdg_extract import egraph_extraction
 
 
 def read_env(v: str):
@@ -21,7 +30,7 @@ def read_env(v: str):
 DEBUG = read_env(os.environ.get("DEBUG", ""))
 
 
-def run(root, *, checks=[], assume=None, debug_points=None):
+def run(root, *, checks=[], assume=None, debug_points=None) -> EGraph:
     """
     Example assume
     --------------
@@ -39,7 +48,7 @@ def run(root, *, checks=[], assume=None, debug_points=None):
     egraph = EGraph()  # save_egglog_string=True)
     egraph.let("root", root)
 
-    ruleset = make_rules()
+    ruleset = make_rules(extraction=True)
 
     if debug_points:
         for k, v in debug_points.items():
@@ -54,6 +63,7 @@ def run(root, *, checks=[], assume=None, debug_points=None):
     print("simplified output".center(80, "-"))
     print(out)
     print("=" * 80)
+    # egraph.display()
     if checks:
         try:
             egraph.check(*checks)
@@ -116,11 +126,18 @@ def test_max_if_else_from_source():
     # Eval with Env
     env = Env.nil()
     env = env.nest(
+        # Argument list
         valuelist(Value.IOState(), Value.ConstI64(2), Value.ConstI64(134))
     )
-    root = Eval(env, egraphed)
+    root = GraphRoot(PartialEvaluated(Eval(env, egraphed)))
 
     checks = [
-        eq(root).to(Value.ConstI64(134)),
+        eq(root).to(GraphRoot(PartialEvaluated(Value.ConstI64(134)))),
     ]
-    run(root, checks=checks)
+    egraph = run(root, checks=checks)
+
+    # Extraction
+    extracted = egraph_extraction(
+        egraph,
+    )
+    print(extracted)

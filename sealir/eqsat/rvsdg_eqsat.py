@@ -101,6 +101,8 @@ class Term(Expr):
     @classmethod
     def Add(cls, a: Term, b: Term) -> Term: ...
     @classmethod
+    def AddIO(cls, io: Term, a: Term, b: Term) -> Term: ...
+    @classmethod
     def LiteralI64(cls, val: i64) -> Term: ...
 
     def getPort(self, idx: i64Like) -> Term: ...
@@ -239,6 +241,17 @@ def IsLoopInVariant(v: Value) -> Bool: ...
 
 @function
 def VSum(vstart: Value, vstop: Value, vstep: Value) -> Value: ...
+
+
+@function
+def PartialEvaluated(value: Value) -> Term: ...
+
+
+@function
+def GraphRoot(t: Term) -> Term: ...
+
+
+# ------------------------------ RuleSets ------------------------------
 
 
 @ruleset
@@ -531,9 +544,16 @@ def _VBinOp_Pure(
 
 
 @ruleset
-def _VBinOp_Add(env: Env, ta: Term, tb: Term, i: i64, j: i64):
+def _VBinOp_Add(env: Env, ta: Term, tb: Term, i: i64, j: i64, io: Term):
     yield rewrite(Eval(env, Term.Add(ta, tb))).to(
         VBinOp("Add", Eval(env, ta), Eval(env, tb))
+    )
+
+    yield rewrite(Eval(env, Term.Add(ta, tb))).to(
+        VBinOp("Add", Eval(env, ta), Eval(env, tb))
+    )
+    yield rewrite(Eval(env, Term.AddIO(io, ta, tb))).to(
+        VBinOpIO("Add", Eval(env, io), Eval(env, ta), Eval(env, tb))
     )
 
 
@@ -630,14 +650,27 @@ def _Eval_Term_Literals(
     yield rewrite(Eval(env, Term.LiteralI64(i))).to(Value.ConstI64(i))
 
 
+@ruleset
+def _PartialEval_rules(
+    env: Env,
+    term: Term,
+    value: Value,
+):
+    yield rewrite(term).to(
+        PartialEvaluated(value),
+        # given
+        eq(value).to(Eval(env, term)),
+    )
+
+
 def valuelist(*args: Value) -> ValueList:
     if not args:
         return ValueList(Vec[Value]())
     return ValueList(Vec(*args))
 
 
-def make_rules():
-    return (
+def make_rules(*, communtative=False, extraction=False):
+    rules = (
         _Value_rules
         | _Eval_Term_Literals
         | _propagate_RegionDef_from_the_end
@@ -649,9 +682,13 @@ def make_rules():
         | _ValueList_rules
         | _EnvEnter_EvalMap
         | _VBinOp_Pure
-        # | _VBinOp_communtativity
         | _VBinOp_Lt
         | _VBinOp_Add
         | _Debug_Eval
         | _LoopAnalysis
     )
+    if communtative:
+        rules |= _VBinOp_communtativity
+    if extraction:
+        rules |= _PartialEval_rules
+    return rules

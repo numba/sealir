@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from sealir import ase
 from sealir.rvsdg import grammar as rg
+from sealir.rvsdg import internal_prefix
 
 from . import rvsdg_eqsat as eg
 
@@ -67,8 +68,13 @@ def egraph_conversion(root: SExpr):
 
     def coro(expr: SExpr, state: ase.TraverseState):
         match expr:
-            case rg.Func(fname=str(fname), args=rg.Args(args), body=body):
-                return (yield body).getPort(1)
+            case rg.Func(
+                fname=str(fname),
+                args=rg.Args(args),
+                body=rg.RegionEnd() as body,
+            ):
+                idx = body.outs.split().index(internal_prefix("ret"))
+                return (yield body).getPort(idx)
 
             case rg.RegionBegin(ins=ins, ports=ports):
                 nin = ins.split()
@@ -107,9 +113,16 @@ def egraph_conversion(root: SExpr):
                     case "<":
                         res = eg.Term.LtIO(ioterm, lhsterm, rhsterm)
 
+                    case "+":
+                        res = eg.Term.AddIO(ioterm, lhsterm, rhsterm)
+
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
                 return WrapIO(ioterm, res)
+
+            case rg.PyInt(int(intval)):
+                assert intval.bit_length() < 64
+                return eg.Term.LiteralI64(intval)
 
             case rg.DbgValue(
                 name=str(varname),
