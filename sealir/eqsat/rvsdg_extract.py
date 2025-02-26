@@ -3,34 +3,19 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass
-from pprint import pprint
-from typing import TypedDict
 
 import networkx as nx
 from egglog import EGraph
 
-
-class NodeDict(TypedDict):
-    children: list[str]
-    cost: float
-    eclass: str
-    op: str
-    subsumed: bool
-
-
-class ClassDataDict(TypedDict):
-    type: str
-
-
-class EGraphJsonDict(TypedDict):
-    nodes: dict[str, NodeDict]
-    root_eclasses: list[str]
-    class_data: dict[str, ClassDataDict]
+from .egraph_utils import EGraphJsonDict
+from .rvsdg_extract_details import EGraphToRVSDG
 
 
 def egraph_extraction(egraph: EGraph):
     gdct: EGraphJsonDict = json.loads(
-        egraph._serialize(n_inline_leaves=0).to_json()
+        egraph._serialize(
+            n_inline_leaves=0, split_primitive_outputs=False
+        ).to_json()
     )
 
     [root] = get_graph_root(gdct)
@@ -43,7 +28,15 @@ def egraph_extraction(egraph: EGraph):
 
     # extraction.draw_graph(extraction.nxg, "full.svg")
     # extraction.draw_graph(exgraph, "cost.svg")
-    raise NotImplementedError(cost, exgraph)
+
+    expr = convert_to_rvsdg(exgraph, gdct)
+    return cost, expr
+
+
+def convert_to_rvsdg(exgraph: nx.MultiDiGraph, gdct: EGraphJsonDict):
+
+    conversion = EGraphToRVSDG(gdct)
+    return conversion.run(nx.dfs_postorder_nodes(exgraph))
 
 
 class CostModel:
@@ -63,7 +56,7 @@ class CostModel:
         ectype = self.graph_data["class_data"][eclass]["type"]
 
         match ectype:
-            case "RegionDef" | "InputPorts" | "Env":
+            case "Region" | "InputPorts" | "Env":
                 current_cost = 0
             case "bool" | "String" | "i64":
                 current_cost = 1

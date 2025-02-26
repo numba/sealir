@@ -25,12 +25,10 @@ from egglog import (
 )
 
 
-class RegionDef(Expr):
-    def __init__(self, uid: StringLike, nin: i64Like): ...
+class Region(Expr):
+    def __init__(self, uid: StringLike, ins: StringLike, ports: TermList): ...
 
     def begin(self) -> InputPorts: ...
-
-    def end(self, outvals: TermList) -> Term: ...
 
 
 class InputPorts(Expr):
@@ -88,11 +86,12 @@ class ValueList(Expr):
 
 class Term(Expr):
     @classmethod
-    def Branch(
-        cls, cond: Term, inputs: TermList, then: Term, orelse: Term
-    ) -> Term: ...
+    def Func(cls, uid: StringLike, body: Term) -> Term: ...
+
     @classmethod
-    def Loop(cls, inputs: TermList, body: Term) -> Term: ...
+    def Branch(cls, cond: Term, then: Term, orelse: Term) -> Term: ...
+    @classmethod
+    def Loop(cls, body: Term) -> Term: ...
 
     @classmethod
     def Lt(cls, a: Term, b: Term) -> Term: ...
@@ -104,6 +103,16 @@ class Term(Expr):
     def AddIO(cls, io: Term, a: Term, b: Term) -> Term: ...
     @classmethod
     def LiteralI64(cls, val: i64) -> Term: ...
+    @classmethod
+    def IO(cls) -> Term: ...
+
+    @classmethod
+    def Param(cls, idx: i64Like) -> Term: ...
+
+    @classmethod
+    def RegionEnd(
+        self, region: Region, outs: StringLike, ports: TermList
+    ) -> Term: ...
 
     def getPort(self, idx: i64Like) -> Term: ...
 
@@ -147,6 +156,10 @@ def VFix(v: Value) -> Value: ...
 
 @function
 def VGetPort(vs: ValueList, idx: i64) -> Value: ...
+
+
+@function
+def VFunc(body: Value) -> Value: ...
 
 
 @function
@@ -248,6 +261,10 @@ def PartialEvaluated(value: Value) -> Term: ...
 
 
 @function
+def DoPartialEval(env: Env, func: Term) -> Value: ...
+
+
+@function
 def GraphRoot(t: Term) -> Term: ...
 
 
@@ -256,14 +273,22 @@ def GraphRoot(t: Term) -> Term: ...
 
 @ruleset
 def _propagate_RegionDef_from_the_end(
-    nin: i64,
     vec_terms: Vec[Term],
     env: Env,
     regionname: String,
+    ins: String,
+    outs: String,
+    args: TermList,
 ):
     yield rewrite(
-        Eval(env, RegionDef(regionname, nin).end(TermList(vec_terms))),
+        Eval(
+            env,
+            Term.RegionEnd(
+                Region(regionname, ins, args), outs, TermList(vec_terms)
+            ),
+        ),
     ).to(EvalMap(env, TermList(vec_terms)).toValue())
+    # ).to(EvalMap(EnvEnter(env, args), TermList(vec_terms)).toValue())
 
 
 @ruleset
@@ -277,15 +302,11 @@ def _VBranch(
     vb: Value,
 ):
     # VBranch
-    yield rewrite(
-        Eval(
-            env, Term.Branch(cond, TermList(input_terms), then_term, else_term)
-        )
-    ).to(
+    yield rewrite(Eval(env, Term.Branch(cond, then_term, else_term))).to(
         VBranch(
             Eval(env, cond),
-            Eval(EnvEnter(env, TermList(input_terms)), then_term),
-            Eval(EnvEnter(env, TermList(input_terms)), else_term),
+            Eval(env, then_term),
+            Eval(env, else_term),
         )
     )
     # Simplify
@@ -306,11 +327,23 @@ def _VLoop(
     va: Value,
     vb: Value,
     i: i64,
+    regionname: String,
+    ins: String,
+    outs: String,
+    out_terms: TermList,
 ):
     # VLoop
     yield rewrite(
-        Eval(env, Term.Loop(input_terms, body_term)),
-    ).to(_LoopTemp(_LoopBack(EvalMap(env, input_terms), body_term)))
+        Eval(env, Term.Loop(body_term)),
+    ).to(
+        _LoopTemp(_LoopBack(EvalMap(env, input_terms), body_term)),
+        # given
+        eq(body_term).to(
+            Term.RegionEnd(
+                Region(regionname, ins, input_terms), outs, out_terms
+            )
+        ),
+    )
 
     yield rule(
         eq(vl).to(_LoopBack(phis, body_term)),
@@ -540,7 +573,7 @@ def _VBinOp_Pure(
 
     yield rule(
         eq(ta).to(Value.ConstI64(i)),
-    ).then(set_(has_pure_type(ta)).to(True))
+    ).then(set_(has_pure_type(ta)).to(Bool(True)))
 
 
 @ruleset
@@ -654,8 +687,15 @@ def _Eval_Term_Literals(
 def _PartialEval_rules(
     env: Env,
     term: Term,
+    body: Term,
     value: Value,
+    uid: String,
+    uid2: String,
+    nin: i64,
 ):
+    yield rewrite(DoPartialEval(env, Term.Func(uid, body))).to(
+        VFunc(Eval(env, body))
+    )
     yield rewrite(term).to(
         PartialEvaluated(value),
         # given
@@ -669,7 +709,7 @@ def valuelist(*args: Value) -> ValueList:
     return ValueList(Vec(*args))
 
 
-def make_rules(*, communtative=False, extraction=False):
+def make_rules(*, communtative=False):
     rules = (
         _Value_rules
         | _Eval_Term_Literals
@@ -687,8 +727,7 @@ def make_rules(*, communtative=False, extraction=False):
         | _Debug_Eval
         | _LoopAnalysis
     )
+    rules |= _PartialEval_rules
     if communtative:
         rules |= _VBinOp_communtativity
-    if extraction:
-        rules |= _PartialEval_rules
     return rules

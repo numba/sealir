@@ -20,7 +20,7 @@ SExpr = ase.SExpr
 
 @dataclass(frozen=True)
 class RegionInfo:
-    region: eg.RegionDef
+    region: eg.RegionBegin
     ins: eg.InputPorts
 
     def __getitem__(self, idx: int) -> eg.Term:
@@ -51,7 +51,7 @@ class WrapTerm:
 
 def egraph_conversion(root: SExpr):
 
-    def region_uid(expr: SExpr) -> str:
+    def node_uid(expr: SExpr) -> str:
         return str(expr._handle)
 
     @contextmanager
@@ -74,11 +74,15 @@ def egraph_conversion(root: SExpr):
                 body=rg.RegionEnd() as body,
             ):
                 idx = body.outs.split().index(internal_prefix("ret"))
-                return (yield body).getPort(idx)
+                return eg.Term.Func(node_uid(expr), (yield body).getPort(idx))
 
             case rg.RegionBegin(ins=ins, ports=ports):
-                nin = ins.split()
-                rd = eg.RegionDef(region_uid(expr), len(nin))
+                procports = []
+                for p in ports:
+                    procports.append((yield p))
+                rd = eg.Region(
+                    node_uid(expr), ins=ins, ports=eg.termlist(*procports)
+                )
                 return RegionInfo(rd, rd.begin())
 
             case rg.RegionEnd(begin=begin, outs=str(outnames), ports=ports):
@@ -87,7 +91,9 @@ def egraph_conversion(root: SExpr):
                     outs = []
                     for p in ports:
                         outs.append((yield p))
-                return ri.region.end(eg.termlist(*outs))
+                return eg.Term.RegionEnd(
+                    ri.region, outnames, eg.termlist(*outs)
+                )
 
             case rg.Unpack(val=source, idx=int(idx)):
                 outs = yield source
@@ -97,12 +103,7 @@ def egraph_conversion(root: SExpr):
                 condval = yield cond
                 outs_if = yield body
                 outs_else = yield orelse
-                ins = []
-                for p in body.begin.ports:
-                    ins.append((yield p))
-                bra = eg.Term.Branch(
-                    condval, eg.termlist(*ins), outs_if, outs_else
-                )
+                bra = eg.Term.Branch(condval, outs_if, outs_else)
                 return WrapTerm(bra)
 
             case rg.PyBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
@@ -131,6 +132,11 @@ def egraph_conversion(root: SExpr):
                 interloc=interloc,
             ):
                 return (yield value)
+            case rg.ArgRef(idx=int(i), name=str(name)):
+                return eg.Term.Param(i)
+            case rg.IO():
+                return eg.Term.IO()
+
             case _:
                 raise NotImplementedError(repr(expr))
 

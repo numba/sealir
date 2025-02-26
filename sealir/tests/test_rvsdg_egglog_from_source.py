@@ -9,10 +9,12 @@ from egglog import EGraph, eq
 from sealir import ase, rvsdg
 from sealir.eqsat.rvsdg_convert import egraph_conversion
 from sealir.eqsat.rvsdg_eqsat import (
+    DoPartialEval,
     Env,
     Eval,
     GraphRoot,
     PartialEvaluated,
+    Term,
     Value,
     make_rules,
     valuelist,
@@ -30,7 +32,9 @@ def read_env(v: str):
 DEBUG = read_env(os.environ.get("DEBUG", ""))
 
 
-def run(root, *, checks=[], assume=None, debug_points=None) -> EGraph:
+def run(
+    root, *extra_statements, checks=[], assume=None, debug_points=None
+) -> EGraph:
     """
     Example assume
     --------------
@@ -47,8 +51,10 @@ def run(root, *, checks=[], assume=None, debug_points=None) -> EGraph:
 
     egraph = EGraph()  # save_egglog_string=True)
     egraph.let("root", root)
-
-    ruleset = make_rules(extraction=True)
+    for i, stmt in enumerate(extra_statements):
+        egraph.let(f"stmt{i}", stmt)
+    # egraph.display()
+    ruleset = make_rules()
 
     if debug_points:
         for k, v in debug_points.items():
@@ -121,7 +127,7 @@ def test_max_if_else_from_source():
 
     memo = egraph_conversion(rvsdg_expr)
 
-    egraphed = memo[rvsdg_expr]
+    egfunc = memo[rvsdg_expr]
 
     # Eval with Env
     env = Env.nil()
@@ -129,15 +135,25 @@ def test_max_if_else_from_source():
         # Argument list
         valuelist(Value.IOState(), Value.ConstI64(2), Value.ConstI64(134))
     )
-    root = GraphRoot(PartialEvaluated(Eval(env, egraphed)))
+    root = GraphRoot(egfunc)
+    extra_statements = [
+        # DoPartialEval(env, egfunc),
+    ]
 
     checks = [
-        eq(root).to(GraphRoot(PartialEvaluated(Value.ConstI64(134)))),
+        # eq(root).to(
+        #     GraphRoot(
+        #         Term.Func(
+        #             str(rvsdg_expr._handle),
+        #             PartialEvaluated(Value.ConstI64(134)),
+        #         )
+        #     )
+        # ),
     ]
-    egraph = run(root, checks=checks)
-
+    egraph = run(root, *extra_statements, checks=checks)
     # Extraction
-    extracted = egraph_extraction(
+    cost, extracted = egraph_extraction(
         egraph,
     )
-    print(extracted)
+    print("COST =", cost)
+    print(rvsdg.format_rvsdg(extracted))

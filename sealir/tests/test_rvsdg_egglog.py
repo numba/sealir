@@ -12,7 +12,7 @@ from sealir.eqsat.rvsdg_eqsat import (
     Eval,
     LoopIndVar,
     LVAnalysis,
-    RegionDef,
+    Region,
     Term,
     Value,
     VBinOp,
@@ -83,6 +83,7 @@ def run(root, *, checks=[], assume=None, debug_points=None):
 
 def saturate(egraph: EGraph, ruleset):
     reports = []
+    limit = 1000
     if DEBUG:
         # Borrowed from egraph.saturate(schedule)
 
@@ -94,12 +95,14 @@ def saturate(egraph: EGraph, ruleset):
             return egraph._serialize().to_json()
 
         egraphs = [to_json()]
-        while True:
+        c = 0
+        while c < limit:
             report = egraph.run(ruleset)
             reports.append(report)
             egraphs.append(to_json())
             # pprint({k: v for k, v in report.num_matches_per_rule.items()
             #         if v > 0})
+            c += 1
             if not report.updated:
                 break
         VisualizerWidget(egraphs=egraphs).display_or_open()
@@ -110,19 +113,27 @@ def saturate(egraph: EGraph, ruleset):
     return reports
 
 
-def region_builder(nin: int):
+def region_builder(*args, arity: int | None = None):
+    if args:
+        assert arity is None
+    else:
+        assert arity is not None
+        args = tuple([Term.Param(i) for i in range(arity)])
+
     def wrapped(fn):
-        region = RegionDef(fn.__name__, nin)
-        ins = region.begin()
-        outs = fn(region, ins)
+        nin = len(args)
+        in_names = " ".join(map(str, range(nin)))
+        region = Region(fn.__name__, in_names, termlist(*args))
+        outs = fn(region, region.begin())
         assert isinstance(outs, (tuple, list))
-        return region.end(termlist(*outs))
+        out_names = " ".join(map(str, range(nin)))
+        return Term.RegionEnd(region, out_names, termlist(*outs))
 
     return wrapped
 
 
 def test_straight_line_basic():
-    @region_builder(5)
+    @region_builder(arity=5)
     def main(region, ins):
         return list(map(ins.get, range(5)))
 
@@ -137,35 +148,32 @@ def test_straight_line_basic():
 
 
 def test_max_if_else():
-    fn = RegionDef("main", 2)
-
-    @region_builder(2)
+    @region_builder(arity=2)
     def main(region, ins):
-        ctx_body = fn.begin()
-        a = ctx_body.get(0)
-        b = ctx_body.get(1)
+        a = ins.get(0)
+        b = ins.get(1)
 
         lt = Term.Lt(a, b)
 
         # Then
-        @region_builder(2)
+        @region_builder(a, b)
         def if_then(region, ins):
             a = ins.get(0)
             b = ins.get(1)
             return [b]
 
         # Else
-        @region_builder(2)
+        @region_builder(a, b)
         def or_else(region, ins):
             a = ins.get(0)
             b = ins.get(1)
             return [a]
 
         # Do Branch
-        ifthen = Term.Branch(lt, termlist(a, b), if_then, or_else)
+        ifelse = Term.Branch(lt, if_then, or_else)
 
         # Return
-        return [ifthen.getPort(0)]
+        return [ifelse.getPort(0)]
 
     # Eval with Env
     env = Env.nil()
@@ -181,19 +189,22 @@ def test_max_if_else():
 def test_loop_analysis():
     debug_points = {}
 
-    @region_builder(2)
-    def loop(region, ins):
-        a, b = ins.get(0), ins.get(1)
-
-        debug_points["a"] = LVAnalysis(Debug.ValueOf(a))
-
-        na = Term.Add(a, Term.LiteralI64(1))
-        cond = Term.Lt(na, b)
-        return [cond, na, b]
-
-    @region_builder(2)
+    @region_builder(arity=2)
     def main(region, ins):
-        return [Term.Loop(termlist(ins.get(0), ins.get(1)), loop)]
+        a = ins.get(0)
+        b = ins.get(1)
+
+        @region_builder(a, b)
+        def loop(region, ins):
+            a, b = ins.get(0), ins.get(1)
+
+            debug_points["a"] = LVAnalysis(Debug.ValueOf(a))
+
+            na = Term.Add(a, Term.LiteralI64(1))
+            cond = Term.Lt(na, b)
+            return [cond, na, b]
+
+        return [Term.Loop(loop)]
 
     # Eval with Env
     env = Env.nil()
@@ -225,14 +236,14 @@ def test_sum_loop():
 
     debug_points = {}
 
-    @region_builder(2)
+    @region_builder(arity=2)
     def main(region, ins):
         init = ins.get(0)
         n = ins.get(1)
         c = init
         i = Term.LiteralI64(0)
 
-        @region_builder(2)
+        @region_builder(i, n, c)
         def body(region, ins):
             i = ins.get(0)
             n = ins.get(1)
@@ -246,7 +257,7 @@ def test_sum_loop():
             return [lt, i, n, c]
 
         # Do Loop
-        loop = Term.Loop(termlist(i, n, c), body)
+        loop = Term.Loop(body)
 
         # Return
         return [loop.getPort(1), loop.getPort(2)]  # sum(range())
