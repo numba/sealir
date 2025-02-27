@@ -68,13 +68,12 @@ def egraph_conversion(root: SExpr):
 
     def coro(expr: SExpr, state: ase.TraverseState):
         match expr:
-            case rg.Func(
-                fname=str(fname),
-                args=rg.Args(args),
-                body=rg.RegionEnd() as body,
-            ):
-                idx = body.outs.split().index(internal_prefix("ret"))
-                return eg.Term.Func(node_uid(expr), (yield body).getPort(idx))
+            case rg.Func(fname=str(fname), args=rg.Args(args), body=body):
+                return eg.Term.Func(
+                    uid=node_uid(expr),
+                    fname=fname,
+                    body=(yield body),
+                )
 
             case rg.RegionBegin(ins=ins, ports=ports):
                 procports = []
@@ -91,8 +90,8 @@ def egraph_conversion(root: SExpr):
                     outs = []
                     for p in ports:
                         outs.append((yield p))
-                return eg.Term.RegionEnd(
-                    ri.region, outnames, eg.termlist(*outs)
+                return WrapTerm(
+                    eg.Term.RegionEnd(ri.region, outnames, eg.termlist(*outs))
                 )
 
             case rg.Unpack(val=source, idx=int(idx)):
@@ -103,7 +102,7 @@ def egraph_conversion(root: SExpr):
                 condval = yield cond
                 outs_if = yield body
                 outs_else = yield orelse
-                bra = eg.Term.Branch(condval, outs_if, outs_else)
+                bra = eg.Term.Branch(condval, outs_if.term, outs_else.term)
                 return WrapTerm(bra)
 
             case rg.PyBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
@@ -119,7 +118,7 @@ def egraph_conversion(root: SExpr):
 
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
-                return WrapIO(ioterm, res)
+                return WrapTerm(res)
 
             case rg.PyInt(int(intval)):
                 assert intval.bit_length() < 64

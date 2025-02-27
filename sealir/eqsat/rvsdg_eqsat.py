@@ -86,7 +86,7 @@ class ValueList(Expr):
 
 class Term(Expr):
     @classmethod
-    def Func(cls, uid: StringLike, body: Term) -> Term: ...
+    def Func(cls, uid: StringLike, fname: StringLike, body: Term) -> Term: ...
 
     @classmethod
     def Branch(cls, cond: Term, then: Term, orelse: Term) -> Term: ...
@@ -690,10 +690,9 @@ def _PartialEval_rules(
     body: Term,
     value: Value,
     uid: String,
-    uid2: String,
-    nin: i64,
+    fname: String,
 ):
-    yield rewrite(DoPartialEval(env, Term.Func(uid, body))).to(
+    yield rewrite(DoPartialEval(env, Term.Func(uid, fname, body))).to(
         VFunc(Eval(env, body))
     )
     yield rewrite(term).to(

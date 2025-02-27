@@ -11,7 +11,7 @@ from .egraph_utils import EGraphJsonDict
 from .rvsdg_extract_details import EGraphToRVSDG
 
 
-def egraph_extraction(egraph: EGraph):
+def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
     gdct: EGraphJsonDict = json.loads(
         egraph._serialize(
             n_inline_leaves=0, split_primitive_outputs=False
@@ -29,13 +29,15 @@ def egraph_extraction(egraph: EGraph):
     # extraction.draw_graph(extraction.nxg, "full.svg")
     # extraction.draw_graph(exgraph, "cost.svg")
 
-    expr = convert_to_rvsdg(exgraph, gdct)
+    expr = convert_to_rvsdg(exgraph, gdct, rvsdg_sexpr)
     return cost, expr
 
 
-def convert_to_rvsdg(exgraph: nx.MultiDiGraph, gdct: EGraphJsonDict):
+def convert_to_rvsdg(
+    exgraph: nx.MultiDiGraph, gdct: EGraphJsonDict, rvsdg_sexpr
+):
 
-    conversion = EGraphToRVSDG(gdct)
+    conversion = EGraphToRVSDG(gdct, rvsdg_sexpr)
     return conversion.run(nx.dfs_postorder_nodes(exgraph))
 
 

@@ -20,6 +20,7 @@ from sealir.eqsat.rvsdg_eqsat import (
     valuelist,
 )
 from sealir.eqsat.rvsdg_extract import egraph_extraction
+from sealir.llvm_pyapi_backend import llvm_codegen
 
 
 def read_env(v: str):
@@ -154,6 +155,13 @@ def test_max_if_else_from_source():
     # Extraction
     cost, extracted = egraph_extraction(
         egraph,
+        rvsdg_expr,
     )
     print("COST =", cost)
     print(rvsdg.format_rvsdg(extracted))
+
+    print(extracted)
+
+    cg = llvm_codegen(extracted)
+    res = cg(2, 134)
+    assert res == 134
