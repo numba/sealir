@@ -104,8 +104,7 @@ def evaluate(
                 ba = sig.bind(*callargs, **callkwargs)
                 scope().update(ba.arguments)
                 with push():
-                    ports = yield body
-                return ports.get_by_name(internal_prefix("ret"))
+                    return (yield body)
             case rg.RegionBegin(ins=ins, ports=ports):
                 paired = zip(ins.split(), ports, strict=True)
                 ports = []

@@ -75,8 +75,9 @@ def llvm_codegen(root: ase.SExpr):
     memo = ase.traverse(bodynode, _codegen_loop, CodegenState(context=ctx))
 
     # builder.ret(builder.load(retval_slot))
-    outports = dict(zip(bodynode.outs.split(), bodynode.ports, strict=True))
-    retval = memo[outports[internal_prefix("ret")]].value
+    # outports = dict(zip(bodynode.outs.split(), bodynode.ports, strict=True))
+    # retval = memo[outports[internal_prefix("ret")]].value
+    retval = memo[bodynode].value
     builder.ret(retval)
 
     llvm_ir = str(mod)

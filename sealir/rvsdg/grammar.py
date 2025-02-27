@@ -37,7 +37,7 @@ class RegionEnd(_Root):
 class Func(_Root):
     fname: str
     args: Args
-    body: RegionEnd
+    body: SExpr
 
 
 class IfElse(_Root):

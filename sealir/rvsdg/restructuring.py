@@ -447,8 +447,15 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
     match (expr._head, expr._args):
         case ("PyAst_FunctionDef", (str(fname), args, body, interloc)):
             with ctx.new_function(expr):
+                args = yield args
+                body = yield body
+                retidx = body.outs.split().index(internal_prefix("ret"))
                 return grm.write(
-                    rg.Func(fname=fname, args=(yield args), body=(yield body))
+                    rg.Func(
+                        fname=fname,
+                        args=args,
+                        body=grm.write(rg.Unpack(val=body, idx=retidx)),
+                    )
                 )
         case ("PyAst_arg", (str(name), annotation, interloc)):
             return grm.write(
