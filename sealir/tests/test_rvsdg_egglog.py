@@ -232,7 +232,7 @@ def test_sum_loop():
     #    ...:         c += i
     #    ...:     return c
     # Target:
-    #   c = sum(range(n))
+    #   c = sum(range(n)) + init
 
     debug_points = {}
 
