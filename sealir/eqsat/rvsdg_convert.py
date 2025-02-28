@@ -105,6 +105,22 @@ def egraph_conversion(root: SExpr):
                 bra = eg.Term.Branch(condval, outs_if.term, outs_else.term)
                 return WrapTerm(bra)
 
+            case rg.Loop(body=body, outs=str(outs), loopvar=str(loopvar)):
+                region = yield body
+                loop = eg.Term.Loop(region.term)
+                return WrapTerm(loop)
+
+            case rg.PyUnaryOp(op=str(op), io=io, operand=operand):
+                ioterm = yield io
+                operandterm = yield operand
+                match op:
+                    case "not":
+                        res = eg.Term.NotIO(ioterm, operandterm)
+                    case _:
+                        raise NotImplementedError(f"unsupported op: {op!r}")
+
+                return WrapTerm(res)
+
             case rg.PyBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
                 ioterm = yield io
                 lhsterm = yield lhs
@@ -120,9 +136,27 @@ def egraph_conversion(root: SExpr):
                         raise NotImplementedError(f"unsupported op: {op!r}")
                 return WrapTerm(res)
 
+            case rg.PyInplaceBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
+                ioterm = yield io
+                lhsterm = yield lhs
+                rhsterm = yield rhs
+                match op:
+                    case _:
+                        raise NotImplementedError(f"unsupported op: {op!r}")
+                return WrapTerm(res)
+
+            case rg.PyCall(func=func, io=io, args=args):
+                functerm = yield func
+                ioterm = yield io
+                argterms = yield args
+                breakpoint()
+
             case rg.PyInt(int(intval)):
                 assert intval.bit_length() < 64
                 return eg.Term.LiteralI64(intval)
+
+            case rg.PyBool(bool(val)):
+                return eg.Term.LiteralBool(val)
 
             case rg.DbgValue(
                 name=str(varname),
@@ -131,8 +165,13 @@ def egraph_conversion(root: SExpr):
                 interloc=interloc,
             ):
                 return (yield value)
+
             case rg.ArgRef(idx=int(i), name=str(name)):
                 return eg.Term.Param(i)
+
+            case rg.Undef():
+                return eg.Term.Undef()
+
             case rg.IO():
                 return eg.Term.IO()
 

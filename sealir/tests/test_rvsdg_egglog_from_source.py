@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 
 from egglog import EGraph, String, eq, var
 
@@ -64,8 +65,15 @@ def run(
     if assume is not None:
         assume(egraph)
 
+    ts = time.time()
     saturate(egraph, ruleset)
-    out = egraph.extract(root)
+    te = time.time()
+    print("saturation time", te - ts)
+
+    ts = time.time()
+    out = egraph.simplify(root, 1)
+    te = time.time()
+    print("extraction time", te - ts)
     # print(egraph.as_egglog_string)
     print("simplified output".center(80, "-"))
     print(out)
@@ -174,3 +182,55 @@ def test_max_if_else_from_source():
     run_check()
     # Run with partial eval
     run_check(extra_statements=extra_statements, checks=checks)
+
+
+def skip_test_sum_loop_from_source():
+    def udt(init, n):
+        c = init
+        i = 0
+        while i < n:
+            c = i + c
+            i = i + 1
+        return c
+
+    rvsdg_expr, dbginfo = rvsdg.restructure_source(udt)
+    print(rvsdg.format_rvsdg(rvsdg_expr))
+
+    memo = egraph_conversion(rvsdg_expr)
+
+    egfunc = memo[rvsdg_expr]
+
+    # Eval with Env
+    env = Env.nil()
+    env = env.nest(
+        # Argument list
+        valuelist(Value.IOState(), Value.Param(0), Value.Param(1))
+    )
+    root = GraphRoot(egfunc)
+
+    extra_statements = [
+        DoPartialEval(env, egfunc),
+    ]
+
+    checks = [
+        # eq(root).to(
+        #     GraphRoot(
+        #         Term.Func(
+        #             str(rvsdg_expr._handle),
+        #             var("fname", String),
+        #             PartialEvaluated(Value.ConstI64(134)),
+        #         )
+        #     )
+        # ),
+    ]
+
+    egraph = run(root, *extra_statements, checks=checks)
+    # Extraction
+    cost, extracted = egraph_extraction(
+        egraph,
+        rvsdg_expr,
+    )
+    # print("COST =", cost)
+    # print(rvsdg.format_rvsdg(extracted))
+
+    # print(extracted)

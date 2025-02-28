@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pprint import pprint
@@ -22,9 +23,12 @@ def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
     [root] = get_graph_root(gdct)
     root_eclass = gdct["nodes"][root]["eclass"]
 
+    ts = time.time()
     cost_model = CostModel(gdct)
     extraction = Extraction(gdct, root_eclass, cost_model)
     cost, exgraph = extraction.choose()
+    te = time.time()
+    print("custom cost-model greedy extraction:", te - ts)
 
     # extraction.draw_graph(extraction.nxg, "full.svg")
     # extraction.draw_graph(exgraph, "cost.svg")
@@ -96,7 +100,6 @@ class CostModel:
                 current_cost = 1
             case "Vec_Value" | "Vec_Term":
                 current_cost = 0
-            case "UnstableFn_Value_Term":
                 current_cost = 0
             case "Term":
                 current_cost = 1
@@ -106,6 +109,8 @@ class CostModel:
                 current_cost = 1
             case "ValueList":
                 current_cost = 1
+            case str(pat) if pat.startswith("UnstableFn_"):
+                current_cost = 0
             case _:
                 raise NotImplementedError(ectype)
         return current_cost + sum(child_costs)
