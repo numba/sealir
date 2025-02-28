@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from egglog import EGraph, eq
+from egglog import EGraph, String, eq, var
 
 from sealir import ase, rvsdg
 from sealir.eqsat.rvsdg_convert import egraph_conversion
@@ -137,31 +137,40 @@ def test_max_if_else_from_source():
         valuelist(Value.IOState(), Value.ConstI64(2), Value.ConstI64(134))
     )
     root = GraphRoot(egfunc)
+
     extra_statements = [
-        # DoPartialEval(env, egfunc),
+        DoPartialEval(env, egfunc),
     ]
 
     checks = [
-        # eq(root).to(
-        #     GraphRoot(
-        #         Term.Func(
-        #             str(rvsdg_expr._handle),
-        #             PartialEvaluated(Value.ConstI64(134)),
-        #         )
-        #     )
-        # ),
+        eq(root).to(
+            GraphRoot(
+                Term.Func(
+                    str(rvsdg_expr._handle),
+                    var("fname", String),
+                    PartialEvaluated(Value.ConstI64(134)),
+                )
+            )
+        ),
     ]
-    egraph = run(root, *extra_statements, checks=checks)
-    # Extraction
-    cost, extracted = egraph_extraction(
-        egraph,
-        rvsdg_expr,
-    )
-    print("COST =", cost)
-    print(rvsdg.format_rvsdg(extracted))
 
-    print(extracted)
+    def run_check(extra_statements=[], checks=[]):
+        egraph = run(root, *extra_statements, checks=checks)
+        # Extraction
+        cost, extracted = egraph_extraction(
+            egraph,
+            rvsdg_expr,
+        )
+        print("COST =", cost)
+        print(rvsdg.format_rvsdg(extracted))
 
-    cg = llvm_codegen(extracted)
-    res = cg(2, 134)
-    assert res == 134
+        print(extracted)
+
+        cg = llvm_codegen(extracted)
+        res = cg(2, 134)
+        assert res == 134
+
+    # Run without partial eval
+    run_check()
+    # Run with partial eval
+    run_check(extra_statements=extra_statements, checks=checks)

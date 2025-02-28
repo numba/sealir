@@ -700,6 +700,7 @@ def format_rvsdg(prgm: SExpr) -> str:
                 put(f"{name} = Region[{expr._handle}] <- {' '.join(fmtins)}")
                 return name
             case rg.RegionEnd(begin=begin, outs=str(outs), ports=ports):
+                print("===?", expr)
                 (yield begin)
                 put("{")
                 outrefs = []

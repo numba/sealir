@@ -565,7 +565,7 @@ def _VBinOp_Pure(
 ):
     # Constant I64 is pure
     yield rewrite(VBinOpIO(op, io, ta, tb)).to(
-        VBinOp(op, ta, tb),
+        ValueList(Vec(Value.IOState(), VBinOp(op, ta, tb))).toValue(),
         # given
         has_pure_type(ta),
         has_pure_type(tb),

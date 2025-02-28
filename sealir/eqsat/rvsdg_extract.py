@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass
+from pprint import pprint
 
 import networkx as nx
 from egglog import EGraph
@@ -27,18 +28,27 @@ def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
     cost, exgraph = extraction.choose()
 
     # extraction.draw_graph(extraction.nxg, "full.svg")
-    # extraction.draw_graph(exgraph, "cost.svg")
+    extraction.draw_graph(exgraph, "cost.svg")
 
-    expr = convert_to_rvsdg(exgraph, gdct, rvsdg_sexpr)
+    expr = convert_to_rvsdg(exgraph, gdct, rvsdg_sexpr, root)
     return cost, expr
 
 
 def convert_to_rvsdg(
-    exgraph: nx.MultiDiGraph, gdct: EGraphJsonDict, rvsdg_sexpr
+    exgraph: nx.MultiDiGraph,
+    gdct: EGraphJsonDict,
+    rvsdg_sexpr,
+    root: str,
 ):
-
     conversion = EGraphToRVSDG(gdct, rvsdg_sexpr)
-    return conversion.run(nx.dfs_postorder_nodes(exgraph))
+    node_iterator = list(nx.dfs_postorder_nodes(exgraph, source=root))
+
+    def iterator(node_iter):
+        for node in node_iter:
+            children = [child for _, child in exgraph.out_edges(node)]
+            yield node, tuple(children)
+
+    return conversion.run(iterator(node_iterator))
 
 
 class CostModel:
