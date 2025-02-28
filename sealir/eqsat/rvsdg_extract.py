@@ -28,7 +28,7 @@ def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
     cost, exgraph = extraction.choose()
 
     # extraction.draw_graph(extraction.nxg, "full.svg")
-    extraction.draw_graph(exgraph, "cost.svg")
+    # extraction.draw_graph(exgraph, "cost.svg")
 
     expr = convert_to_rvsdg(exgraph, gdct, rvsdg_sexpr, root)
     return cost, expr
