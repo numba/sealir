@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence
 
 from sealir import ase
 from sealir.rvsdg import Grammar
@@ -44,7 +43,9 @@ class EGraphToRVSDG:
         tape: ase.Tape = self.rvsdg_sexpr._tape
         return Grammar.downcast(tape.read_value(uid))
 
-    def handle(self, key: str, child_keys: tuple[str, ...], grm: Grammar):
+    def handle(
+        self, key: str, child_keys: list[str] | dict[str, str], grm: Grammar
+    ):
         nodes = self.gdct["nodes"]
         memo = self.memo
 
@@ -52,8 +53,11 @@ class EGraphToRVSDG:
         eclass = node["eclass"]
         node_type = self.gdct["class_data"][eclass]["type"]
 
-        def get_children():
-            return list(map(memo.__getitem__, child_keys))
+        def get_children() -> dict | list:
+            if isinstance(child_keys, dict):
+                return {k: memo[v] for k, v in child_keys.items()}
+            else:
+                return [memo[v] for v in child_keys]
 
         if key.startswith("primitive-"):
             match node_type:
@@ -71,9 +75,8 @@ class EGraphToRVSDG:
             children = get_children()
 
             rbd: RegionBeginData
-            match node_type:
-                case "Region":
-                    uid, ins, ports = children
+            match node_type, children:
+                case "Region", {"ins": ins, "ports": ports}:
                     return RegionBeginData(
                         begin=grm.write(
                             rg.RegionBegin(ins=ins, ports=tuple(ports))
@@ -81,16 +84,22 @@ class EGraphToRVSDG:
                         ins=ins,
                         ports=tuple(ports),
                     )
-                case "InputPorts":
-                    [rbd] = children
+                case "InputPorts", {"self": RegionBeginData() as rbd}:
                     return rbd.begin
-                case "Term":
-                    match op:
-                        case "GraphRoot":
-                            [term] = children
+                case "Term", children:
+                    match op, children:
+                        case "GraphRoot", {"t": term}:
                             return term
-                        case "Term.Func":
-                            [uid, fname, body] = children
+                        case "Term.Func", {
+                            "uid": uid,
+                            "fname": fname,
+                            "body": body,
+                        }:
+                            [uid, fname, body] = (
+                                uid,
+                                fname,
+                                body,
+                            )
                             orig_func: rg.Func = self.lookup_sexpr(int(uid))
                             return grm.write(
                                 rg.Func(
@@ -99,18 +108,29 @@ class EGraphToRVSDG:
                                     body=body,
                                 )
                             )
-                        case "Term.RegionEnd":
-                            [rbg, outs, ports] = children
+                        case "Term.RegionEnd", {
+                            "region": region,
+                            "outs": outs,
+                            "ports": ports,
+                        }:
                             assert len(outs.split()) == len(ports)
                             return grm.write(
                                 rg.RegionEnd(
-                                    begin=rbg.begin,
+                                    begin=region.begin,
                                     outs=outs,
                                     ports=tuple(ports),
                                 )
                             )
-                        case "Term.Branch":
-                            [cond, then, orelse] = children
+                        case "Term.Branch", {
+                            "cond": cond,
+                            "then": then,
+                            "orelse": orelse,
+                        }:
+                            [cond, then, orelse] = (
+                                cond,
+                                then,
+                                orelse,
+                            )
                             return grm.write(
                                 rg.IfElse(
                                     cond=cond,
@@ -119,33 +139,33 @@ class EGraphToRVSDG:
                                     outs=then.outs,
                                 )
                             )
-                        case "Term.IO":
+                        case "Term.IO", {}:
                             return grm.write(rg.IO())
-                        case "Term.Param":
-                            [idx] = children
+                        case "Term.Param", {"idx": idx}:
+                            # TODO: get actual param name
                             return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
-                        case "Term.LtIO":
-                            [io, lhs, rhs] = children
+                        case "Term.LtIO", {"io": io, "a": lhs, "b": rhs}:
                             return grm.write(
-                                rg.PyBinOp(op="<", io=io, lhs=lhs, rhs=rhs)
+                                rg.PyBinOp(
+                                    op="<",
+                                    io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
                             )
-                        case "·.get":
-                            [term, idx] = children
+                        case "·.get", {"self": term, "idx": idx}:
                             return grm.write(rg.Unpack(val=term, idx=idx))
-                        case "·.getPort":
-                            [term, idx] = children
+                        case "·.getPort", {"self": term, "idx": idx}:
                             return grm.write(rg.Unpack(val=term, idx=idx))
-                        case "PartialEvaluated":
-                            [inner] = children
-                            return inner
+                        case "PartialEvaluated", {"value": value}:
+                            return value
                         case _:
                             raise NotImplementedError(
                                 f"invalid Term op: {op!r}"
                             )
-                case "TermList":
-                    [terms] = children
+                case "TermList", {"terms": terms}:
                     return terms
-                case "Value":
+                case "Value", children:
                     return self.handle_Value(op, children, grm)
                 case _:
                     raise NotImplementedError(
@@ -154,10 +174,9 @@ class EGraphToRVSDG:
         else:
             raise NotImplementedError(key)
 
-    def handle_Value(self, op: str, children: list, grm: Grammar):
-        match op:
-            case "Value.ConstI64":
-                [val] = children
+    def handle_Value(self, op: str, children: dict | list, grm: Grammar):
+        match op, children:
+            case "Value.ConstI64", {"val": val}:
                 return grm.write(rg.PyInt(val))
             case _:
                 raise NotImplementedError(f"Value of {op!r}")

@@ -20,7 +20,6 @@ def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
     )
 
     [root] = get_graph_root(gdct)
-
     root_eclass = gdct["nodes"][root]["eclass"]
 
     cost_model = CostModel(gdct)
@@ -30,7 +29,7 @@ def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
     # extraction.draw_graph(extraction.nxg, "full.svg")
     # extraction.draw_graph(exgraph, "cost.svg")
 
-    expr = convert_to_rvsdg(exgraph, gdct, rvsdg_sexpr, root)
+    expr = convert_to_rvsdg(exgraph, gdct, rvsdg_sexpr, root, egraph)
     return cost, expr
 
 
@@ -39,14 +38,37 @@ def convert_to_rvsdg(
     gdct: EGraphJsonDict,
     rvsdg_sexpr,
     root: str,
+    egraph: EGraph,
 ):
+    # Get declarations so we have named fields
+    state = egraph._state
+    decls = state.__egg_decls__
+
+    # Do the conversion back into RVSDG
     conversion = EGraphToRVSDG(gdct, rvsdg_sexpr)
     node_iterator = list(nx.dfs_postorder_nodes(exgraph, source=root))
+
+    def egg_fn_to_arg_names(egg_fn: str) -> tuple[str, ...]:
+        for ref in state.egg_fn_to_callable_refs[egg_fn]:
+            decl = decls.get_callable_decl(ref)
+            return tuple(decl.signature.arg_names)
+        else:
+            raise ValueError(f"missing decl for {egg_fn!r}")
 
     def iterator(node_iter):
         for node in node_iter:
             children = [child for _, child in exgraph.out_edges(node)]
-            yield node, tuple(children)
+            # extract argument names
+            kind, _, egg_fn = node.split("-")
+            match kind:
+                case "primitive":
+                    pass
+                case "function":
+                    arg_names = egg_fn_to_arg_names(egg_fn)
+                    children = dict(zip(arg_names, children, strict=True))
+                case _:
+                    raise NotImplementedError(f"kind is {kind!r}")
+            yield node, children
 
     return conversion.run(iterator(node_iterator))
 
