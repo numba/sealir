@@ -132,6 +132,15 @@ def egraph_conversion(root: SExpr):
                     case "+":
                         res = eg.Term.AddIO(ioterm, lhsterm, rhsterm)
 
+                    case "*":
+                        res = eg.Term.MulIO(ioterm, lhsterm, rhsterm)
+
+                    case "/":
+                        res = eg.Term.DivIO(ioterm, lhsterm, rhsterm)
+
+                    case "**":
+                        res = eg.Term.PowIO(ioterm, lhsterm, rhsterm)
+
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
                 return WrapTerm(res)
@@ -148,12 +157,28 @@ def egraph_conversion(root: SExpr):
             case rg.PyCall(func=func, io=io, args=args):
                 functerm = yield func
                 ioterm = yield io
-                argterms = yield args
-                breakpoint()
+                argterms = []
+                for arg in args:
+                    argterms.append((yield arg))
+                return WrapTerm(
+                    eg.Term.Call(functerm, ioterm, eg.termlist(*argterms))
+                )
+
+            case rg.PyLoadGlobal(io=io, name=str(name)):
+                ioterm = yield io
+                return eg.Term.LoadGlobal(ioterm, name)
+
+            case rg.PyAttr(io=io, value=value, attrname=str(attrname)):
+                ioterm = yield io
+                valterm = yield value
+                return WrapTerm(eg.Term.AttrIO(ioterm, valterm, attrname))
 
             case rg.PyInt(int(intval)):
                 assert intval.bit_length() < 64
                 return eg.Term.LiteralI64(intval)
+
+            case rg.PyFloat(float(fval)):
+                return eg.Term.LiteralF64(fval)
 
             case rg.PyBool(bool(val)):
                 return eg.Term.LiteralBool(val)

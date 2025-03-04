@@ -227,6 +227,12 @@ class ConvertToSExpr(ast.NodeTransformer):
                         node.value,
                         self.get_loc(node),
                     )
+                case float():
+                    return self._tape.expr(
+                        "PyAst_Constant_float",
+                        node.value,
+                        self.get_loc(node),
+                    )
                 case complex():
                     return self._tape.expr(
                         "PyAst_Constant_complex",
@@ -272,6 +278,7 @@ class ConvertToSExpr(ast.NodeTransformer):
 
     def map_op(self, node: ast.operator) -> str:
         match node:
+            # binary
             case ast.Add():
                 return "+"
             case ast.Sub():
@@ -282,6 +289,9 @@ class ConvertToSExpr(ast.NodeTransformer):
                 return "/"
             case ast.FloorDiv():
                 return "//"
+            case ast.Pow():
+                return "**"
+            # unary
             case ast.Not():
                 return "not"
             case ast.USub():

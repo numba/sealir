@@ -26,12 +26,13 @@ def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
     ts = time.time()
     cost_model = CostModel(gdct)
     extraction = Extraction(gdct, root_eclass, cost_model)
+    # extraction.draw_graph(extraction.nxg, "full.svg")
+    # extraction.draw_graph(extraction.dag, "dag.svg")
     cost, exgraph = extraction.choose()
     te = time.time()
     print("custom cost-model greedy extraction:", te - ts)
 
-    # extraction.draw_graph(extraction.nxg, "full.svg")
-    # extraction.draw_graph(exgraph, "cost.svg")
+    extraction.draw_graph(exgraph, "cost.svg")
 
     expr = convert_to_rvsdg(exgraph, gdct, rvsdg_sexpr, root, egraph)
     return cost, expr
@@ -77,6 +78,9 @@ def convert_to_rvsdg(
     return conversion.run(iterator(node_iterator))
 
 
+MAX_COST = 2**59
+
+
 class CostModel:
     graph_data: EGraphJsonDict
 
@@ -94,21 +98,26 @@ class CostModel:
         ectype = self.graph_data["class_data"][eclass]["type"]
 
         match ectype:
-            case "Region" | "InputPorts" | "Env":
+            case "Region" | "InputPorts":
                 current_cost = 0
-            case "bool" | "String" | "i64":
+            case "bool" | "String" | "i64" | "f64":
                 current_cost = 1
             case "Vec_Value" | "Vec_Term":
-                current_cost = 0
                 current_cost = 0
             case "Term":
                 current_cost = 1
             case "TermList":
                 current_cost = 1
             case "Value":
-                current_cost = 1
+                match op:
+                    case "Eval":
+                        current_cost = MAX_COST
+                    case _:
+                        current_cost = 1
             case "ValueList":
                 current_cost = 1
+            case "Env":
+                current_cost = MAX_COST
             case str(pat) if pat.startswith("UnstableFn_"):
                 current_cost = 0
             case _:
@@ -214,35 +223,24 @@ class Extraction:
 
     def _compute_cost(self):
         dag = self.dag
-        rev_topo = list(nx.dfs_postorder_nodes(dag))
+        rev_topo = list(nx.topological_sort(dag))
+        rev_topo.reverse()
         nodes = self.nodes
         costmap = {}
         for k in rev_topo:
             if k in self.class_data:
-                costmap[k] = min(costmap.get(x, 0) for x in self.class_data[k])
+                costmap[k] = min(costmap[x] for x in self.class_data[k])
+            elif nodes[k].subsumed:
+                costmap[k] = MAX_COST
             else:
                 child_costs = [
-                    costmap.get(nodes[x].eclass, costmap.get(x, 1))
+                    # if the node is not yet available, it is a backedge
+                    costmap.get(nodes[x].eclass, MAX_COST)
                     for x in nodes[k].children
                 ]
                 cost = self.cost_model.get_cost_function(
                     k, nodes[k].op, nodes, child_costs
                 )
-                # if k.startswith("primitive-"):
-                #     cost = 0
-                # elif k.startswith("function-"):
-                #     # costmap lookup here can see cycles;
-                #     # in that case use the actual node cost.
-                #     # if that is not computed, use 1.
-                #     child_costs = [
-                #         costmap.get(nodes[x].eclass, costmap.get(x, 1))
-                #         for x in nodes[k].children
-                #     ]
-                #     cost = self.cost_model.get_cost_function(
-                #         k, nodes[k].op, nodes, child_costs
-                #     )
-                # else:
-                #     raise ValueError(f"unknown node {k}")
 
                 costmap[k] = cost
                 nodes[k].cost = costmap[k]

@@ -609,6 +609,9 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
         case ("PyAst_Constant_int", (int(value), interloc)):
             return grm.write(rg.PyInt(value))
 
+        case ("PyAst_Constant_float", (float(value), interloc)):
+            return grm.write(rg.PyFloat(value))
+
         case ("PyAst_Constant_bool", (bool(value), interloc)):
             return grm.write(rg.PyBool(value))
 
@@ -762,6 +765,10 @@ def format_rvsdg(prgm: SExpr) -> str:
             case rg.PyInt(int(v)):
                 name = fresh_name()
                 put(f"{name} = PyInt {v}")
+                return name
+            case rg.PyFloat(float(v)):
+                name = fresh_name()
+                put(f"{name} = PyFloat {v}")
                 return name
             case rg.PyComplex(float(real), float(imag)):
                 name = fresh_name()

@@ -74,6 +74,10 @@ class PyInt(_Root):
     value: int
 
 
+class PyFloat(_Root):
+    value: float
+
+
 class PyComplex(_Root):
     real: float
     imag: float

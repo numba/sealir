@@ -66,6 +66,8 @@ class EGraphToRVSDG:
                     return unquoted
                 case "i64":
                     return int(node["op"])
+                case "f64":
+                    return float(node["op"])
                 case "Vec_Term":
                     return get_children()
                 case _:
@@ -141,9 +143,49 @@ class EGraphToRVSDG:
                             )
                         case "Term.IO", {}:
                             return grm.write(rg.IO())
+                        case "Term.LiteralF64", {"val": float(val)}:
+                            return grm.write(rg.PyFloat(val))
+                        case "Term.LiteralI64", {"val": int(val)}:
+                            return grm.write(rg.PyInt(val))
                         case "Term.Param", {"idx": idx}:
                             # TODO: get actual param name
                             return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
+                        case "Term.AddIO", {"io": io, "a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOp(
+                                    op="+",
+                                    io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
+                        case "Term.MulIO", {"io": io, "a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOp(
+                                    op="*",
+                                    io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
+                        case "Term.DivIO", {"io": io, "a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOp(
+                                    op="/",
+                                    io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
+                        case "Term.PowIO", {"io": io, "a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOp(
+                                    op="**",
+                                    io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
                         case "Term.LtIO", {"io": io, "a": lhs, "b": rhs}:
                             return grm.write(
                                 rg.PyBinOp(
@@ -153,6 +195,25 @@ class EGraphToRVSDG:
                                     rhs=rhs,
                                 )
                             )
+                        case "Term.AttrIO", {
+                            "io": io,
+                            "obj": obj,
+                            "attrname": str(attrname),
+                        }:
+                            return grm.write(
+                                rg.PyAttr(io=io, value=obj, attrname=attrname)
+                            )
+                        case "Term.LoadGlobal", {"io": io, "name": str(name)}:
+                            return grm.write(rg.PyLoadGlobal(io=io, name=name))
+                        case "Term.Call", {
+                            "func": func,
+                            "io": io,
+                            "args": args,
+                        }:
+                            return grm.write(
+                                rg.PyCall(func=func, io=io, args=tuple(args))
+                            )
+
                         case "·.get", {"self": term, "idx": idx}:
                             return grm.write(rg.Unpack(val=term, idx=idx))
                         case "·.getPort", {"self": term, "idx": idx}:
@@ -178,5 +239,7 @@ class EGraphToRVSDG:
         match op, children:
             case "Value.ConstI64", {"val": val}:
                 return grm.write(rg.PyInt(val))
+            case "Value.Param", {"i": int(idx)}:
+                return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
             case _:
                 raise NotImplementedError(f"Value of {op!r}")

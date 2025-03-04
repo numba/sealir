@@ -13,6 +13,8 @@ from egglog import (
     StringLike,
     Vec,
     eq,
+    f64,
+    f64Like,
     function,
     i64,
     i64Like,
@@ -105,17 +107,35 @@ class Term(Expr):
     @classmethod
     def AddIO(cls, io: Term, a: Term, b: Term) -> Term: ...
     @classmethod
+    def Mul(cls, a: Term, b: Term) -> Term: ...
+    @classmethod
+    def MulIO(cls, io: Term, a: Term, b: Term) -> Term: ...
+    @classmethod
+    def Div(cls, a: Term, b: Term) -> Term: ...
+    @classmethod
+    def DivIO(cls, io: Term, a: Term, b: Term) -> Term: ...
+    @classmethod
+    def Pow(cls, a: Term, b: Term) -> Term: ...
+    @classmethod
+    def PowIO(cls, io: Term, a: Term, b: Term) -> Term: ...
+    @classmethod
+    def AttrIO(cls, io: Term, obj: Term, attrname: StringLike) -> Term: ...
+    @classmethod
     def LiteralI64(cls, val: i64) -> Term: ...
+    @classmethod
+    def LiteralF64(cls, val: f64) -> Term: ...
     @classmethod
     def LiteralBool(cls, val: Bool) -> Term: ...
     @classmethod
     def IO(cls) -> Term: ...
     @classmethod
     def Undef(cls) -> Term: ...
-
     @classmethod
     def Param(cls, idx: i64Like) -> Term: ...
-
+    @classmethod
+    def LoadGlobal(cls, io: Term, name: StringLike) -> Term: ...
+    @classmethod
+    def Call(cls, func: Term, io: Term, args: TermList) -> Term: ...
     @classmethod
     def RegionEnd(
         self, region: Region, outs: StringLike, ports: TermList
@@ -294,6 +314,7 @@ def _propagate_RegionDef_from_the_end(
                 Region(regionname, ins, args), outs, TermList(vec_terms)
             ),
         ),
+        subsume=True,
     ).to(EvalMap(env, TermList(vec_terms)).toValue())
     # ).to(EvalMap(EnvEnter(env, args), TermList(vec_terms)).toValue())
 
@@ -440,9 +461,10 @@ def _ValueList_rules(
         subsume=True,
     ).to(ValueList(vs1.append(vs2)))
     # Simplify ValueList
-    yield rewrite(vl.toValue().toList()).to(vl)
+    yield rewrite(vl.toValue().toList(), subsume=True).to(vl)
     yield rewrite(
         ValueList(vs1).toValue(),
+        subsume=True,
     ).to(
         vs1[0],
         # given
@@ -501,15 +523,15 @@ def _EvalMap_to_ValueList(
     map_fn: Callable[[Term], Value],
 ):
     # EvalMap to Value.List
-    yield rewrite(EvalMap(env, TermList(vec_terms))).to(
+    yield rewrite(EvalMap(env, TermList(vec_terms)), subsume=True).to(
         TermList(vec_terms).mapValue(partial(Eval, env)),
     )
-    yield rewrite(TermList(vec_terms).mapValue(map_fn)).to(
+    yield rewrite(TermList(vec_terms).mapValue(map_fn), subsume=True).to(
         valuelist(),
         # given
         eq(i64(0)).to(vec_terms.length()),
     )
-    yield rewrite(TermList(vec_terms).mapValue(map_fn)).to(
+    yield rewrite(TermList(vec_terms).mapValue(map_fn), subsume=True).to(
         valuelist(map_fn(vec_terms[0])).append(
             TermList(vec_terms.remove(0)).mapValue(map_fn)
         ),
@@ -529,7 +551,9 @@ def _Debug_Eval(term: Term, env: Env, val: Value):
 @ruleset
 def _EnvEnter_EvalMap(terms: TermList, env: Env):
     # EnvEnter
-    yield rewrite(EnvEnter(env, terms)).to(Env.nil().nest(EvalMap(env, terms)))
+    yield rewrite(EnvEnter(env, terms), subsume=True).to(
+        Env.nil().nest(EvalMap(env, terms))
+    )
 
 
 @ruleset
