@@ -89,6 +89,9 @@ class EGraphToRVSDG:
                 case "InputPorts", {"self": RegionBeginData() as rbd}:
                     return rbd.begin
                 case "Term", children:
+                    extended_handle = self.handle_Term(op, children, grm)
+                    if extended_handle is not NotImplemented:
+                        return extended_handle
                     match op, children:
                         case "GraphRoot", {"t": term}:
                             return term
@@ -150,11 +153,27 @@ class EGraphToRVSDG:
                         case "Term.Param", {"idx": idx}:
                             # TODO: get actual param name
                             return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
+                        case "Term.Add", {"a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOpPure(
+                                    op="+",
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
                         case "Term.AddIO", {"io": io, "a": lhs, "b": rhs}:
                             return grm.write(
                                 rg.PyBinOp(
                                     op="+",
                                     io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
+                        case "Term.Mul", {"a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOpPure(
+                                    op="*",
                                     lhs=lhs,
                                     rhs=rhs,
                                 )
@@ -168,11 +187,27 @@ class EGraphToRVSDG:
                                     rhs=rhs,
                                 )
                             )
+                        case "Term.Div", {"a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOpPure(
+                                    op="/",
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
                         case "Term.DivIO", {"io": io, "a": lhs, "b": rhs}:
                             return grm.write(
                                 rg.PyBinOp(
                                     op="/",
                                     io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
+                        case "Term.Pow", {"a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOpPure(
+                                    op="**",
                                     lhs=lhs,
                                     rhs=rhs,
                                 )
@@ -243,3 +278,6 @@ class EGraphToRVSDG:
                 return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
             case _:
                 raise NotImplementedError(f"Value of {op!r}")
+
+    def handle_Term(self, op: str, children: dict | list, grm: Grammar):
+        return NotImplemented

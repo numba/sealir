@@ -13,7 +13,9 @@ from .egraph_utils import EGraphJsonDict
 from .rvsdg_extract_details import EGraphToRVSDG
 
 
-def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
+def egraph_extraction(
+    egraph: EGraph, rvsdg_sexpr, *, converter_class=EGraphToRVSDG
+):
     gdct: EGraphJsonDict = json.loads(
         egraph._serialize(
             n_inline_leaves=0, split_primitive_outputs=False
@@ -34,7 +36,14 @@ def egraph_extraction(egraph: EGraph, rvsdg_sexpr):
 
     extraction.draw_graph(exgraph, "cost.svg")
 
-    expr = convert_to_rvsdg(exgraph, gdct, rvsdg_sexpr, root, egraph)
+    expr = convert_to_rvsdg(
+        exgraph,
+        gdct,
+        rvsdg_sexpr,
+        root,
+        egraph,
+        converter_class=converter_class,
+    )
     return cost, expr
 
 
@@ -44,13 +53,15 @@ def convert_to_rvsdg(
     rvsdg_sexpr,
     root: str,
     egraph: EGraph,
+    *,
+    converter_class,
 ):
     # Get declarations so we have named fields
     state = egraph._state
     decls = state.__egg_decls__
 
     # Do the conversion back into RVSDG
-    conversion = EGraphToRVSDG(gdct, rvsdg_sexpr)
+    conversion = converter_class(gdct, rvsdg_sexpr)
     node_iterator = list(nx.dfs_postorder_nodes(exgraph, source=root))
 
     def egg_fn_to_arg_names(egg_fn: str) -> tuple[str, ...]:
@@ -117,6 +128,8 @@ class CostModel:
             case "ValueList":
                 current_cost = 1
             case "Env":
+                current_cost = MAX_COST
+            case "Unit":
                 current_cost = MAX_COST
             case str(pat) if pat.startswith("UnstableFn_"):
                 current_cost = 0

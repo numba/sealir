@@ -36,7 +36,12 @@ DEBUG = read_env(os.environ.get("DEBUG", ""))
 
 
 def run(
-    root, *extra_statements, checks=[], assume=None, debug_points=None
+    root,
+    *extra_statements,
+    checks=[],
+    assume=None,
+    debug_points=None,
+    ruleset=None,
 ) -> EGraph:
     """
     Example assume
@@ -57,8 +62,9 @@ def run(
     for i, stmt in enumerate(extra_statements):
         egraph.let(f"stmt{i}", stmt)
     # egraph.display()
-    ruleset = make_rules()
 
+    if ruleset is None:
+        ruleset = make_rules()
     if debug_points:
         for k, v in debug_points.items():
             egraph.let(f"debug_point_{k}", v)
@@ -129,7 +135,7 @@ def test_geglu_tanh_approx():
     def float32(num):
         return np.float32(num)
 
-    dt = float32
+    flt = float32
 
     def tanh(x):
         return np.tanh(x)
@@ -141,9 +147,12 @@ def test_geglu_tanh_approx():
 
     def udt(a):
         result = (
-            dt(0.5)
+            flt(0.5)
             * a
-            * (dt(1) + tanh(sqrt(dt(2) / dt(pi)) * (a + dt(0.044715) * a**3)))
+            * (
+                flt(1)
+                + tanh(sqrt(flt(2) / flt(pi)) * (a + flt(0.044715) * a**3))
+            )
         )
         return result
 
@@ -178,18 +187,164 @@ def test_geglu_tanh_approx():
         # ),
     ]
 
-    egraph = run(root, *extra_statements, checks=checks)
+    def extra_ruleset():
+        from egglog import (
+            String,
+            Unit,
+            Vec,
+            delete,
+            f64,
+            function,
+            i64,
+            rewrite,
+            rule,
+            ruleset,
+            set_,
+            union,
+        )
+
+        import sealir.eqsat.rvsdg_eqsat as eg
+
+        @function
+        def Tanh(val: eg.Term) -> eg.Term: ...
+
+        @function
+        def Sqrt(val: eg.Term) -> eg.Term: ...
+
+        @function
+        def Flt(val: eg.Term) -> eg.Term: ...
+
+        @function
+        def Pi() -> eg.Term: ...
+
+        @function(unextractable=True)
+        def IsFloat(val: eg.Term) -> Unit: ...
+
+        @ruleset
+        def rule_cheats(uid: String, ins: String, argvec: Vec[Term], i: i64):
+            yield rewrite(
+                eg.Region(uid, ins, eg.TermList(argvec)).begin().get(i)
+            ).to(
+                argvec[i],
+                # given
+                i < argvec.length(),
+            )
+
+        @ruleset
+        def facts(x: eg.Term, y: eg.Term, z: eg.Term, fval: f64, io: eg.Term):
+            yield rule(eq(x).to(eg.Term.Param(0))).then(
+                set_(IsFloat(x)).to(Unit())
+            )
+
+            yield rule(eq(x).to(eg.Term.LiteralF64(fval))).then(
+                set_(IsFloat(x)).to(Unit())
+            )
+
+            for fn in [Tanh, Sqrt, Flt]:
+                yield rule(eq(x).to(fn(y))).then(set_(IsFloat(x)).to(Unit()))
+
+            yield rewrite(eg.Term.LoadGlobal(io, "pi")).to(Pi())
+
+            yield rule(eq(x).to(Pi())).then(set_(IsFloat(x)).to(Unit()))
+
+        @ruleset
+        def rules_simplify_python(
+            io: eg.Term, argvec: Vec[eg.Term], lhs: eg.Term, rhs: eg.Term
+        ):
+            def shortcut_call(call_target: str, func_target):
+                return rule(
+                    call := eg.Term.Call(
+                        func=eg.Term.LoadGlobal(io=io, name=call_target),
+                        io=io,
+                        args=eg.TermList(argvec),
+                    ),
+                    call.getPort(0),
+                    call.getPort(1),
+                    eq(argvec.length()).to(i64(1)),
+                ).then(
+                    union(call.getPort(1)).with_(func_target(argvec[0])),
+                    union(call.getPort(0)).with_(io),
+                )
+
+            yield shortcut_call("tanh", Tanh)
+            yield shortcut_call("sqrt", Sqrt)
+            yield shortcut_call("flt", Flt)
+
+            # Remove IO
+            def shortcut_io(fnio, fnpure):
+                return rule(
+                    call := fnio(io, lhs, rhs),
+                    IsFloat(lhs),
+                    IsFloat(rhs),
+                ).then(
+                    union(res := call.getPort(1)).with_(fnpure(lhs, rhs)),
+                    union(call.getPort(0)).with_(io),
+                    set_(IsFloat(res)).to(Unit()),
+                )
+
+            yield shortcut_io(eg.Term.AddIO, eg.Term.Add)
+            yield shortcut_io(eg.Term.MulIO, eg.Term.Mul)
+            yield shortcut_io(eg.Term.DivIO, eg.Term.Div)
+            yield rule(
+                call := eg.Term.PowIO(io, lhs, rhs),
+                IsFloat(lhs),
+            ).then(
+                union(res := call.getPort(1)).with_(eg.Term.Pow(lhs, rhs)),
+                union(call.getPort(0)).with_(io),
+                set_(IsFloat(res)).to(Unit()),
+            )
+
+        return rule_cheats | facts | rules_simplify_python
+
+    egraph = run(
+        root, *extra_statements, checks=checks, ruleset=extra_ruleset()
+    )
     # Extraction
+    from sealir.eqsat.rvsdg_extract import EGraphToRVSDG
+
+    class ExtendedConverter(EGraphToRVSDG):
+        def handle_Term(self, op: str, children: dict | list, grm):
+            import sealir.rvsdg.grammar as rg
+
+            match op, children:
+                case "Flt", {"val": val}:
+                    io = grm.write(rg.IO())  # dummy
+                    fn_flt = grm.write(rg.PyLoadGlobal(io=io, name="flt"))
+                    return grm.write(
+                        rg.PyCallPure(func=fn_flt, args=tuple([val]))
+                    )
+
+                case "Sqrt", {"val": val}:
+                    io = grm.write(rg.IO())  # dummy
+                    fn_flt = grm.write(rg.PyLoadGlobal(io=io, name="sqrt"))
+                    return grm.write(
+                        rg.PyCallPure(func=fn_flt, args=tuple([val]))
+                    )
+
+                case "Tanh", {"val": val}:
+                    io = grm.write(rg.IO())  # dummy
+                    fn_flt = grm.write(rg.PyLoadGlobal(io=io, name="tanh"))
+                    return grm.write(
+                        rg.PyCallPure(func=fn_flt, args=tuple([val]))
+                    )
+
+                case "Pi", {}:
+                    return grm.write(rg.PyFloat(np.pi))
+
+                case _:
+                    return NotImplemented
+
     cost, extracted = egraph_extraction(
         egraph,
         rvsdg_expr,
+        converter_class=ExtendedConverter,
     )
     print(ase.as_tuple(extracted, depth=5))
     print("cost =", cost)
     print(rvsdg.format_rvsdg(extracted))
 
     ns = {
-        "dt": dt,
+        "flt": flt,
         "pi": pi,
         "sqrt": sqrt,
         "tanh": tanh,

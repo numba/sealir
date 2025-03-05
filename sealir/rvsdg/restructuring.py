@@ -804,6 +804,13 @@ def format_rvsdg(prgm: SExpr) -> str:
                 put(f"{name} = PyBinOp {op} {ioref} {lhsref}, {rhsref}")
                 return name
 
+            case rg.PyBinOpPure(op=op, lhs=lhs, rhs=rhs):
+                lhsref = yield lhs
+                rhsref = yield rhs
+                name = fresh_name()
+                put(f"{name} = PyBinOpPure {op} {lhsref}, {rhsref}")
+                return name
+
             case rg.PyInplaceBinOp(op, io, lhs, rhs):
                 ioref = yield io
                 lhsref = yield lhs
@@ -830,6 +837,16 @@ def format_rvsdg(prgm: SExpr) -> str:
                 fmtargs = ", ".join(argrefs)
                 name = fresh_name()
                 put(f"{name} = PyCall {funcref} {ioref} {fmtargs}")
+                return name
+
+            case rg.PyCallPure(func=func, args=args):
+                funcref = yield func
+                argrefs = []
+                for arg in args:
+                    argrefs.append((yield arg))
+                fmtargs = ", ".join(argrefs)
+                name = fresh_name()
+                put(f"{name} = PyCall {funcref} {fmtargs}")
                 return name
 
             case rg.PyLoadGlobal(io=io, name=str(varname)):

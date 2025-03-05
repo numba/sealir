@@ -176,29 +176,17 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             ports: PackedValues = yield source
             return ports[idx]
 
+        case rg.PyBinOpPure(op=op, lhs=lhs, rhs=rhs):
+            lhsval = (yield lhs).value
+            rhsval = (yield rhs).value
+            res = _handle_binop(ctx, op, lhsval, rhsval)
+            return SSAValue(res)
+
         case rg.PyBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
             ioval = ensure_io((yield io))
             lhsval = (yield lhs).value
             rhsval = (yield rhs).value
-            match op:
-                case "+":
-                    res = ctx.pyapi.number_add(lhsval, rhsval)
-                case "-":
-                    res = ctx.pyapi.number_subtract(lhsval, rhsval)
-                case "*":
-                    res = ctx.pyapi.number_multiply(lhsval, rhsval)
-                case "/":
-                    res = ctx.pyapi.number_truedivide(lhsval, rhsval)
-                case "//":
-                    res = ctx.pyapi.number_floordivide(lhsval, rhsval)
-                case "**":
-                    res = ctx.pyapi.number_power(lhsval, rhsval)
-
-                # compare
-                case "<" | ">" | "==" | "!=" | "in":
-                    res = ctx.pyapi.object_richcompare(lhsval, rhsval, op)
-                case _:
-                    raise NotImplementedError(op)
+            res = _handle_binop(ctx, op, lhsval, rhsval)
             return PackedValues.make(ioval, SSAValue(res))
 
         case rg.PyInplaceBinOp(op=op, io=io, lhs=lhs, rhs=rhs):
@@ -385,6 +373,14 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 argvals.append((yield arg).value)
             retval = pyapi.call_function_objargs(callee, argvals)
             return PackedValues.make(ioval, SSAValue(retval))
+
+        case rg.PyCallPure(func=func, args=args):
+            callee = (yield func).value
+            argvals = []
+            for arg in args:
+                argvals.append((yield arg).value)
+            retval = pyapi.call_function_objargs(callee, argvals)
+            return SSAValue(retval)
 
         case rg.PyLoadGlobal(io=io, name=str(varname)):
             freezeobj = ctx.global_ns[varname]
@@ -838,3 +834,28 @@ def _alloca_once_value(builder: ir.IRBuilder, value):
 
     builder.store(value, slot)
     return slot
+
+
+def _handle_binop(ctx: CodegenCtx, op: str, lhsval, rhsval):
+
+    match op:
+        case "+":
+            res = ctx.pyapi.number_add(lhsval, rhsval)
+        case "-":
+            res = ctx.pyapi.number_subtract(lhsval, rhsval)
+        case "*":
+            res = ctx.pyapi.number_multiply(lhsval, rhsval)
+        case "/":
+            res = ctx.pyapi.number_truedivide(lhsval, rhsval)
+        case "//":
+            res = ctx.pyapi.number_floordivide(lhsval, rhsval)
+        case "**":
+            res = ctx.pyapi.number_power(lhsval, rhsval)
+
+        # compare
+        case "<" | ">" | "==" | "!=" | "in":
+            res = ctx.pyapi.object_richcompare(lhsval, rhsval, op)
+        case _:
+            raise NotImplementedError(op)
+
+    return res

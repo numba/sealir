@@ -105,6 +105,11 @@ class PyCall(_Root):
     args: tuple[SExpr]
 
 
+class PyCallPure(_Root):
+    func: SExpr
+    args: tuple[SExpr]
+
+
 class PyAttr(_Root):
     io: SExpr
     value: SExpr
@@ -126,6 +131,12 @@ class PyUnaryOp(_Root):
 class PyBinOp(_Root):
     op: str
     io: SExpr
+    lhs: SExpr
+    rhs: SExpr
+
+
+class PyBinOpPure(_Root):
+    op: str
     lhs: SExpr
     rhs: SExpr
 
