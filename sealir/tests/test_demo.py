@@ -134,16 +134,16 @@ def test_geglu_tanh_approx():
     def tanh(x):
         return np.tanh(x)
 
+    def sqrt(x):
+        return np.sqrt(x)
+
     pi = np.pi
 
     def udt(a):
         result = (
             dt(0.5)
             * a
-            * (
-                dt(1)
-                + tanh(np.sqrt(dt(2) / dt(pi)) * (a + dt(0.044715) * a**3))
-            )
+            * (dt(1) + tanh(sqrt(dt(2) / dt(pi)) * (a + dt(0.044715) * a**3)))
         )
         return result
 
@@ -187,3 +187,16 @@ def test_geglu_tanh_approx():
     print(ase.as_tuple(extracted, depth=5))
     print("cost =", cost)
     print(rvsdg.format_rvsdg(extracted))
+
+    ns = {
+        "dt": dt,
+        "pi": pi,
+        "sqrt": sqrt,
+        "tanh": tanh,
+    }
+
+    cg = llvm_codegen(extracted, ns)
+
+    arg = 0.315
+    print(cg(0.315))
+    print(udt(arg))

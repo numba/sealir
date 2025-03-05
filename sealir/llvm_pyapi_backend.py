@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import ctypes as _ct
 import sys
+from collections import ChainMap
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from functools import wraps
-from typing import Any, Callable, Self
+from types import MappingProxyType
+from typing import Any, Callable, Mapping, Self
 
 from llvmlite import binding as llvm
 from llvmlite import ir
@@ -18,8 +20,10 @@ ll_byte = ir.IntType(8)
 ll_pyobject_ptr = ll_byte.as_pointer()
 ll_iostate = ir.LiteralStructType([])  # empty struct
 
+_kwargs_default = MappingProxyType[str, Any]({})
 
-def llvm_codegen(root: ase.SExpr):
+
+def llvm_codegen(root: ase.SExpr, ns: Mapping[str, Any] = _kwargs_default):
     """
     Emit LLVM using Python C-API.
 
@@ -60,6 +64,7 @@ def llvm_codegen(root: ase.SExpr):
         pyapi=PythonAPI(builder),
         retval_slot=retval_slot,
         ports={},
+        global_ns=ChainMap(ns, __builtins__),
     )
     # print(fn)
     # # Setup ports
@@ -186,6 +191,10 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     res = ctx.pyapi.number_truedivide(lhsval, rhsval)
                 case "//":
                     res = ctx.pyapi.number_floordivide(lhsval, rhsval)
+                case "**":
+                    res = ctx.pyapi.number_power(lhsval, rhsval)
+
+                # compare
                 case "<" | ">" | "==" | "!=" | "in":
                     res = ctx.pyapi.object_richcompare(lhsval, rhsval, op)
                 case _:
@@ -238,6 +247,10 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
         case rg.PyInt(int(ival)) | rg.PyBool(int(ival)):
             const = ir.Constant(pyapi.py_ssize_t, int(ival))
             return SSAValue(pyapi.long_from_ssize_t(const))
+
+        case rg.PyFloat(float(fval)):
+            const = ir.Constant(pyapi.double, fval)
+            return SSAValue(pyapi.float_from_double(const))
 
         case rg.PyStr(str(text)):
             module = builder.module
@@ -374,11 +387,15 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             return PackedValues.make(ioval, SSAValue(retval))
 
         case rg.PyLoadGlobal(io=io, name=str(varname)):
-            freezeobj = __builtins__[varname]
+            freezeobj = ctx.global_ns[varname]
             ptr = pyapi.py_ssize_t(id(freezeobj))
             obj = builder.inttoptr(
                 ptr, ll_pyobject_ptr, name=f"global.{varname}"
             )
+            return SSAValue(obj)
+
+        case rg.PyAttr(io=io, value=value, attrname=str(attrname)):
+            obj = pyapi.object_getattr_string((yield value), attrname)
             return SSAValue(obj)
 
         case _:
@@ -394,6 +411,7 @@ class CodegenCtx:
     retval_slot: ir.Value
 
     ports: dict[str, LLVMValue]
+    global_ns: Mapping[str, Any]
 
 
 def determine_arity(root: ase.SExpr) -> int:
@@ -440,7 +458,7 @@ class PackedValues(LLVMValue):
         return len(self.values)
 
 
-_EMIT_ERROR_HANDLING = True
+_EMIT_ERROR_HANDLING = False
 """
 - control `handle_error`
 """
@@ -573,40 +591,60 @@ class PythonAPI:
         else:
             raise OverflowError("integer too big (%d bits)" % (bits))
 
+    def float_from_double(self, fval):
+        func_name = "PyFloat_FromDouble"
+        fnty = ir.FunctionType(self.pyobj, [self.double])
+        fn = self._get_function(fnty, name=func_name)
+        return self.builder.call(fn, [fval])
+
     def _get_number_operator(self, name):
         fnty = ir.FunctionType(self.pyobj, [self.pyobj, self.pyobj])
         fn = self._get_function(fnty, name="PyNumber_%s" % name)
         return fn
 
-    @handle_error
     def _call_number_operator(self, name, lhs, rhs, inplace=False):
         if inplace:
             name = "InPlace" + name
         fn = self._get_number_operator(name)
         return self.builder.call(fn, [lhs, rhs])
 
+    @handle_error
     def number_add(self, lhs, rhs, inplace=False):
         return self._call_number_operator("Add", lhs, rhs, inplace=inplace)
 
+    @handle_error
     def number_subtract(self, lhs, rhs, inplace=False):
         return self._call_number_operator(
             "Subtract", lhs, rhs, inplace=inplace
         )
 
+    @handle_error
     def number_multiply(self, lhs, rhs, inplace=False):
         return self._call_number_operator(
             "Multiply", lhs, rhs, inplace=inplace
         )
 
+    @handle_error
     def number_truedivide(self, lhs, rhs, inplace=False):
         return self._call_number_operator(
             "TrueDivide", lhs, rhs, inplace=inplace
         )
 
+    @handle_error
     def number_floordivide(self, lhs, rhs, inplace=False):
         return self._call_number_operator(
             "FloorDivide", lhs, rhs, inplace=inplace
         )
+
+    @handle_error
+    def number_power(self, lhs, rhs, mod=None):
+        assert mod is None  # 3-arg pow() not implemented
+        mod = self.borrow_none()
+        fnty = ir.FunctionType(
+            self.pyobj, [self.pyobj, self.pyobj, self.pyobj]
+        )
+        fn = self._get_function(fnty, name="PyNumber_Power")
+        return self.builder.call(fn, [lhs, rhs, mod])
 
     @handle_error
     def number_negative(self, operand):
@@ -709,6 +747,13 @@ class PythonAPI:
         fn = self._get_function(fnty, name=fname)
         return self.builder.call(fn, [string])
 
+    @handle_error
+    def object_getattr_string(self, obj, attrname: str):
+        fnty = ir.FunctionType(self.pyobj, [self.pyobj, self.cstring])
+        fname = "PyObject_GetAttrString"
+        fn = self._get_function(fnty, name=fname)
+        return self.builder.call(fn, [obj, attrname])
+
     def make_none(self):
         obj = self.borrow_none()
         self.incref(obj)
@@ -747,20 +792,21 @@ class PythonAPI:
 
     def printf(self, fmt, *args):
         fnty = ir.FunctionType(ir.VoidType(), [self.pyobj], var_arg=True)
+        ptr = self._get_cstring(fmt)
+        fn = self._get_function(fnty, name="printf")
+        self.builder.call(fn, [ptr, *args])
 
+    def _get_cstring(self, text: str):
         module = self.module
         builder = self.builder
-        encoded = bytearray(fmt.encode("utf-8") + b"\x00")
+        encoded = bytearray(text.encode("utf-8") + b"\x00")
         byte_string = ir.Constant(ir.ArrayType(ll_byte, len(encoded)), encoded)
-        unique_name = module.get_unique_name(f"_printf.{fmt.split()[0]}")
+        unique_name = module.get_unique_name(f"_printf.{text.split()[0]}")
         gv = ir.GlobalVariable(module, byte_string.type, unique_name)
         gv.global_constant = True
         gv.initializer = byte_string
         gv.linkage = "internal"
-        ptr = builder.bitcast(gv, self.cstring)
-
-        fn = self._get_function(fnty, name="printf")
-        self.builder.call(fn, [ptr, *args])
+        return builder.bitcast(gv, self.cstring)
 
 
 def _get_or_insert_function(module, fnty, name):
