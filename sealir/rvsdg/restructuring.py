@@ -576,21 +576,20 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             ctx.store_var(varname, ctx.insert_io_node(res))
             return
         case ("PyAst_UnaryOp", (str(op), operand, interloc)):
-            res = rg.PyUnaryOp(
-                op=op, io=ctx.load_io(), operand=(yield operand)
-            )
+            operandval = yield operand
+            res = rg.PyUnaryOp(op=op, io=ctx.load_io(), operand=operandval)
             return ctx.insert_io_node(res)
 
         case ("PyAst_BinOp", (str(op), lhs, rhs, interloc)):
-            res = rg.PyBinOp(
-                op=op, io=ctx.load_io(), lhs=(yield lhs), rhs=(yield rhs)
-            )
+            lhsval = yield lhs
+            rhsval = yield rhs
+            res = rg.PyBinOp(op=op, io=ctx.load_io(), lhs=lhsval, rhs=rhsval)
             return ctx.insert_io_node(res)
 
         case ("PyAst_Compare", (str(op), lhs, rhs, interloc)):
-            res = rg.PyBinOp(
-                op=op, io=ctx.load_io(), lhs=(yield lhs), rhs=(yield rhs)
-            )
+            lhsval = yield lhs
+            rhsval = yield rhs
+            res = rg.PyBinOp(op=op, io=ctx.load_io(), lhs=lhsval, rhs=rhsval)
             return ctx.insert_io_node(res)
 
         case ("PyAst_Call", (SExpr() as func, SExpr() as posargs, interloc)):
