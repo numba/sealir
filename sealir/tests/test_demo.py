@@ -413,3 +413,128 @@ def test_geglu_tanh_approx():
     got = cg(arg)
     expect = udt(arg)
     assert got == expect
+
+    out = generate_mlir(extracted)
+    print(out)
+
+
+def generate_mlir(root: ase.SExpr):
+    import sealir.rvsdg.grammar as rg
+
+    ctxargs = []
+    ctxportmap = {}
+
+    sourcebuf = []
+
+    ctr = 0
+
+    def codegen(expr: ase.SExpr, state: ase.TraverseState):
+
+        def fresh_name():
+            nonlocal ctr
+            ctr += 1
+            return f"%v{ctr}"
+
+        match expr:
+            case rg.Func(fname=str(fname), args=rg.Args(args), body=body):
+                argbuf = []
+                for i in range(len(args)):
+                    argbuf.append(f"%arg{i}: f64")
+                    ctxargs.append(f"%arg{i}")
+
+                argfmt = ", ".join(argbuf)
+                sourcebuf.append(f"func.func @{fname}({argfmt}) -> f64")
+                sourcebuf.append("{")
+                out = yield body
+                sourcebuf.append(f"return {out}")
+                sourcebuf.append("}")
+                return sourcebuf
+
+            case rg.RegionEnd(
+                begin=rg.RegionBegin() as begin,
+                outs=str(outs),
+                ports=ports,
+            ):
+                (yield begin)
+                outputs = []
+                for p in ports:
+                    ctxportmap[p] = pv = yield p
+                    outputs.append(pv)
+                return tuple(outputs)
+
+            case rg.RegionBegin(
+                ins=ins,
+                ports=ports,
+            ):
+                for p in ports:
+                    ctxportmap[p] = yield p
+
+            case rg.Unpack(val=source, idx=int(idx)):
+                pv = yield source
+                return pv[idx]
+
+            case rg.IO():
+                return "<<<IO>>>"
+            case rg.ArgRef(idx=int(idx), name=str(name)):
+                return ctxargs[idx]
+
+            case rg.PyBinOpPure(op=op, lhs=lhs, rhs=rhs):
+                lhsval = yield lhs
+                rhsval = yield rhs
+                inst = _handle_binop(op, lhsval, rhsval)
+                var = fresh_name()
+                sourcebuf.append(f"{var} = {inst}")
+                return var
+
+            case rg.PyCallPure(func=func, args=args):
+                callee = yield func
+                argvals = []
+                for arg in args:
+                    argvals.append((yield arg))
+                inst = f"{callee} {', '.join(argvals)} : f64"
+                var = fresh_name()
+                sourcebuf.append(f"{var} = {inst}")
+                return var
+            case rg.PyLoadGlobal(io=io, name=str(varname)):
+                match varname:
+                    case "flt":
+                        return "arith.sitofp"
+
+                    case "sqrt":
+                        return "math.sqrt"
+                    case _:
+                        raise NotImplementedError(f"unknown global: {varname}")
+            case rg.PyFloat(float(val)):
+                var = fresh_name()
+                inst = f"arith.constant {val:g} : f64"
+                sourcebuf.append(f"{var} = {inst}")
+                return var
+
+            case rg.PyInt(int(val)):
+                var = fresh_name()
+                inst = f"arith.constant {val} : i64"
+                sourcebuf.append(f"{var} = {inst}")
+                return var
+
+            case _:
+                print("\n".join(sourcebuf))
+                raise NotImplementedError(f"failed: {expr}")
+
+    def _handle_binop(op: str, lhsval, rhsval):
+
+        match op:
+            case "+":
+                res = f"arith.addf {lhsval}, {rhsval} : f64"
+            case "-":
+                res = f"arith.subf {lhsval}, {rhsval} : f64"
+            case "*":
+                res = f"arith.mulf {lhsval}, {rhsval} : f64"
+            case "/":
+                res = f"arith.divf {lhsval}, {rhsval} : f64"
+            case _:
+                raise NotImplementedError(op)
+
+        return res
+
+    memo = ase.traverse(root, codegen)
+    return "\n".join(sourcebuf)
