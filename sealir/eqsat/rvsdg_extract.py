@@ -75,7 +75,7 @@ def egraph_extraction(
             n_inline_leaves=0, split_primitive_outputs=False
         ).to_json()
     )
-    pprint(gdct)
+    # pprint(gdct)
 
     [root] = get_graph_root(gdct)
     root_eclass = gdct["nodes"][root]["eclass"]
@@ -172,7 +172,10 @@ class Extraction:
         self.cost_model = cost_model
 
     def _compute_cost(self, max_iter=10000) -> dict[str, Bucket]:
-        """
+        """Compute cost for the EGraph.
+
+        Uses dynamic programming with iterative cost propagation
+
         Performance notes
 
         Time complexity is O(N * M) where:

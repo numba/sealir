@@ -318,8 +318,38 @@ def test_geglu_tanh_approx():
                 )
             )
 
+        @ruleset
+        def expand_pow(
+            x: eg.Term, y: eg.Term, z: eg.Term, term: eg.Term, i: i64
+        ):
+            yield rule(
+                eq(term).to(eg.Term.Pow(x, eg.Term.LiteralI64(i))),
+                IsFloat(x),
+                i > i64(1),
+            ).then(
+                union(term).with_(
+                    eg.Term.Mul(
+                        x, eg.Term.Pow(x, eg.Term.LiteralI64(i - i64(1)))
+                    )
+                )
+            )
+            yield rewrite(eg.Term.Pow(x, eg.Term.LiteralI64(1))).to(
+                x,
+                # given
+                IsFloat(x),
+            )
+            yield rewrite(eg.Term.Pow(x, eg.Term.LiteralI64(0))).to(
+                eg.Term.LiteralF64(1.0),
+                # given
+                IsFloat(x),
+            )
+
         return (
-            rule_cheats | facts | rules_simplify_python | pade44_tanh_expansion
+            rule_cheats
+            | facts
+            | rules_simplify_python
+            | pade44_tanh_expansion
+            | expand_pow
         )
 
     egraph = run(
@@ -369,10 +399,10 @@ def test_geglu_tanh_approx():
             nodes: dict[str, Any],
             child_costs: list[float],
         ) -> float:
-            # eclass = nodes[nodename].eclass
-            # ectype = self.graph_data["class_data"][eclass]["type"]
             match op:
                 case "Tanh":
+                    return 100 + sum(child_costs)
+                case "Term.Pow" | "Term.PowIO":
                     return 100 + sum(child_costs)
             return super().get_cost_function(nodename, op, nodes, child_costs)
 
