@@ -207,7 +207,7 @@ def test_geglu_tanh_approx():
 
         import sealir.eqsat.rvsdg_eqsat as eg
 
-        @function(cost=100)
+        @function(cost=400)
         def Tanh(val: eg.Term) -> eg.Term: ...
 
         @function
@@ -377,12 +377,13 @@ def test_geglu_tanh_approx():
                         rg.PyCallPure(func=fn_flt, args=tuple([val]))
                     )
 
-                case "Tanh", {"val": val}:
-                    io = grm.write(rg.IO())  # dummy
-                    fn_flt = grm.write(rg.PyLoadGlobal(io=io, name="tanh"))
-                    return grm.write(
-                        rg.PyCallPure(func=fn_flt, args=tuple([val]))
-                    )
+                ## Commented out because this should not be used
+                # case "Tanh", {"val": val}:
+                #     io = grm.write(rg.IO())  # dummy
+                #     fn_flt = grm.write(rg.PyLoadGlobal(io=io, name="tanh"))
+                #     return grm.write(
+                #         rg.PyCallPure(func=fn_flt, args=tuple([val]))
+                #     )
 
                 case "Pi", {}:
                     return grm.write(rg.PyFloat(np.pi))
