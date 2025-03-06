@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import time
+from typing import Any
 
 import numpy as np
 from egglog import EGraph, String, eq, var
@@ -200,12 +201,13 @@ def test_geglu_tanh_approx():
             rule,
             ruleset,
             set_,
+            subsume,
             union,
         )
 
         import sealir.eqsat.rvsdg_eqsat as eg
 
-        @function
+        @function(cost=1000)
         def Tanh(val: eg.Term) -> eg.Term: ...
 
         @function
@@ -264,6 +266,7 @@ def test_geglu_tanh_approx():
                 ).then(
                     union(call.getPort(1)).with_(func_target(argvec[0])),
                     union(call.getPort(0)).with_(io),
+                    subsume(call),
                 )
 
             yield shortcut_call("tanh", Tanh)
@@ -280,6 +283,7 @@ def test_geglu_tanh_approx():
                     union(res := call.getPort(1)).with_(fnpure(lhs, rhs)),
                     union(call.getPort(0)).with_(io),
                     set_(IsFloat(res)).to(Unit()),
+                    subsume(call),
                 )
 
             yield shortcut_io(eg.Term.AddIO, eg.Term.Add)
@@ -294,13 +298,35 @@ def test_geglu_tanh_approx():
                 set_(IsFloat(res)).to(Unit()),
             )
 
-        return rule_cheats | facts | rules_simplify_python
+        @ruleset
+        def pade44_tanh_expansion(x: Term, y: Term, z: Term):
+            flt = lambda f: eg.Term.LiteralF64(f64(float(f)))
+            liti64 = eg.Term.LiteralI64
+            pow = eg.Term.Pow
+            mul = eg.Term.Mul
+            add = eg.Term.Add
+            div = eg.Term.Div
+            yield rewrite(Tanh(x)).to(
+                div(
+                    add(mul(flt(10), pow(x, liti64(3))), mul(flt(105), x)),
+                    add(
+                        add(
+                            pow(x, liti64(4)), mul(flt(45), pow(x, liti64(2)))
+                        ),
+                        flt(105),
+                    ),
+                )
+            )
+
+        return (
+            rule_cheats | facts | rules_simplify_python | pade44_tanh_expansion
+        )
 
     egraph = run(
         root, *extra_statements, checks=checks, ruleset=extra_ruleset()
     )
     # Extraction
-    from sealir.eqsat.rvsdg_extract import EGraphToRVSDG
+    from sealir.eqsat.rvsdg_extract import CostModel, EGraphToRVSDG
 
     class ExtendedConverter(EGraphToRVSDG):
         def handle_Term(self, op: str, children: dict | list, grm):
@@ -334,9 +360,26 @@ def test_geglu_tanh_approx():
                 case _:
                     return NotImplemented
 
+    class MyCostModel(CostModel):
+
+        def get_cost_function(
+            self,
+            nodename: str,
+            op: str,
+            nodes: dict[str, Any],
+            child_costs: list[float],
+        ) -> float:
+            # eclass = nodes[nodename].eclass
+            # ectype = self.graph_data["class_data"][eclass]["type"]
+            match op:
+                case "Tanh":
+                    return 100 + sum(child_costs)
+            return super().get_cost_function(nodename, op, nodes, child_costs)
+
     cost, extracted = egraph_extraction(
         egraph,
         rvsdg_expr,
+        cost_model_class=MyCostModel,
         converter_class=ExtendedConverter,
     )
     print(ase.as_tuple(extracted, depth=5))
@@ -353,5 +396,6 @@ def test_geglu_tanh_approx():
     cg = llvm_codegen(extracted, ns)
 
     arg = 0.315
-    print(cg(0.315))
-    print(udt(arg))
+    got = cg(arg)
+    expect = udt(arg)
+    assert got == expect

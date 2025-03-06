@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import heapq
 import json
+import math
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from pprint import pprint
+from pprint import pformat, pprint
 
 import networkx as nx
 from egglog import EGraph
@@ -12,29 +14,78 @@ from egglog import EGraph
 from .egraph_utils import EGraphJsonDict
 from .rvsdg_extract_details import EGraphToRVSDG
 
+MAX_COST = float("inf")
+
+
+class CostModel:
+    graph_data: EGraphJsonDict
+
+    def __init__(self, graph_data: EGraphJsonDict):
+        self.graph_data = graph_data
+
+    def get_cost_function(
+        self,
+        nodename: str,
+        op: str,
+        nodes: dict[str, Node],
+        child_costs: list[float],
+    ) -> float:
+        eclass = nodes[nodename].eclass
+        ectype = self.graph_data["class_data"][eclass]["type"]
+
+        match ectype:
+            case "Region" | "InputPorts":
+                current_cost = 0
+            case "bool" | "String" | "i64" | "f64":
+                current_cost = 1
+            case "Vec_Value" | "Vec_Term":
+                current_cost = 0
+            case "Term":
+                current_cost = 1
+            case "TermList":
+                current_cost = 1
+            case "Value":
+                match op:
+                    case "Eval":
+                        current_cost = MAX_COST
+                    case _:
+                        current_cost = 1
+            case "ValueList":
+                current_cost = 1
+            case "Env":
+                current_cost = MAX_COST
+            case "Unit":
+                current_cost = MAX_COST
+            case str(pat) if pat.startswith("UnstableFn_"):
+                current_cost = 0
+            case _:
+                raise NotImplementedError(ectype)
+        return current_cost + sum(child_costs)
+
 
 def egraph_extraction(
-    egraph: EGraph, rvsdg_sexpr, *, converter_class=EGraphToRVSDG
+    egraph: EGraph,
+    rvsdg_sexpr,
+    *,
+    cost_model_class=CostModel,
+    converter_class=EGraphToRVSDG,
 ):
     gdct: EGraphJsonDict = json.loads(
         egraph._serialize(
             n_inline_leaves=0, split_primitive_outputs=False
         ).to_json()
     )
+    pprint(gdct)
 
     [root] = get_graph_root(gdct)
     root_eclass = gdct["nodes"][root]["eclass"]
 
     ts = time.time()
-    cost_model = CostModel(gdct)
+    cost_model = cost_model_class(gdct)
     extraction = Extraction(gdct, root_eclass, cost_model)
-    # extraction.draw_graph(extraction.nxg, "full.svg")
-    # extraction.draw_graph(extraction.dag, "dag.svg")
     cost, exgraph = extraction.choose()
     te = time.time()
     print("custom cost-model greedy extraction:", te - ts)
-
-    extraction.draw_graph(exgraph, "cost.svg")
 
     expr = convert_to_rvsdg(
         exgraph,
@@ -89,55 +140,6 @@ def convert_to_rvsdg(
     return conversion.run(iterator(node_iterator))
 
 
-MAX_COST = 2**59
-
-
-class CostModel:
-    graph_data: EGraphJsonDict
-
-    def __init__(self, graph_data: EGraphJsonDict):
-        self.graph_data = graph_data
-
-    def get_cost_function(
-        self,
-        nodename: str,
-        op: str,
-        nodes: dict[str, Node],
-        child_costs: list[float],
-    ) -> float:
-        eclass = nodes[nodename].eclass
-        ectype = self.graph_data["class_data"][eclass]["type"]
-
-        match ectype:
-            case "Region" | "InputPorts":
-                current_cost = 0
-            case "bool" | "String" | "i64" | "f64":
-                current_cost = 1
-            case "Vec_Value" | "Vec_Term":
-                current_cost = 0
-            case "Term":
-                current_cost = 1
-            case "TermList":
-                current_cost = 1
-            case "Value":
-                match op:
-                    case "Eval":
-                        current_cost = MAX_COST
-                    case _:
-                        current_cost = 1
-            case "ValueList":
-                current_cost = 1
-            case "Env":
-                current_cost = MAX_COST
-            case "Unit":
-                current_cost = MAX_COST
-            case str(pat) if pat.startswith("UnstableFn_"):
-                current_cost = 0
-            case _:
-                raise NotImplementedError(ectype)
-        return current_cost + sum(child_costs)
-
-
 def get_graph_root(graph_json: EGraphJsonDict) -> set[str]:
     # Get GraphRoot
     roots = set()
@@ -156,33 +158,10 @@ class Node:
     subsumed: bool
 
 
-def _convert_cyclic_to_dag(graph, root):
-    # Create a copy of the original graph
-    dag: nx.DiGraph = graph.copy()
-
-    backedges = set()
-    processed = set()
-
-    worklist = [(root, ())]
-    # DFS
-    while worklist:
-        current, parents = worklist.pop()
-        processed.add(current)
-        new_parents = (*parents, current)
-        for neighbor in dag.neighbors(current):
-            if neighbor in parents:
-                backedges.add((current, neighbor))
-            elif neighbor not in processed:
-                worklist.append((neighbor, new_parents))
-
-    dag.remove_edges_from(backedges)
-    return dag
-
-
 class Extraction:
     nodes: dict[str, Node]
-    nxg: nx.DiGraph
     root_eclass: str
+    cost_model: CostModel
 
     def __init__(self, graph_json: EGraphJsonDict, root_eclass, cost_model):
         self.root_eclass = root_eclass
@@ -191,25 +170,70 @@ class Extraction:
         for k, node in self.nodes.items():
             self.class_data[node.eclass].add(k)
         self.cost_model = cost_model
-        self.nxg = self._make_nx()
-        self.dag = _convert_cyclic_to_dag(self.nxg, self.root_eclass)
 
-    @staticmethod
-    def draw_graph(G, filename):
-        A = nx.nx_pydot.to_pydot(G)
-        svg = A.create_svg()
-        with open(f"{filename}", "wb") as fout:
-            fout.write(svg)
+    def _compute_cost(self, max_iter=10000) -> dict[str, Bucket]:
+        """
+        Performance notes
 
-    def choose(self):
-        self._compute_cost()
+        Time complexity is O(N * M) where:
+
+        - N is the number of iterations specified by max_iter (default 10000)
+        - M is the number of nodes in the graph
+
+        For each iteration, the function:
+
+        - Iterates through all nodes
+        - For each node, computes costs based on its children
+        - Updates selections dictionary
+
+        The function can terminate early if a finite root score is computed,
+        but in worst case it will run for the full N iterations.
+        """
+        nodes = self.nodes
+        eclassmap: dict[str, set[str]] = defaultdict(set)
+
+        for k, node in nodes.items():
+            eclassmap[node.eclass].add(k)
+
+        selections: dict[str, Bucket] = defaultdict(Bucket)
+
+        def compute_cost(nodename: str, node: Node):
+            if node.subsumed:
+                return MAX_COST
+            child_costs = []
+            for child in node.children:
+                child_node = nodes[child]
+                choices = selections[child_node.eclass]
+                if choices:
+                    _, best = choices.best()
+                    child_costs.append(best)
+                else:
+                    child_costs.append(MAX_COST)
+            cost = self.cost_model.get_cost_function(
+                nodename, node.op, nodes, child_costs
+            )
+            return cost
+
+        # Repeatedly compute cost and propagate while keeping the best variant
+        # for each eclass. If root score is computed, return early.
+        for round_i in range(max_iter):
+            # propagate
+            for k, node in nodes.items():
+                cost = compute_cost(k, node)
+                selections[node.eclass].put(cost, k)
+            # root score is computed?
+            if math.isfinite(selections[self.root_eclass].best()[1]):
+                break
+
+        return selections
+
+    def choose(self) -> tuple[float, nx.MultiDiGraph]:
+        selections = self._compute_cost()
 
         nodes = self.nodes
-        cost, chosen_root = min(
-            (nodes[k].cost, k)
-            for k in nodes
-            if nodes[k].eclass == self.root_eclass
-        )
+        chosen_root, rootcost = selections[self.root_eclass].best()
+        sentry_cost(rootcost)
+
         # make selected graph
         G = nx.MultiDiGraph()
         todolist = [chosen_root]
@@ -221,58 +245,34 @@ class Extraction:
             visited.add(cur)
 
             for i, u in enumerate(nodes[cur].children):
-                child = nodes[u]
-                candidates = self.class_data[child.eclass]
+                child_eclass = nodes[u].eclass
+                child_key, cost = selections[child_eclass].best()
+                sentry_cost(cost)
+                G.add_edge(cur, child_key, label=str(i))
+                todolist.append(child_key)
 
-                if len(candidates) > 1:
-                    v = min(candidates, key=lambda v: nodes[v].cost)
-                    G.add_edge(cur, v, label=str(i))
-                    todolist.append(v)
-                else:
-                    G.add_edge(cur, u, label=str(i))
-                    todolist.append(u)
+        return rootcost, G
 
-        return cost, G
 
-    def _compute_cost(self):
-        dag = self.dag
-        rev_topo = list(nx.topological_sort(dag))
-        rev_topo.reverse()
-        nodes = self.nodes
-        costmap = {}
-        for k in rev_topo:
-            if k in self.class_data:
-                costmap[k] = min(costmap[x] for x in self.class_data[k])
-            elif nodes[k].subsumed:
-                costmap[k] = MAX_COST
-            else:
-                child_costs = [
-                    # if the node is not yet available, it is a backedge
-                    costmap.get(nodes[x].eclass, MAX_COST)
-                    for x in nodes[k].children
-                ]
-                cost = self.cost_model.get_cost_function(
-                    k, nodes[k].op, nodes, child_costs
-                )
+def sentry_cost(cost: float) -> None:
+    if math.isinf(cost):
+        raise ValueError("invalid cost extracted")
 
-                costmap[k] = cost
-                nodes[k].cost = costmap[k]
 
-    def _make_nx(self) -> nx.DiGraph:
-        """
-        Make NX graph that start the node children always points to the eclass,
-        which then contains the node (enode)
-        """
-        nodes = self.nodes
+class Bucket:
+    def __init__(self):
+        self.data = defaultdict(lambda: MAX_COST)
 
-        G = nx.DiGraph()
-        for k, node in nodes.items():
-            G.add_node(node.eclass, shape="diamond")
-            G.add_node(k)
-            G.add_edge(node.eclass, k)
+    def put(self, cost: float, key: str) -> None:
+        self.data[key] = min(cost, self.data[key])
 
-        for k, node in nodes.items():
-            for v in node.children:
-                child = nodes[v]
-                G.add_edge(k, child.eclass)
-        return G
+    def best(self) -> tuple[str, float]:
+        return min(self.data.items(), key=lambda kv: kv[1])
+
+    def __len__(self) -> int:
+        return len(self.data)
+
+    def __repr__(self):
+        cls = self.__class__.__name__
+        args = pformat(sorted(self.data.items(), key=lambda x: x[1]))
+        return f"{cls}({args})"
