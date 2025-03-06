@@ -207,7 +207,7 @@ def test_geglu_tanh_approx():
 
         import sealir.eqsat.rvsdg_eqsat as eg
 
-        @function(cost=1000)
+        @function(cost=100)
         def Tanh(val: eg.Term) -> eg.Term: ...
 
         @function
@@ -390,26 +390,9 @@ def test_geglu_tanh_approx():
                 case _:
                     return NotImplemented
 
-    class MyCostModel(CostModel):
-
-        def get_cost_function(
-            self,
-            nodename: str,
-            op: str,
-            nodes: dict[str, Any],
-            child_costs: list[float],
-        ) -> float:
-            match op:
-                case "Tanh":
-                    return 100 + sum(child_costs)
-                case "Term.Pow" | "Term.PowIO":
-                    return 100 + sum(child_costs)
-            return super().get_cost_function(nodename, op, nodes, child_costs)
-
     cost, extracted = egraph_extraction(
         egraph,
         rvsdg_expr,
-        cost_model_class=MyCostModel,
         converter_class=ExtendedConverter,
     )
     print(ase.as_tuple(extracted, depth=5))

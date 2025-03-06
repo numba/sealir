@@ -27,40 +27,11 @@ class CostModel:
         self,
         nodename: str,
         op: str,
+        cost: float,
         nodes: dict[str, Node],
         child_costs: list[float],
     ) -> float:
-        eclass = nodes[nodename].eclass
-        ectype = self.graph_data["class_data"][eclass]["type"]
-
-        match ectype:
-            case "Region" | "InputPorts":
-                current_cost = 0
-            case "bool" | "String" | "i64" | "f64":
-                current_cost = 1
-            case "Vec_Value" | "Vec_Term":
-                current_cost = 0
-            case "Term":
-                current_cost = 1
-            case "TermList":
-                current_cost = 1
-            case "Value":
-                match op:
-                    case "Eval":
-                        current_cost = MAX_COST
-                    case _:
-                        current_cost = 1
-            case "ValueList":
-                current_cost = 1
-            case "Env":
-                current_cost = MAX_COST
-            case "Unit":
-                current_cost = MAX_COST
-            case str(pat) if pat.startswith("UnstableFn_"):
-                current_cost = 0
-            case _:
-                raise NotImplementedError(ectype)
-        return current_cost + sum(child_costs)
+        return cost + sum(child_costs)
 
 
 def egraph_extraction(
@@ -149,7 +120,7 @@ def get_graph_root(graph_json: EGraphJsonDict) -> set[str]:
     return roots
 
 
-@dataclass
+@dataclass(frozen=True)
 class Node:
     children: list[str]
     cost: float
@@ -213,7 +184,7 @@ class Extraction:
                 else:
                     child_costs.append(MAX_COST)
             cost = self.cost_model.get_cost_function(
-                nodename, node.op, nodes, child_costs
+                nodename, node.op, node.cost, nodes, child_costs
             )
             return cost
 
