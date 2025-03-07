@@ -180,7 +180,7 @@ tape.render_dot(show_metadata=True)
 
 ## Manual Traversal Techniques
 
-The `SExpr` class in SealIR provides several methods for manually traversing the S-expression tree. These methods offer fine-grained control over tree exploration and analysis.
+The `sealir.ase` module in SealIR provides several methods for manually traversing the S-expression tree. These methods offer fine-grained control over tree exploration and analysis.
 
 +++
 

@@ -3,6 +3,15 @@
 
 format: jb-book
 root: intro
-chapters:
-- file: lambda
-- file: rvsdg
+
+parts:
+- caption: Key concepts
+  chapters:
+    - file: traverse.md
+- caption: Demos
+  chapters:
+    - file: demo_geglu_approx_mlir.md
+    
+- caption: Old and additional stuff
+  chapters:
+    - file: lambda
