@@ -72,9 +72,12 @@ class BakeInLocAsStr(ast.NodeTransformer):
 def restructure_source(function):
     # TODO: a lot of duplication here
     # Get source info
-    srcfile = pathlib.Path(inspect.getsourcefile(function)).relative_to(
-        os.getcwd()
-    )
+
+    srcfile = inspect.getsourcefile(function)
+    try:
+        srcfile = pathlib.Path(srcfile).relative_to(os.getcwd())
+    except ValueError:
+        pass  # ignore fail to get relative path
     srclineoffset = min(
         (0xFFFFFFFF if ln is None else ln)
         for _, _, ln in function.__code__.co_lines()
