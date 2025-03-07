@@ -14,6 +14,8 @@ kernelspec:
 
 # GEGLU Approximation
 
+This demonstrates an approach to approximate the GEGLU (Gated Linear Unit with Gaussian Error Linear Unit activation) function using equality saturation, RVSDG representation, MLIR code generation, and LLVM compilation. The primary goal is to optimize mathematical expressions via rewriting techniques and compile them efficiently for execution.
+
 ```{code-cell} ipython3
 
 from __future__ import annotations
@@ -120,6 +122,8 @@ def equality_saturation(
 ```
 
 ### MLIR codegen 
+
+This is a simplified MLIR codegen implementation. Types are assumed for the code being tested.
 
 ```{code-cell} ipython3
 
@@ -272,9 +276,13 @@ func.func @do_work(%arg0: memref<?xf64>, %arg1: memref<?xf64>) attributes {llvm.
 
 ## Start of GEGLU Approximation demo
 
+### Define GEGLU. The Target function.
 
-Firstly, define our target function `geglu()` and helpers to abstract away `numpy`
-calls:
+We first define ``geglu()``, which follows the formulation:
+
+$$
+GEGLU(a) = 0.5 \cdot a \cdot (1 + \tanh(\sqrt{2 / \pi} \cdot (a + 0.044715 \cdot a^3)))
+$$
 
 ```{code-cell} ipython3
 
@@ -306,6 +314,8 @@ def geglu(a):
 
 ### Get RVSDG representation
 
+The Regionalized Value-State Dependence Graph (RVSDG) helps structure computation.
+
 ```{code-cell} ipython3
 rvsdg_expr, dbginfo = rvsdg.restructure_source(geglu)
 print(rvsdg.format_rvsdg(rvsdg_expr))
@@ -313,6 +323,7 @@ print(rvsdg.format_rvsdg(rvsdg_expr))
 
 ### Convert RVSDG to EGraph
 
+The E-Graph (Equality Graph) representation is useful for performing term rewriting and optimization.
 
 ```{code-cell} ipython3
 
@@ -322,6 +333,8 @@ egfunc = memo[rvsdg_expr]
 ```
 
 ### Prepare for Equality Saturation
+
+We set up an environment (Env) to evaluate expressions within the equality saturation framework. (Developer note: This is likely redundant in the future)
 
 ```{code-cell} ipython3
 # Eval with Env
@@ -337,166 +350,224 @@ extra_statements = [
 ]
 
 ```
-### Application specific rules
+
+
+### Defining Rewrite Rules for Optimization
+
+We introduce application-specific rewrite rules to eliminate costly operations like tanh using approximations.
+
+
+Extra imports:
 
 ```{code-cell} ipython3
-def extra_ruleset():
-    from egglog import (
-        Unit,
-        Vec,
-        f64,
-        function,
-        i64,
-        rewrite,
-        rule,
-        ruleset,
-        set_,
-        subsume,
-        union,
+
+
+from egglog import (
+    Unit,
+    Vec,
+    f64,
+    function,
+    i64,
+    rewrite,
+    rule,
+    ruleset,
+    set_,
+    subsume,
+    union,
+)
+
+import sealir.eqsat.rvsdg_eqsat as eg
+
+```
+
+
+Extra rules for function shortcuts
+
+
+```{code-cell} ipython3
+
+@function(cost=400)
+def Tanh(val: eg.Term) -> eg.Term: ...
+
+@function
+def Sqrt(val: eg.Term) -> eg.Term: ...
+
+@function
+def Flt(val: eg.Term) -> eg.Term: ...
+
+@function
+def Pi() -> eg.Term: ...
+```
+
+Helper rule for marking something is a Float.
+`Unit` type is to indicate something exist or not.
+
+```{code-cell} ipython3
+
+@function(unextractable=True)
+def IsFloat(val: eg.Term) -> Unit: ...
+```
+
+This is to simplify region handling. As the details of the EqSat for RVSDG
+is still being flushed out.
+
+```{code-cell} ipython3
+@ruleset
+def rule_cheats(uid: String, ins: String, argvec: Vec[Term], i: i64):
+    yield rewrite(
+        eg.Region(uid, ins, eg.TermList(argvec)).begin().get(i)
+    ).to(
+        argvec[i],
+        # given
+        i < argvec.length(),
+    )
+```
+
+
+Setup facts for parameters and function calls since we don't have type inference
+
+```{code-cell} ipython3
+@ruleset
+def facts(x: eg.Term, y: eg.Term, z: eg.Term, fval: f64, io: eg.Term):
+    # First parameter is a float
+    yield rule(eq(x).to(eg.Term.Param(0))).then(
+        set_(IsFloat(x)).to(Unit())
     )
 
-    import sealir.eqsat.rvsdg_eqsat as eg
+    yield rule(eq(x).to(eg.Term.LiteralF64(fval))).then(
+        set_(IsFloat(x)).to(Unit())
+    )
 
-    @function(cost=400)
-    def Tanh(val: eg.Term) -> eg.Term: ...
+    for fn in [Tanh, Sqrt, Flt]:
+        yield rule(eq(x).to(fn(y))).then(set_(IsFloat(x)).to(Unit()))
 
-    @function
-    def Sqrt(val: eg.Term) -> eg.Term: ...
+    yield rewrite(eg.Term.LoadGlobal(io, "pi")).to(Pi())
 
-    @function
-    def Flt(val: eg.Term) -> eg.Term: ...
+    yield rule(eq(x).to(Pi())).then(set_(IsFloat(x)).to(Unit()))
+```
 
-    @function
-    def Pi() -> eg.Term: ...
+Simplify Python expressions:
 
-    @function(unextractable=True)
-    def IsFloat(val: eg.Term) -> Unit: ...
+- handle pure vs impure (uses IO) 
+- simplify function calls
 
-    @ruleset
-    def rule_cheats(uid: String, ins: String, argvec: Vec[Term], i: i64):
-        yield rewrite(
-            eg.Region(uid, ins, eg.TermList(argvec)).begin().get(i)
-        ).to(
-            argvec[i],
-            # given
-            i < argvec.length(),
-        )
-
-    @ruleset
-    def facts(x: eg.Term, y: eg.Term, z: eg.Term, fval: f64, io: eg.Term):
-        yield rule(eq(x).to(eg.Term.Param(0))).then(
-            set_(IsFloat(x)).to(Unit())
-        )
-
-        yield rule(eq(x).to(eg.Term.LiteralF64(fval))).then(
-            set_(IsFloat(x)).to(Unit())
-        )
-
-        for fn in [Tanh, Sqrt, Flt]:
-            yield rule(eq(x).to(fn(y))).then(set_(IsFloat(x)).to(Unit()))
-
-        yield rewrite(eg.Term.LoadGlobal(io, "pi")).to(Pi())
-
-        yield rule(eq(x).to(Pi())).then(set_(IsFloat(x)).to(Unit()))
-
-    @ruleset
-    def rules_simplify_python(
-        io: eg.Term, argvec: Vec[eg.Term], lhs: eg.Term, rhs: eg.Term
-    ):
-        def shortcut_call(call_target: str, func_target):
-            return rule(
-                call := eg.Term.Call(
-                    func=eg.Term.LoadGlobal(io=io, name=call_target),
-                    io=io,
-                    args=eg.TermList(argvec),
-                ),
-                call.getPort(0),
-                call.getPort(1),
-                eq(argvec.length()).to(i64(1)),
-            ).then(
-                union(call.getPort(1)).with_(func_target(argvec[0])),
-                union(call.getPort(0)).with_(io),
-                subsume(call),
-            )
-
-        yield shortcut_call("tanh", Tanh)
-        yield shortcut_call("sqrt", Sqrt)
-        yield shortcut_call("flt", Flt)
-
-        # Remove IO
-        def shortcut_io(fnio, fnpure):
-            return rule(
-                call := fnio(io, lhs, rhs),
-                IsFloat(lhs),
-                IsFloat(rhs),
-            ).then(
-                union(res := call.getPort(1)).with_(fnpure(lhs, rhs)),
-                union(call.getPort(0)).with_(io),
-                set_(IsFloat(res)).to(Unit()),
-                subsume(call),
-            )
-
-        yield shortcut_io(eg.Term.AddIO, eg.Term.Add)
-        yield shortcut_io(eg.Term.MulIO, eg.Term.Mul)
-        yield shortcut_io(eg.Term.DivIO, eg.Term.Div)
-        yield rule(
-            call := eg.Term.PowIO(io, lhs, rhs),
-            IsFloat(lhs),
+```{code-cell} ipython3
+@ruleset
+def rules_simplify_python(
+    io: eg.Term, argvec: Vec[eg.Term], lhs: eg.Term, rhs: eg.Term
+):
+    def shortcut_call(call_target: str, func_target):
+        return rule(
+            call := eg.Term.Call(
+                func=eg.Term.LoadGlobal(io=io, name=call_target),
+                io=io,
+                args=eg.TermList(argvec),
+            ),
+            call.getPort(0),
+            call.getPort(1),
+            eq(argvec.length()).to(i64(1)),
         ).then(
-            union(res := call.getPort(1)).with_(eg.Term.Pow(lhs, rhs)),
+            union(call.getPort(1)).with_(func_target(argvec[0])),
+            union(call.getPort(0)).with_(io),
+            subsume(call),
+        )
+
+    yield shortcut_call("tanh", Tanh)
+    yield shortcut_call("sqrt", Sqrt)
+    yield shortcut_call("flt", Flt)
+
+    # Remove IO
+    def shortcut_io(fnio, fnpure):
+        return rule(
+            call := fnio(io, lhs, rhs),
+            IsFloat(lhs),
+            IsFloat(rhs),
+        ).then(
+            union(res := call.getPort(1)).with_(fnpure(lhs, rhs)),
             union(call.getPort(0)).with_(io),
             set_(IsFloat(res)).to(Unit()),
+            subsume(call),
         )
 
-        yield rewrite(Flt(rhs)).to(rhs, IsFloat(rhs))
+    yield shortcut_io(eg.Term.AddIO, eg.Term.Add)
+    yield shortcut_io(eg.Term.MulIO, eg.Term.Mul)
+    yield shortcut_io(eg.Term.DivIO, eg.Term.Div)
+    yield rule(
+        call := eg.Term.PowIO(io, lhs, rhs),
+        IsFloat(lhs),
+    ).then(
+        union(res := call.getPort(1)).with_(eg.Term.Pow(lhs, rhs)),
+        union(call.getPort(0)).with_(io),
+        set_(IsFloat(res)).to(Unit()),
+    )
 
-    @ruleset
-    def pade44_tanh_expansion(x: Term, y: Term, z: Term):
-        flt = lambda f: eg.Term.LiteralF64(f64(float(f)))
-        liti64 = eg.Term.LiteralI64
-        pow = eg.Term.Pow
-        mul = eg.Term.Mul
-        add = eg.Term.Add
-        div = eg.Term.Div
-        yield rewrite(Tanh(x)).to(
-            div(
-                add(mul(flt(10), pow(x, liti64(3))), mul(flt(105), x)),
+    yield rewrite(Flt(rhs)).to(rhs, IsFloat(rhs))
+```
+
+
+
+Pade Approximation for Tanh. The following approximation is used :
+
+$$
+\tanh(x) \approx \frac{10x^3 + 105x}{x^4 + 45x^2 + 105}
+$$
+
+```{code-cell} ipython3
+@ruleset
+def pade44_tanh_expansion(x: Term, y: Term, z: Term):
+    flt = lambda f: eg.Term.LiteralF64(f64(float(f)))
+    liti64 = eg.Term.LiteralI64
+    pow = eg.Term.Pow
+    mul = eg.Term.Mul
+    add = eg.Term.Add
+    div = eg.Term.Div
+    yield rewrite(Tanh(x)).to(
+        div(
+            add(mul(flt(10), pow(x, liti64(3))), mul(flt(105), x)),
+            add(
                 add(
-                    add(
-                        pow(x, liti64(4)), mul(flt(45), pow(x, liti64(2)))
-                    ),
-                    flt(105),
+                    pow(x, liti64(4)), mul(flt(45), pow(x, liti64(2)))
                 ),
+                flt(105),
+            ),
+        )
+    )
+```
+
+Simplify `x**i` into multiplications.
+
+```{code-cell} ipython3
+@ruleset
+def expand_pow(
+    x: eg.Term, y: eg.Term, z: eg.Term, term: eg.Term, i: i64
+):
+    yield rule(
+        eq(term).to(eg.Term.Pow(x, eg.Term.LiteralI64(i))),
+        IsFloat(x),
+        i > i64(1),
+    ).then(
+        union(term).with_(
+            eg.Term.Mul(
+                x, eg.Term.Pow(x, eg.Term.LiteralI64(i - i64(1)))
             )
         )
+    )
+    yield rewrite(eg.Term.Pow(x, eg.Term.LiteralI64(1))).to(
+        x,
+        # given
+        IsFloat(x),
+    )
+    yield rewrite(eg.Term.Pow(x, eg.Term.LiteralI64(0))).to(
+        eg.Term.LiteralF64(1.0),
+        # given
+        IsFloat(x),
+    )
+```
 
-    @ruleset
-    def expand_pow(
-        x: eg.Term, y: eg.Term, z: eg.Term, term: eg.Term, i: i64
-    ):
-        yield rule(
-            eq(term).to(eg.Term.Pow(x, eg.Term.LiteralI64(i))),
-            IsFloat(x),
-            i > i64(1),
-        ).then(
-            union(term).with_(
-                eg.Term.Mul(
-                    x, eg.Term.Pow(x, eg.Term.LiteralI64(i - i64(1)))
-                )
-            )
-        )
-        yield rewrite(eg.Term.Pow(x, eg.Term.LiteralI64(1))).to(
-            x,
-            # given
-            IsFloat(x),
-        )
-        yield rewrite(eg.Term.Pow(x, eg.Term.LiteralI64(0))).to(
-            eg.Term.LiteralF64(1.0),
-            # given
-            IsFloat(x),
-        )
+Combine the rules:
 
-    return (
+```{code-cell} ipython3
+extra_ruleset = (
         rule_cheats
         | facts
         | rules_simplify_python
@@ -505,17 +576,22 @@ def extra_ruleset():
     )
 
 ```
-### Equality Saturation
+### Running Equality Saturation
+
+We run equality saturation, applying rewrite rules to optimize the expression.
 
 ```{code-cell} ipython3
-egraph = equality_saturation(root, *extra_statements, ruleset=extra_ruleset())
+egraph = equality_saturation(root, *extra_statements, ruleset=extra_ruleset)
 
 ```
+After this step, `Tanh()` should be eliminated.
 
-The result above is free of `Tanh()`.
 
-### Run Custom Cost-based Extraction. (EGraph -> RVSDG)
+### Extracting an Optimized Representation
 
+After saturation, we extract an optimized RVSDG representation from the E-Graph.
+An extended converter is needed because new terms were introduced into the 
+E-Graph earlier.
 
 ```{code-cell} ipython3
 # Extraction
@@ -569,7 +645,9 @@ print(rvsdg.format_rvsdg(extracted))
 
 ```
 
-### Test extracted code with LLVM Python CAPI backend
+### Emit LLVM to Verify
+
+We execute the optimized function using LLVM with Python C-API calls.
 
 ```{code-cell} ipython3
 ns = {
@@ -589,7 +667,10 @@ assert got == expect
 
 ```
 
-### Use MLIR to get OMP ufunc version
+### Parallel Execution via MLIR
+
+Finally, we validate the MLIR-based OMP ufunc version on an array of inputs.
+
 
 ```{code-cell} ipython3
 

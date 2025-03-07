@@ -57,6 +57,8 @@
     <script async="async" src="_static/sphinx-thebe.js?v=c100c467"></script>
     <script>var togglebuttonSelector = '.toggle, .admonition.dropdown';</script>
     <script>const THEBE_JS_URL = "https://unpkg.com/thebe@0.8.2/lib/index.js"; const thebe_selector = ".thebe,.cell"; const thebe_selector_input = "pre"; const thebe_selector_output = ".output, .cell_output"</script>
+    <script>window.MathJax = {"options": {"processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+    <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script>DOCUMENTATION_OPTIONS.pagename = 'demo_geglu_approx_mlir';</script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
@@ -344,14 +346,15 @@ document.write(`
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#start-of-geglu-approximation-demo">Start of GEGLU Approximation demo</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#define-geglu-the-target-function">Define GEGLU. The Target function.</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#get-rvsdg-representation">Get RVSDG representation</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#convert-rvsdg-to-egraph">Convert RVSDG to EGraph</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#prepare-for-equality-saturation">Prepare for Equality Saturation</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#application-specific-rules">Application specific rules</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#equality-saturation">Equality Saturation</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-custom-cost-based-extraction-egraph-rvsdg">Run Custom Cost-based Extraction. (EGraph -&gt; RVSDG)</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-extracted-code-with-llvm-python-capi-backend">Test extracted code with LLVM Python CAPI backend</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-mlir-to-get-omp-ufunc-version">Use MLIR to get OMP ufunc version</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#defining-rewrite-rules-for-optimization">Defining Rewrite Rules for Optimization</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#running-equality-saturation">Running Equality Saturation</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#extracting-an-optimized-representation">Extracting an Optimized Representation</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#emit-llvm-to-verify">Emit LLVM to Verify</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#parallel-execution-via-mlir">Parallel Execution via MLIR</a></li>
 </ul>
 </li>
 </ul>
@@ -367,6 +370,7 @@ document.write(`
                   
   <section class="tex2jax_ignore mathjax_ignore" id="geglu-approximation">
 <h1>GEGLU Approximation<a class="headerlink" href="#geglu-approximation" title="Link to this heading">#</a></h1>
+<p>This demonstrates an approach to approximate the GEGLU (Gated Linear Unit with Gaussian Error Linear Unit activation) function using equality saturation, RVSDG representation, MLIR code generation, and LLVM compilation. The primary goal is to optimize mathematical expressions via rewriting techniques and compile them efficiently for execution.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
@@ -475,6 +479,7 @@ document.write(`
 </section>
 <section id="mlir-codegen">
 <h3>MLIR codegen<a class="headerlink" href="#mlir-codegen" title="Link to this heading">#</a></h3>
+<p>This is a simplified MLIR codegen implementation. Types are assumed for the code being tested.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">generate_mlir</span><span class="p">(</span><span class="n">root</span><span class="p">:</span> <span class="n">ase</span><span class="o">.</span><span class="n">SExpr</span><span class="p">):</span>
@@ -627,8 +632,13 @@ document.write(`
 </section>
 <section id="start-of-geglu-approximation-demo">
 <h2>Start of GEGLU Approximation demo<a class="headerlink" href="#start-of-geglu-approximation-demo" title="Link to this heading">#</a></h2>
-<p>Firstly, define our target function <code class="docutils literal notranslate"><span class="pre">geglu()</span></code> and helpers to abstract away <code class="docutils literal notranslate"><span class="pre">numpy</span></code>
-calls:</p>
+<section id="define-geglu-the-target-function">
+<h3>Define GEGLU. The Target function.<a class="headerlink" href="#define-geglu-the-target-function" title="Link to this heading">#</a></h3>
+<p>We first define <code class="docutils literal notranslate"><span class="pre">geglu()</span></code>, which follows the formulation:</p>
+<div class="math notranslate nohighlight">
+\[
+GEGLU(a) = 0.5 \cdot a \cdot (1 + \tanh(\sqrt{2 / \pi} \cdot (a + 0.044715 \cdot a^3)))
+\]</div>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">float32</span><span class="p">(</span><span class="n">num</span><span class="p">):</span>
@@ -658,8 +668,10 @@ calls:</p>
 </div>
 </div>
 </div>
+</section>
 <section id="get-rvsdg-representation">
 <h3>Get RVSDG representation<a class="headerlink" href="#get-rvsdg-representation" title="Link to this heading">#</a></h3>
+<p>The Regionalized Value-State Dependence Graph (RVSDG) helps structure computation.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">rvsdg_expr</span><span class="p">,</span> <span class="n">dbginfo</span> <span class="o">=</span> <span class="n">rvsdg</span><span class="o">.</span><span class="n">restructure_source</span><span class="p">(</span><span class="n">geglu</span><span class="p">)</span>
@@ -706,6 +718,7 @@ $0 = Region[640] &lt;- !io=IO a=(ArgRef 0 a)
 </section>
 <section id="convert-rvsdg-to-egraph">
 <h3>Convert RVSDG to EGraph<a class="headerlink" href="#convert-rvsdg-to-egraph" title="Link to this heading">#</a></h3>
+<p>The E-Graph (Equality Graph) representation is useful for performing term rewriting and optimization.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">memo</span> <span class="o">=</span> <span class="n">egraph_conversion</span><span class="p">(</span><span class="n">rvsdg_expr</span><span class="p">)</span>
@@ -718,6 +731,7 @@ $0 = Region[640] &lt;- !io=IO a=(ArgRef 0 a)
 </section>
 <section id="prepare-for-equality-saturation">
 <h3>Prepare for Equality Saturation<a class="headerlink" href="#prepare-for-equality-saturation" title="Link to this heading">#</a></h3>
+<p>We set up an environment (Env) to evaluate expressions within the equality saturation framework. (Developer note: This is likely redundant in the future)</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Eval with Env</span>
@@ -736,167 +750,227 @@ $0 = Region[640] &lt;- !io=IO a=(ArgRef 0 a)
 </div>
 </div>
 </section>
-<section id="application-specific-rules">
-<h3>Application specific rules<a class="headerlink" href="#application-specific-rules" title="Link to this heading">#</a></h3>
+<section id="defining-rewrite-rules-for-optimization">
+<h3>Defining Rewrite Rules for Optimization<a class="headerlink" href="#defining-rewrite-rules-for-optimization" title="Link to this heading">#</a></h3>
+<p>We introduce application-specific rewrite rules to eliminate costly operations like tanh using approximations.</p>
+<p>Extra imports:</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span><span class="w"> </span><span class="nf">extra_ruleset</span><span class="p">():</span>
-    <span class="kn">from</span><span class="w"> </span><span class="nn">egglog</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
-        <span class="n">Unit</span><span class="p">,</span>
-        <span class="n">Vec</span><span class="p">,</span>
-        <span class="n">f64</span><span class="p">,</span>
-        <span class="n">function</span><span class="p">,</span>
-        <span class="n">i64</span><span class="p">,</span>
-        <span class="n">rewrite</span><span class="p">,</span>
-        <span class="n">rule</span><span class="p">,</span>
-        <span class="n">ruleset</span><span class="p">,</span>
-        <span class="n">set_</span><span class="p">,</span>
-        <span class="n">subsume</span><span class="p">,</span>
-        <span class="n">union</span><span class="p">,</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">egglog</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+    <span class="n">Unit</span><span class="p">,</span>
+    <span class="n">Vec</span><span class="p">,</span>
+    <span class="n">f64</span><span class="p">,</span>
+    <span class="n">function</span><span class="p">,</span>
+    <span class="n">i64</span><span class="p">,</span>
+    <span class="n">rewrite</span><span class="p">,</span>
+    <span class="n">rule</span><span class="p">,</span>
+    <span class="n">ruleset</span><span class="p">,</span>
+    <span class="n">set_</span><span class="p">,</span>
+    <span class="n">subsume</span><span class="p">,</span>
+    <span class="n">union</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">sealir.eqsat.rvsdg_eqsat</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">eg</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Extra rules for function shortcuts</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@function</span><span class="p">(</span><span class="n">cost</span><span class="o">=</span><span class="mi">400</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">Tanh</span><span class="p">(</span><span class="n">val</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">:</span> <span class="o">...</span>
+
+<span class="nd">@function</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">Sqrt</span><span class="p">(</span><span class="n">val</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">:</span> <span class="o">...</span>
+
+<span class="nd">@function</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">Flt</span><span class="p">(</span><span class="n">val</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">:</span> <span class="o">...</span>
+
+<span class="nd">@function</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">Pi</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">:</span> <span class="o">...</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Helper rule for marking something is a Float.
+<code class="docutils literal notranslate"><span class="pre">Unit</span></code> type is to indicate something exist or not.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@function</span><span class="p">(</span><span class="n">unextractable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">IsFloat</span><span class="p">(</span><span class="n">val</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Unit</span><span class="p">:</span> <span class="o">...</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>This is to simplify region handling. As the details of the EqSat for RVSDG
+is still being flushed out.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@ruleset</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rule_cheats</span><span class="p">(</span><span class="n">uid</span><span class="p">:</span> <span class="n">String</span><span class="p">,</span> <span class="n">ins</span><span class="p">:</span> <span class="n">String</span><span class="p">,</span> <span class="n">argvec</span><span class="p">:</span> <span class="n">Vec</span><span class="p">[</span><span class="n">Term</span><span class="p">],</span> <span class="n">i</span><span class="p">:</span> <span class="n">i64</span><span class="p">):</span>
+    <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span>
+        <span class="n">eg</span><span class="o">.</span><span class="n">Region</span><span class="p">(</span><span class="n">uid</span><span class="p">,</span> <span class="n">ins</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">TermList</span><span class="p">(</span><span class="n">argvec</span><span class="p">))</span><span class="o">.</span><span class="n">begin</span><span class="p">()</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
+        <span class="n">argvec</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
+        <span class="c1"># given</span>
+        <span class="n">i</span> <span class="o">&lt;</span> <span class="n">argvec</span><span class="o">.</span><span class="n">length</span><span class="p">(),</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Setup facts for parameters and function calls since we don’t have type inference</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@ruleset</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">facts</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">z</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">fval</span><span class="p">:</span> <span class="n">f64</span><span class="p">,</span> <span class="n">io</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">):</span>
+    <span class="c1"># First parameter is a float</span>
+    <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span><span class="n">eq</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Param</span><span class="p">(</span><span class="mi">0</span><span class="p">)))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+        <span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">())</span>
     <span class="p">)</span>
 
-    <span class="kn">import</span><span class="w"> </span><span class="nn">sealir.eqsat.rvsdg_eqsat</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">eg</span>
+    <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span><span class="n">eq</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralF64</span><span class="p">(</span><span class="n">fval</span><span class="p">)))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+        <span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">())</span>
+    <span class="p">)</span>
 
-    <span class="nd">@function</span><span class="p">(</span><span class="n">cost</span><span class="o">=</span><span class="mi">400</span><span class="p">)</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">Tanh</span><span class="p">(</span><span class="n">val</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">for</span> <span class="n">fn</span> <span class="ow">in</span> <span class="p">[</span><span class="n">Tanh</span><span class="p">,</span> <span class="n">Sqrt</span><span class="p">,</span> <span class="n">Flt</span><span class="p">]:</span>
+        <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span><span class="n">eq</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">fn</span><span class="p">(</span><span class="n">y</span><span class="p">)))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span><span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">()))</span>
 
-    <span class="nd">@function</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">Sqrt</span><span class="p">(</span><span class="n">val</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">:</span> <span class="o">...</span>
+    <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LoadGlobal</span><span class="p">(</span><span class="n">io</span><span class="p">,</span> <span class="s2">&quot;pi&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Pi</span><span class="p">())</span>
 
-    <span class="nd">@function</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">Flt</span><span class="p">(</span><span class="n">val</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">:</span> <span class="o">...</span>
-
-    <span class="nd">@function</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">Pi</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">:</span> <span class="o">...</span>
-
-    <span class="nd">@function</span><span class="p">(</span><span class="n">unextractable</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">IsFloat</span><span class="p">(</span><span class="n">val</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Unit</span><span class="p">:</span> <span class="o">...</span>
-
-    <span class="nd">@ruleset</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">rule_cheats</span><span class="p">(</span><span class="n">uid</span><span class="p">:</span> <span class="n">String</span><span class="p">,</span> <span class="n">ins</span><span class="p">:</span> <span class="n">String</span><span class="p">,</span> <span class="n">argvec</span><span class="p">:</span> <span class="n">Vec</span><span class="p">[</span><span class="n">Term</span><span class="p">],</span> <span class="n">i</span><span class="p">:</span> <span class="n">i64</span><span class="p">):</span>
-        <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span>
-            <span class="n">eg</span><span class="o">.</span><span class="n">Region</span><span class="p">(</span><span class="n">uid</span><span class="p">,</span> <span class="n">ins</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">TermList</span><span class="p">(</span><span class="n">argvec</span><span class="p">))</span><span class="o">.</span><span class="n">begin</span><span class="p">()</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
-        <span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
-            <span class="n">argvec</span><span class="p">[</span><span class="n">i</span><span class="p">],</span>
-            <span class="c1"># given</span>
-            <span class="n">i</span> <span class="o">&lt;</span> <span class="n">argvec</span><span class="o">.</span><span class="n">length</span><span class="p">(),</span>
-        <span class="p">)</span>
-
-    <span class="nd">@ruleset</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">facts</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">z</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">fval</span><span class="p">:</span> <span class="n">f64</span><span class="p">,</span> <span class="n">io</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">):</span>
-        <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span><span class="n">eq</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Param</span><span class="p">(</span><span class="mi">0</span><span class="p">)))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
-            <span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">())</span>
-        <span class="p">)</span>
-
-        <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span><span class="n">eq</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralF64</span><span class="p">(</span><span class="n">fval</span><span class="p">)))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
-            <span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">())</span>
-        <span class="p">)</span>
-
-        <span class="k">for</span> <span class="n">fn</span> <span class="ow">in</span> <span class="p">[</span><span class="n">Tanh</span><span class="p">,</span> <span class="n">Sqrt</span><span class="p">,</span> <span class="n">Flt</span><span class="p">]:</span>
-            <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span><span class="n">eq</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">fn</span><span class="p">(</span><span class="n">y</span><span class="p">)))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span><span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">()))</span>
-
-        <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LoadGlobal</span><span class="p">(</span><span class="n">io</span><span class="p">,</span> <span class="s2">&quot;pi&quot;</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Pi</span><span class="p">())</span>
-
-        <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span><span class="n">eq</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Pi</span><span class="p">()))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span><span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">()))</span>
-
-    <span class="nd">@ruleset</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">rules_simplify_python</span><span class="p">(</span>
-        <span class="n">io</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">argvec</span><span class="p">:</span> <span class="n">Vec</span><span class="p">[</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">],</span> <span class="n">lhs</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">rhs</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span>
-    <span class="p">):</span>
-        <span class="k">def</span><span class="w"> </span><span class="nf">shortcut_call</span><span class="p">(</span><span class="n">call_target</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">func_target</span><span class="p">):</span>
-            <span class="k">return</span> <span class="n">rule</span><span class="p">(</span>
-                <span class="n">call</span> <span class="o">:=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Call</span><span class="p">(</span>
-                    <span class="n">func</span><span class="o">=</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LoadGlobal</span><span class="p">(</span><span class="n">io</span><span class="o">=</span><span class="n">io</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">call_target</span><span class="p">),</span>
-                    <span class="n">io</span><span class="o">=</span><span class="n">io</span><span class="p">,</span>
-                    <span class="n">args</span><span class="o">=</span><span class="n">eg</span><span class="o">.</span><span class="n">TermList</span><span class="p">(</span><span class="n">argvec</span><span class="p">),</span>
-                <span class="p">),</span>
-                <span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span>
-                <span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span>
-                <span class="n">eq</span><span class="p">(</span><span class="n">argvec</span><span class="o">.</span><span class="n">length</span><span class="p">())</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">i64</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span>
-            <span class="p">)</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
-                <span class="n">union</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">func_target</span><span class="p">(</span><span class="n">argvec</span><span class="p">[</span><span class="mi">0</span><span class="p">])),</span>
-                <span class="n">union</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">io</span><span class="p">),</span>
-                <span class="n">subsume</span><span class="p">(</span><span class="n">call</span><span class="p">),</span>
-            <span class="p">)</span>
-
-        <span class="k">yield</span> <span class="n">shortcut_call</span><span class="p">(</span><span class="s2">&quot;tanh&quot;</span><span class="p">,</span> <span class="n">Tanh</span><span class="p">)</span>
-        <span class="k">yield</span> <span class="n">shortcut_call</span><span class="p">(</span><span class="s2">&quot;sqrt&quot;</span><span class="p">,</span> <span class="n">Sqrt</span><span class="p">)</span>
-        <span class="k">yield</span> <span class="n">shortcut_call</span><span class="p">(</span><span class="s2">&quot;flt&quot;</span><span class="p">,</span> <span class="n">Flt</span><span class="p">)</span>
-
-        <span class="c1"># Remove IO</span>
-        <span class="k">def</span><span class="w"> </span><span class="nf">shortcut_io</span><span class="p">(</span><span class="n">fnio</span><span class="p">,</span> <span class="n">fnpure</span><span class="p">):</span>
-            <span class="k">return</span> <span class="n">rule</span><span class="p">(</span>
-                <span class="n">call</span> <span class="o">:=</span> <span class="n">fnio</span><span class="p">(</span><span class="n">io</span><span class="p">,</span> <span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">),</span>
-                <span class="n">IsFloat</span><span class="p">(</span><span class="n">lhs</span><span class="p">),</span>
-                <span class="n">IsFloat</span><span class="p">(</span><span class="n">rhs</span><span class="p">),</span>
-            <span class="p">)</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
-                <span class="n">union</span><span class="p">(</span><span class="n">res</span> <span class="o">:=</span> <span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">fnpure</span><span class="p">(</span><span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">)),</span>
-                <span class="n">union</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">io</span><span class="p">),</span>
-                <span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">res</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">()),</span>
-                <span class="n">subsume</span><span class="p">(</span><span class="n">call</span><span class="p">),</span>
-            <span class="p">)</span>
-
-        <span class="k">yield</span> <span class="n">shortcut_io</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">AddIO</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Add</span><span class="p">)</span>
-        <span class="k">yield</span> <span class="n">shortcut_io</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">MulIO</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Mul</span><span class="p">)</span>
-        <span class="k">yield</span> <span class="n">shortcut_io</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">DivIO</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Div</span><span class="p">)</span>
-        <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span>
-            <span class="n">call</span> <span class="o">:=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">PowIO</span><span class="p">(</span><span class="n">io</span><span class="p">,</span> <span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">),</span>
-            <span class="n">IsFloat</span><span class="p">(</span><span class="n">lhs</span><span class="p">),</span>
+    <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span><span class="n">eq</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Pi</span><span class="p">()))</span><span class="o">.</span><span class="n">then</span><span class="p">(</span><span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">()))</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Simplify Python expressions:</p>
+<ul class="simple">
+<li><p>handle pure vs impure (uses IO)</p></li>
+<li><p>simplify function calls</p></li>
+</ul>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@ruleset</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">rules_simplify_python</span><span class="p">(</span>
+    <span class="n">io</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">argvec</span><span class="p">:</span> <span class="n">Vec</span><span class="p">[</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">],</span> <span class="n">lhs</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">rhs</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span>
+<span class="p">):</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">shortcut_call</span><span class="p">(</span><span class="n">call_target</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">func_target</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">rule</span><span class="p">(</span>
+            <span class="n">call</span> <span class="o">:=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Call</span><span class="p">(</span>
+                <span class="n">func</span><span class="o">=</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LoadGlobal</span><span class="p">(</span><span class="n">io</span><span class="o">=</span><span class="n">io</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">call_target</span><span class="p">),</span>
+                <span class="n">io</span><span class="o">=</span><span class="n">io</span><span class="p">,</span>
+                <span class="n">args</span><span class="o">=</span><span class="n">eg</span><span class="o">.</span><span class="n">TermList</span><span class="p">(</span><span class="n">argvec</span><span class="p">),</span>
+            <span class="p">),</span>
+            <span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span>
+            <span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span>
+            <span class="n">eq</span><span class="p">(</span><span class="n">argvec</span><span class="o">.</span><span class="n">length</span><span class="p">())</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">i64</span><span class="p">(</span><span class="mi">1</span><span class="p">)),</span>
         <span class="p">)</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
-            <span class="n">union</span><span class="p">(</span><span class="n">res</span> <span class="o">:=</span> <span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">)),</span>
+            <span class="n">union</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">func_target</span><span class="p">(</span><span class="n">argvec</span><span class="p">[</span><span class="mi">0</span><span class="p">])),</span>
+            <span class="n">union</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">io</span><span class="p">),</span>
+            <span class="n">subsume</span><span class="p">(</span><span class="n">call</span><span class="p">),</span>
+        <span class="p">)</span>
+
+    <span class="k">yield</span> <span class="n">shortcut_call</span><span class="p">(</span><span class="s2">&quot;tanh&quot;</span><span class="p">,</span> <span class="n">Tanh</span><span class="p">)</span>
+    <span class="k">yield</span> <span class="n">shortcut_call</span><span class="p">(</span><span class="s2">&quot;sqrt&quot;</span><span class="p">,</span> <span class="n">Sqrt</span><span class="p">)</span>
+    <span class="k">yield</span> <span class="n">shortcut_call</span><span class="p">(</span><span class="s2">&quot;flt&quot;</span><span class="p">,</span> <span class="n">Flt</span><span class="p">)</span>
+
+    <span class="c1"># Remove IO</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">shortcut_io</span><span class="p">(</span><span class="n">fnio</span><span class="p">,</span> <span class="n">fnpure</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">rule</span><span class="p">(</span>
+            <span class="n">call</span> <span class="o">:=</span> <span class="n">fnio</span><span class="p">(</span><span class="n">io</span><span class="p">,</span> <span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">),</span>
+            <span class="n">IsFloat</span><span class="p">(</span><span class="n">lhs</span><span class="p">),</span>
+            <span class="n">IsFloat</span><span class="p">(</span><span class="n">rhs</span><span class="p">),</span>
+        <span class="p">)</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+            <span class="n">union</span><span class="p">(</span><span class="n">res</span> <span class="o">:=</span> <span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">fnpure</span><span class="p">(</span><span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">)),</span>
             <span class="n">union</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">io</span><span class="p">),</span>
             <span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">res</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">()),</span>
+            <span class="n">subsume</span><span class="p">(</span><span class="n">call</span><span class="p">),</span>
         <span class="p">)</span>
 
-        <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">Flt</span><span class="p">(</span><span class="n">rhs</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">rhs</span><span class="p">,</span> <span class="n">IsFloat</span><span class="p">(</span><span class="n">rhs</span><span class="p">))</span>
+    <span class="k">yield</span> <span class="n">shortcut_io</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">AddIO</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Add</span><span class="p">)</span>
+    <span class="k">yield</span> <span class="n">shortcut_io</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">MulIO</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Mul</span><span class="p">)</span>
+    <span class="k">yield</span> <span class="n">shortcut_io</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">DivIO</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Div</span><span class="p">)</span>
+    <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span>
+        <span class="n">call</span> <span class="o">:=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">PowIO</span><span class="p">(</span><span class="n">io</span><span class="p">,</span> <span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">),</span>
+        <span class="n">IsFloat</span><span class="p">(</span><span class="n">lhs</span><span class="p">),</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+        <span class="n">union</span><span class="p">(</span><span class="n">res</span> <span class="o">:=</span> <span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">1</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">lhs</span><span class="p">,</span> <span class="n">rhs</span><span class="p">)),</span>
+        <span class="n">union</span><span class="p">(</span><span class="n">call</span><span class="o">.</span><span class="n">getPort</span><span class="p">(</span><span class="mi">0</span><span class="p">))</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span><span class="n">io</span><span class="p">),</span>
+        <span class="n">set_</span><span class="p">(</span><span class="n">IsFloat</span><span class="p">(</span><span class="n">res</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">Unit</span><span class="p">()),</span>
+    <span class="p">)</span>
 
-    <span class="nd">@ruleset</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">pade44_tanh_expansion</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="n">Term</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">Term</span><span class="p">,</span> <span class="n">z</span><span class="p">:</span> <span class="n">Term</span><span class="p">):</span>
-        <span class="n">flt</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">f</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralF64</span><span class="p">(</span><span class="n">f64</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">f</span><span class="p">)))</span>
-        <span class="n">liti64</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span>
-        <span class="nb">pow</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span>
-        <span class="n">mul</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Mul</span>
-        <span class="n">add</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Add</span>
-        <span class="n">div</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Div</span>
-        <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">Tanh</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
-            <span class="n">div</span><span class="p">(</span>
-                <span class="n">add</span><span class="p">(</span><span class="n">mul</span><span class="p">(</span><span class="n">flt</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span> <span class="nb">pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">liti64</span><span class="p">(</span><span class="mi">3</span><span class="p">))),</span> <span class="n">mul</span><span class="p">(</span><span class="n">flt</span><span class="p">(</span><span class="mi">105</span><span class="p">),</span> <span class="n">x</span><span class="p">)),</span>
+    <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">Flt</span><span class="p">(</span><span class="n">rhs</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">rhs</span><span class="p">,</span> <span class="n">IsFloat</span><span class="p">(</span><span class="n">rhs</span><span class="p">))</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Pade Approximation for Tanh. The following approximation is used :</p>
+<div class="math notranslate nohighlight">
+\[
+\tanh(x) \approx \frac{10x^3 + 105x}{x^4 + 45x^2 + 105}
+\]</div>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@ruleset</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">pade44_tanh_expansion</span><span class="p">(</span><span class="n">x</span><span class="p">:</span> <span class="n">Term</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">Term</span><span class="p">,</span> <span class="n">z</span><span class="p">:</span> <span class="n">Term</span><span class="p">):</span>
+    <span class="n">flt</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">f</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralF64</span><span class="p">(</span><span class="n">f64</span><span class="p">(</span><span class="nb">float</span><span class="p">(</span><span class="n">f</span><span class="p">)))</span>
+    <span class="n">liti64</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span>
+    <span class="nb">pow</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span>
+    <span class="n">mul</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Mul</span>
+    <span class="n">add</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Add</span>
+    <span class="n">div</span> <span class="o">=</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Div</span>
+    <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">Tanh</span><span class="p">(</span><span class="n">x</span><span class="p">))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
+        <span class="n">div</span><span class="p">(</span>
+            <span class="n">add</span><span class="p">(</span><span class="n">mul</span><span class="p">(</span><span class="n">flt</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span> <span class="nb">pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">liti64</span><span class="p">(</span><span class="mi">3</span><span class="p">))),</span> <span class="n">mul</span><span class="p">(</span><span class="n">flt</span><span class="p">(</span><span class="mi">105</span><span class="p">),</span> <span class="n">x</span><span class="p">)),</span>
+            <span class="n">add</span><span class="p">(</span>
                 <span class="n">add</span><span class="p">(</span>
-                    <span class="n">add</span><span class="p">(</span>
-                        <span class="nb">pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">liti64</span><span class="p">(</span><span class="mi">4</span><span class="p">)),</span> <span class="n">mul</span><span class="p">(</span><span class="n">flt</span><span class="p">(</span><span class="mi">45</span><span class="p">),</span> <span class="nb">pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">liti64</span><span class="p">(</span><span class="mi">2</span><span class="p">)))</span>
-                    <span class="p">),</span>
-                    <span class="n">flt</span><span class="p">(</span><span class="mi">105</span><span class="p">),</span>
+                    <span class="nb">pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">liti64</span><span class="p">(</span><span class="mi">4</span><span class="p">)),</span> <span class="n">mul</span><span class="p">(</span><span class="n">flt</span><span class="p">(</span><span class="mi">45</span><span class="p">),</span> <span class="nb">pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">liti64</span><span class="p">(</span><span class="mi">2</span><span class="p">)))</span>
                 <span class="p">),</span>
+                <span class="n">flt</span><span class="p">(</span><span class="mi">105</span><span class="p">),</span>
+            <span class="p">),</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Simplify <code class="docutils literal notranslate"><span class="pre">x**i</span></code> into multiplications.</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@ruleset</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">expand_pow</span><span class="p">(</span>
+    <span class="n">x</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">z</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">term</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">i</span><span class="p">:</span> <span class="n">i64</span>
+<span class="p">):</span>
+    <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span>
+        <span class="n">eq</span><span class="p">(</span><span class="n">term</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span><span class="p">(</span><span class="n">i</span><span class="p">))),</span>
+        <span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">),</span>
+        <span class="n">i</span> <span class="o">&gt;</span> <span class="n">i64</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
+        <span class="n">union</span><span class="p">(</span><span class="n">term</span><span class="p">)</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span>
+            <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Mul</span><span class="p">(</span>
+                <span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span><span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="n">i64</span><span class="p">(</span><span class="mi">1</span><span class="p">)))</span>
             <span class="p">)</span>
         <span class="p">)</span>
-
-    <span class="nd">@ruleset</span>
-    <span class="k">def</span><span class="w"> </span><span class="nf">expand_pow</span><span class="p">(</span>
-        <span class="n">x</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">y</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">z</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">term</span><span class="p">:</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="p">,</span> <span class="n">i</span><span class="p">:</span> <span class="n">i64</span>
-    <span class="p">):</span>
-        <span class="k">yield</span> <span class="n">rule</span><span class="p">(</span>
-            <span class="n">eq</span><span class="p">(</span><span class="n">term</span><span class="p">)</span><span class="o">.</span><span class="n">to</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span><span class="p">(</span><span class="n">i</span><span class="p">))),</span>
-            <span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">),</span>
-            <span class="n">i</span> <span class="o">&gt;</span> <span class="n">i64</span><span class="p">(</span><span class="mi">1</span><span class="p">),</span>
-        <span class="p">)</span><span class="o">.</span><span class="n">then</span><span class="p">(</span>
-            <span class="n">union</span><span class="p">(</span><span class="n">term</span><span class="p">)</span><span class="o">.</span><span class="n">with_</span><span class="p">(</span>
-                <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Mul</span><span class="p">(</span>
-                    <span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span><span class="p">(</span><span class="n">i</span> <span class="o">-</span> <span class="n">i64</span><span class="p">(</span><span class="mi">1</span><span class="p">)))</span>
-                <span class="p">)</span>
-            <span class="p">)</span>
-        <span class="p">)</span>
-        <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span><span class="p">(</span><span class="mi">1</span><span class="p">)))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
-            <span class="n">x</span><span class="p">,</span>
-            <span class="c1"># given</span>
-            <span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">),</span>
-        <span class="p">)</span>
-        <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span><span class="p">(</span><span class="mi">0</span><span class="p">)))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
-            <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralF64</span><span class="p">(</span><span class="mf">1.0</span><span class="p">),</span>
-            <span class="c1"># given</span>
-            <span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">),</span>
-        <span class="p">)</span>
-
-    <span class="k">return</span> <span class="p">(</span>
+    <span class="p">)</span>
+    <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span><span class="p">(</span><span class="mi">1</span><span class="p">)))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
+        <span class="n">x</span><span class="p">,</span>
+        <span class="c1"># given</span>
+        <span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">),</span>
+    <span class="p">)</span>
+    <span class="k">yield</span> <span class="n">rewrite</span><span class="p">(</span><span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">Pow</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralI64</span><span class="p">(</span><span class="mi">0</span><span class="p">)))</span><span class="o">.</span><span class="n">to</span><span class="p">(</span>
+        <span class="n">eg</span><span class="o">.</span><span class="n">Term</span><span class="o">.</span><span class="n">LiteralF64</span><span class="p">(</span><span class="mf">1.0</span><span class="p">),</span>
+        <span class="c1"># given</span>
+        <span class="n">IsFloat</span><span class="p">(</span><span class="n">x</span><span class="p">),</span>
+    <span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</div>
+<p>Combine the rules:</p>
+<div class="cell docutils container">
+<div class="cell_input docutils container">
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">extra_ruleset</span> <span class="o">=</span> <span class="p">(</span>
         <span class="n">rule_cheats</span>
         <span class="o">|</span> <span class="n">facts</span>
         <span class="o">|</span> <span class="n">rules_simplify_python</span>
@@ -908,17 +982,18 @@ $0 = Region[640] &lt;- !io=IO a=(ArgRef 0 a)
 </div>
 </div>
 </section>
-<section id="equality-saturation">
-<h3>Equality Saturation<a class="headerlink" href="#equality-saturation" title="Link to this heading">#</a></h3>
+<section id="running-equality-saturation">
+<h3>Running Equality Saturation<a class="headerlink" href="#running-equality-saturation" title="Link to this heading">#</a></h3>
+<p>We run equality saturation, applying rewrite rules to optimize the expression.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">egraph</span> <span class="o">=</span> <span class="n">equality_saturation</span><span class="p">(</span><span class="n">root</span><span class="p">,</span> <span class="o">*</span><span class="n">extra_statements</span><span class="p">,</span> <span class="n">ruleset</span><span class="o">=</span><span class="n">extra_ruleset</span><span class="p">())</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">egraph</span> <span class="o">=</span> <span class="n">equality_saturation</span><span class="p">(</span><span class="n">root</span><span class="p">,</span> <span class="o">*</span><span class="n">extra_statements</span><span class="p">,</span> <span class="n">ruleset</span><span class="o">=</span><span class="n">extra_ruleset</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>saturation time 0.011656045913696289
-extraction time 0.002445220947265625
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>saturation time 0.012064933776855469
+extraction time 0.001917123794555664
 -------------------------------simplified output--------------------------------
 _Term_1 = Term.Mul(
     Sqrt(Term.Div(Flt(Term.LiteralI64(2)), Pi())), Term.Add(Term.Param(0), Term.Mul(Term.LiteralF64(0.044715), Term.Mul(Term.Param(0), Term.Mul(Term.Param(0), Term.Param(0)))))
@@ -949,10 +1024,13 @@ GraphRoot(
 </div>
 </div>
 </div>
-<p>The result above is free of <code class="docutils literal notranslate"><span class="pre">Tanh()</span></code>.</p>
+<p>After this step, <code class="docutils literal notranslate"><span class="pre">Tanh()</span></code> should be eliminated.</p>
 </section>
-<section id="run-custom-cost-based-extraction-egraph-rvsdg">
-<h3>Run Custom Cost-based Extraction. (EGraph -&gt; RVSDG)<a class="headerlink" href="#run-custom-cost-based-extraction-egraph-rvsdg" title="Link to this heading">#</a></h3>
+<section id="extracting-an-optimized-representation">
+<h3>Extracting an Optimized Representation<a class="headerlink" href="#extracting-an-optimized-representation" title="Link to this heading">#</a></h3>
+<p>After saturation, we extract an optimized RVSDG representation from the E-Graph.
+An extended converter is needed because new terms were introduced into the
+E-Graph earlier.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Extraction</span>
@@ -1007,8 +1085,8 @@ GraphRoot(
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>custom cost-model greedy extraction: 0.0015680789947509766
-(&#39;Func&#39;, &#39;transformed_geglu&#39;, (&#39;Args&#39;, (&#39;ArgSpec&#39;, &#39;a&#39;, (&#39;PyNone&#39;,))), (&#39;Unpack&#39;, (&#39;RegionEnd&#39;, (&#39;RegionBegin&#39;, &#39;!io a&#39;, (&#39;IO&#39;,), (&#39;ArgRef&#39;, 0, &#39;0&#39;)), &#39;!io !ret a result&#39;, (&#39;IO&#39;,), (&#39;PyBinOpPure&#39;, &#39;*&#39;, (&#39;PyBinOpPure&#39;, &#39;*&#39;, &lt;Expr &#39;PyFloat&#39; [1240] @0x10704d2b0&gt;, &lt;Expr &#39;ArgRef&#39; [1229] @0x10704d2b0&gt;), &lt;Expr &#39;PyBinOpPure&#39; [1413] @0x10704d2b0&gt;), (&#39;PyBinOpPure&#39;, &#39;*&#39;, (&#39;PyBinOpPure&#39;, &#39;*&#39;, &lt;Expr &#39;PyFloat&#39; [1240] @0x10704d2b0&gt;, &lt;Expr &#39;ArgRef&#39; [1229] @0x10704d2b0&gt;), &lt;Expr &#39;PyBinOpPure&#39; [1413] @0x10704d2b0&gt;), (&#39;ArgRef&#39;, 0, &#39;0&#39;)), 1))
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>custom cost-model greedy extraction: 0.0016210079193115234
+(&#39;Func&#39;, &#39;transformed_geglu&#39;, (&#39;Args&#39;, (&#39;ArgSpec&#39;, &#39;a&#39;, (&#39;PyNone&#39;,))), (&#39;Unpack&#39;, (&#39;RegionEnd&#39;, (&#39;RegionBegin&#39;, &#39;!io a&#39;, (&#39;IO&#39;,), (&#39;ArgRef&#39;, 0, &#39;0&#39;)), &#39;!io !ret a result&#39;, (&#39;IO&#39;,), (&#39;PyBinOpPure&#39;, &#39;*&#39;, (&#39;PyBinOpPure&#39;, &#39;*&#39;, &lt;Expr &#39;PyFloat&#39; [1240] @0x118ac0530&gt;, &lt;Expr &#39;ArgRef&#39; [1229] @0x118ac0530&gt;), &lt;Expr &#39;PyBinOpPure&#39; [1413] @0x118ac0530&gt;), (&#39;PyBinOpPure&#39;, &#39;*&#39;, (&#39;PyBinOpPure&#39;, &#39;*&#39;, &lt;Expr &#39;PyFloat&#39; [1240] @0x118ac0530&gt;, &lt;Expr &#39;ArgRef&#39; [1229] @0x118ac0530&gt;), &lt;Expr &#39;PyBinOpPure&#39; [1413] @0x118ac0530&gt;), (&#39;ArgRef&#39;, 0, &#39;0&#39;)), 1))
 cost = 1075.0
 transformed_geglu = Func (Args (ArgSpec &#39;a&#39; (PyNone)))
 $0 = Region[1234] &lt;- !io=IO a=(ArgRef 0 0)
@@ -1052,8 +1130,9 @@ $0 = Region[1234] &lt;- !io=IO a=(ArgRef 0 0)
 </div>
 </div>
 </section>
-<section id="test-extracted-code-with-llvm-python-capi-backend">
-<h3>Test extracted code with LLVM Python CAPI backend<a class="headerlink" href="#test-extracted-code-with-llvm-python-capi-backend" title="Link to this heading">#</a></h3>
+<section id="emit-llvm-to-verify">
+<h3>Emit LLVM to Verify<a class="headerlink" href="#emit-llvm-to-verify" title="Link to this heading">#</a></h3>
+<p>We execute the optimized function using LLVM with Python C-API calls.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">ns</span> <span class="o">=</span> <span class="p">{</span>
@@ -1075,8 +1154,9 @@ $0 = Region[1234] &lt;- !io=IO a=(ArgRef 0 0)
 </div>
 </div>
 </section>
-<section id="use-mlir-to-get-omp-ufunc-version">
-<h3>Use MLIR to get OMP ufunc version<a class="headerlink" href="#use-mlir-to-get-omp-ufunc-version" title="Link to this heading">#</a></h3>
+<section id="parallel-execution-via-mlir">
+<h3>Parallel Execution via MLIR<a class="headerlink" href="#parallel-execution-via-mlir" title="Link to this heading">#</a></h3>
+<p>Finally, we validate the MLIR-based OMP ufunc version on an array of inputs.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># MLIR output</span>
@@ -1340,14 +1420,15 @@ func.func @do_work(%arg0: memref&lt;?xf64&gt;, %arg1: memref&lt;?xf64&gt;) attri
 </ul>
 </li>
 <li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#start-of-geglu-approximation-demo">Start of GEGLU Approximation demo</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#define-geglu-the-target-function">Define GEGLU. The Target function.</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#get-rvsdg-representation">Get RVSDG representation</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#convert-rvsdg-to-egraph">Convert RVSDG to EGraph</a></li>
 <li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#prepare-for-equality-saturation">Prepare for Equality Saturation</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#application-specific-rules">Application specific rules</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#equality-saturation">Equality Saturation</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#run-custom-cost-based-extraction-egraph-rvsdg">Run Custom Cost-based Extraction. (EGraph -&gt; RVSDG)</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#test-extracted-code-with-llvm-python-capi-backend">Test extracted code with LLVM Python CAPI backend</a></li>
-<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#use-mlir-to-get-omp-ufunc-version">Use MLIR to get OMP ufunc version</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#defining-rewrite-rules-for-optimization">Defining Rewrite Rules for Optimization</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#running-equality-saturation">Running Equality Saturation</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#extracting-an-optimized-representation">Extracting an Optimized Representation</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#emit-llvm-to-verify">Emit LLVM to Verify</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#parallel-execution-via-mlir">Parallel Execution via MLIR</a></li>
 </ul>
 </li>
 </ul>
