@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
 
 import numpy as np
-from egglog import EGraph, String, eq, var
+from egglog import EGraph, String, eq
 
 from sealir import ase, rvsdg
 from sealir.eqsat.rvsdg_convert import egraph_conversion
@@ -24,6 +23,7 @@ from sealir.eqsat.rvsdg_eqsat import (
 )
 from sealir.eqsat.rvsdg_extract import egraph_extraction
 from sealir.llvm_pyapi_backend import llvm_codegen
+from sealir.mlir_backend import Compiler, call_ufunc
 
 
 def read_env(v: str):
@@ -107,8 +107,6 @@ def saturate(egraph: EGraph, ruleset):
     if DEBUG:
         # Borrowed from egraph.saturate(schedule)
 
-        from pprint import pprint
-
         from egglog.visualizer_widget import VisualizerWidget
 
         def to_json() -> str:
@@ -178,10 +176,8 @@ def test_geglu_tanh_approx():
 
     def extra_ruleset():
         from egglog import (
-            String,
             Unit,
             Vec,
-            delete,
             f64,
             function,
             i64,
@@ -344,7 +340,7 @@ def test_geglu_tanh_approx():
 
     egraph = run(root, *extra_statements, ruleset=extra_ruleset())
     # Extraction
-    from sealir.eqsat.rvsdg_extract import CostModel, EGraphToRVSDG
+    from sealir.eqsat.rvsdg_extract import EGraphToRVSDG
 
     class ExtendedConverter(EGraphToRVSDG):
         def handle_Term(self, op: str, children: dict | list, grm):
@@ -407,8 +403,6 @@ def test_geglu_tanh_approx():
 
     mlir_src = generate_mlir(extracted)
     print(mlir_src)
-
-    from sealir.mlir_backend import Compiler, call_ufunc
 
     comp_opts = {}
     # comp_opts={"debug": True, "print_cmds": True}

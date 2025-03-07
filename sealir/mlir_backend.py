@@ -3,7 +3,6 @@ import ctypes.util
 import os
 import subprocess
 import sys
-import types as pytypes
 from functools import cache
 from tempfile import NamedTemporaryFile
 from types import MappingProxyType
