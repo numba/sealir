@@ -6,7 +6,7 @@
 
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.18.1: http://docutils.sourceforge.net/" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <title>Lambda Calculus Encoding and Grammar &#8212; SealIR</title>
   
@@ -28,13 +28,13 @@
 <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-brands-400.woff2" />
 <link rel="preload" as="font" type="font/woff2" crossorigin href="_static/vendor/fontawesome/6.5.2/webfonts/fa-regular-400.woff2" />
 
-    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b76e3c8a" />
-    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=a3416100" />
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=eba8b062" />
     <link rel="stylesheet" type="text/css" href="_static/togglebutton.css?v=13237357" />
     <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
     <link rel="stylesheet" type="text/css" href="_static/mystnb.4510f1fc1dee50b3e5859aac5469c37c29e427902b24a333a5f9fcb2f0b3ac41.css?v=be8a1c11" />
     <link rel="stylesheet" type="text/css" href="_static/sphinx-thebe.css?v=4fa983c6" />
-    <link rel="stylesheet" type="text/css" href="_static/design-style.1e8bd061cd6da7fc9cf755528e8ffc24.min.css?v=0a3b3ea7" />
+    <link rel="stylesheet" type="text/css" href="_static/sphinx-design.min.css?v=95c83b7e" />
   
   <!-- Pre-loaded scripts that we'll load fully later -->
   <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=dfe6caa3a7d634c4db9b" />
@@ -60,8 +60,7 @@
     <script>DOCUMENTATION_OPTIONS.pagename = 'lambda';</script>
     <link rel="index" title="Index" href="genindex.html" />
     <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="RVSDG? Numba Intermediate Language (NIL)?" href="rvsdg.html" />
-    <link rel="prev" title="Introduction" href="intro.html" />
+    <link rel="prev" title="GEGLU Approximation" href="demo_geglu_approx_mlir.html" />
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <meta name="docsearch:language" content="en"/>
   </head>
@@ -179,9 +178,17 @@
                 </a>
             </li>
         </ul>
-        <ul class="current nav bd-sidenav">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">Key concepts</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="traverse.html"><code class="docutils literal notranslate"><span class="pre">ase.Traverse</span></code></a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Demos</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="demo_geglu_approx_mlir.html">GEGLU Approximation</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">Old and additional stuff</span></p>
+<ul class="current nav bd-sidenav">
 <li class="toctree-l1 current active"><a class="current reference internal" href="#">Lambda Calculus Encoding and Grammar</a></li>
-<li class="toctree-l1"><a class="reference internal" href="rvsdg.html">RVSDG? Numba Intermediate Language (NIL)?</a></li>
 </ul>
 
     </div>
@@ -362,7 +369,7 @@ document.write(`
 <p>It uses De Bruijn index to achieve nameless reference to values. A <code class="docutils literal notranslate"><span class="pre">(Arg</span> <span class="pre">N)</span></code> refers to the Nth enclosing lambda abstraction.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">sealir</span> <span class="kn">import</span> <span class="n">lam</span><span class="p">,</span> <span class="n">ase</span><span class="p">,</span> <span class="n">grammar</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">sealir</span><span class="w"> </span><span class="kn">import</span> <span class="n">lam</span><span class="p">,</span> <span class="n">ase</span><span class="p">,</span> <span class="n">grammar</span>
 </pre></div>
 </div>
 </div>
@@ -370,24 +377,24 @@ document.write(`
 <p>Grammar can be extended to include user defined node types. To do so, user can define a new <code class="docutils literal notranslate"><span class="pre">grammar.Rule</span></code> class as the root of the grammar and subclass the root with additional rules for specific node types.</p>
 <div class="cell docutils container">
 <div class="cell_input docutils container">
-<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">class</span> <span class="nc">_Val</span><span class="p">(</span><span class="n">grammar</span><span class="o">.</span><span class="n">Rule</span><span class="p">):</span>
+<div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">class</span><span class="w"> </span><span class="nc">_Val</span><span class="p">(</span><span class="n">grammar</span><span class="o">.</span><span class="n">Rule</span><span class="p">):</span>
     <span class="k">pass</span>
 
-<span class="k">class</span> <span class="nc">Num</span><span class="p">(</span><span class="n">_Val</span><span class="p">):</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Num</span><span class="p">(</span><span class="n">_Val</span><span class="p">):</span>
     <span class="c1"># (Num int)</span>
     <span class="n">value</span><span class="p">:</span> <span class="nb">int</span>
 
-<span class="k">class</span> <span class="nc">_BinOp</span><span class="p">(</span><span class="n">_Val</span><span class="p">):</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">_BinOp</span><span class="p">(</span><span class="n">_Val</span><span class="p">):</span>
     <span class="c1"># (_BinOp lhs rhs)</span>
     <span class="n">lhs</span><span class="p">:</span> <span class="n">ase</span><span class="o">.</span><span class="n">SExpr</span>
     <span class="n">rhs</span><span class="p">:</span> <span class="n">ase</span><span class="o">.</span><span class="n">SExpr</span>
 
-<span class="k">class</span> <span class="nc">Add</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
-<span class="k">class</span> <span class="nc">Sub</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
-<span class="k">class</span> <span class="nc">Mul</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Add</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Sub</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Mul</span><span class="p">(</span><span class="n">_BinOp</span><span class="p">):</span> <span class="o">...</span>
 
 <span class="c1"># Build the grammar that combines the builtin lambda-calculus grammar</span>
-<span class="k">class</span> <span class="nc">Grammar</span><span class="p">(</span><span class="n">grammar</span><span class="o">.</span><span class="n">Grammar</span><span class="p">):</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">Grammar</span><span class="p">(</span><span class="n">grammar</span><span class="o">.</span><span class="n">Grammar</span><span class="p">):</span>
     <span class="n">start</span> <span class="o">=</span> <span class="n">lam</span><span class="o">.</span><span class="n">LamGrammar</span><span class="o">.</span><span class="n">start</span> <span class="o">|</span> <span class="n">_Val</span>
 </pre></div>
 </div>
@@ -399,7 +406,7 @@ document.write(`
 <div class="highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="n">grm</span> <span class="o">=</span> <span class="n">Grammar</span><span class="p">(</span><span class="n">ase</span><span class="o">.</span><span class="n">Tape</span><span class="p">())</span>
 
 <span class="nd">@lam</span><span class="o">.</span><span class="n">lam_func</span><span class="p">(</span><span class="n">grm</span><span class="p">)</span>
-<span class="k">def</span> <span class="nf">func_body</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">func_body</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
     <span class="n">a</span> <span class="o">=</span> <span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Mul</span><span class="p">(</span><span class="n">lhs</span><span class="o">=</span><span class="n">x</span><span class="p">,</span> <span class="n">rhs</span><span class="o">=</span><span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Num</span><span class="p">(</span><span class="mi">2</span><span class="p">))))</span>
     <span class="n">b</span> <span class="o">=</span> <span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Add</span><span class="p">(</span><span class="n">lhs</span><span class="o">=</span><span class="n">a</span><span class="p">,</span> <span class="n">rhs</span><span class="o">=</span><span class="n">x</span><span class="p">))</span>
     <span class="n">c</span> <span class="o">=</span> <span class="n">grm</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">Sub</span><span class="p">(</span><span class="n">lhs</span><span class="o">=</span><span class="n">a</span><span class="p">,</span> <span class="n">rhs</span><span class="o">=</span><span class="n">b</span><span class="p">))</span>
@@ -416,7 +423,7 @@ document.write(`
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>&lt;Expr &#39;Lam&#39; [29] @0x10d7f2e40&gt;
+<div class="output text_plain highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>&lt;Expr &#39;Lam&#39; [29] @0x10458b290&gt;
 </pre></div>
 </div>
 </div>
@@ -445,7 +452,7 @@ document.write(`
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10d7f2e40
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10458b290
 |      0 | &lt;0: none&gt;
 |      1 | Arg 0
 |      5 | Num 2
@@ -465,7 +472,8 @@ document.write(`
 </div>
 </div>
 <div class="cell_output docutils container">
-<img alt="_images/d8569ec5a8673a643354f9579b950ea72dfae2b7f1bb0cc550760f8ff06f3319.svg" src="_images/d8569ec5a8673a643354f9579b950ea72dfae2b7f1bb0cc550760f8ff06f3319.svg" /></div>
+<img alt="_images/d8569ec5a8673a643354f9579b950ea72dfae2b7f1bb0cc550760f8ff06f3319.svg" src="_images/d8569ec5a8673a643354f9579b950ea72dfae2b7f1bb0cc550760f8ff06f3319.svg" />
+</div>
 </div>
 </section>
 <section id="abstraction-pass">
@@ -508,7 +516,7 @@ document.write(`
 </div>
 </div>
 <div class="cell_output docutils container">
-<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10d7f2e40
+<div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>Tape @0x10458b290
 |      0 | &lt;0: none&gt;
 |      1 | Arg 0
 |      5 | Num 2
@@ -562,7 +570,8 @@ document.write(`
 </div>
 </div>
 <div class="cell_output docutils container">
-<img alt="_images/34c6e151045cb6f5d81c212679761a0d85d072d4940d27eb71a4aa5b8bdcba42.svg" src="_images/34c6e151045cb6f5d81c212679761a0d85d072d4940d27eb71a4aa5b8bdcba42.svg" /></div>
+<img alt="_images/34c6e151045cb6f5d81c212679761a0d85d072d4940d27eb71a4aa5b8bdcba42.svg" src="_images/34c6e151045cb6f5d81c212679761a0d85d072d4940d27eb71a4aa5b8bdcba42.svg" />
+</div>
 </div>
 </section>
 <section id="beta-reduction">
@@ -605,10 +614,10 @@ let $17 = App (Num 123) $15
 <div class="cell_output docutils container">
 <div class="output stream highlight-myst-ansi notranslate"><div class="highlight"><pre><span></span>let $12 = λ {
   let $7 = λ {
-    let $2 = Sub (Arg 1) (Arg 0)
-    let $4 = Mul (Arg 0) $2
+    let $2 = Sub (Arg 1) (Num 123)
+    let $4 = Mul (Num 123) $2
   }
-  let $8 = Add (Arg 0) (Arg 1)
+  let $8 = Add (Num 123) (Arg 1)
   let $9 = App $8 $7
 }
 let $13 = Mul (Num 123) (Num 2)
@@ -651,22 +660,13 @@ let $14 = App $13 $12
                   
 <div class="prev-next-area">
     <a class="left-prev"
-       href="intro.html"
+       href="demo_geglu_approx_mlir.html"
        title="previous page">
       <i class="fa-solid fa-angle-left"></i>
       <div class="prev-next-info">
         <p class="prev-next-subtitle">previous</p>
-        <p class="prev-next-title">Introduction</p>
+        <p class="prev-next-title">GEGLU Approximation</p>
       </div>
-    </a>
-    <a class="right-next"
-       href="rvsdg.html"
-       title="next page">
-      <div class="prev-next-info">
-        <p class="prev-next-subtitle">next</p>
-        <p class="prev-next-title">RVSDG? Numba Intermediate Language (NIL)?</p>
-      </div>
-      <i class="fa-solid fa-angle-right"></i>
     </a>
 </div>
                 </footer>
