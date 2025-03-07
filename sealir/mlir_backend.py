@@ -164,50 +164,28 @@ class Compiler:
 
         self.ee = create_execution_engine()
         self._mlir_compiler_options = mlir_compiler_options
+        self.output_logs = []
 
     def run_backend(self, mlir_src, symbol):
         mlir_compiler = MLIRCompiler(**self._mlir_compiler_options)
         mlir_omp = mlir_compiler.to_llvm_dialect_with_omp_target(mlir_src)
+
         llvm_ir = mlir_compiler.mlir_translate_to_llvm_ir(mlir_omp)
         fdata = mlir_compiler.llvm_ir_to_bitcode(llvm_ir)
         mod = llvm.parse_bitcode(fdata)
         mod = compile_mod(self.ee, mod)
+
+        self.output_logs.append(
+            dict(
+                mlir_optimized=mlir_omp,
+            )
+        )
 
         address = self.ee.get_function_address(symbol)
         assert (
             address
         ), "Lookup for compiled function address is returning NULL."
         return address
-
-
-class Dispatcher:
-    def __init__(self, py_func):
-        self.py_func = py_func
-        self._compiled_func = None
-        self._compiler = None
-
-    def compile(self, sig):
-        self._compiler = Compiler()
-        binary = self._compiler.jit_compile(self.py_func, sig)
-        self._compiled_func = binary
-        return binary
-
-    def __call__(self, *args, **kwargs):
-        assert not kwargs
-        if self._compiled_func is None:
-            self.compile("TODO: work out signature from types in *args")
-
-        out = np.empty_like(args[0])
-        all_args = *args, out
-        args_as_memref = [
-            as_memref_descriptor(x, ctypes.c_double) for x in all_args
-        ]
-        prototype = ctypes.CFUNCTYPE(
-            None, *[ctypes.POINTER(type(x)) for x in args_as_memref]
-        )
-        cfunc = prototype(self._compiled_func)
-        cfunc(*[ctypes.byref(x) for x in args_as_memref])
-        return out
 
 
 def call_ufunc(addr: int, *, args, out):
