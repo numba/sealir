@@ -148,7 +148,7 @@ def test_geglu_tanh_approx():
 
     def udt(a):
         result = (
-            flt(0.5)
+            0.5
             * a
             * (
                 flt(1)
@@ -174,18 +174,6 @@ def test_geglu_tanh_approx():
 
     extra_statements = [
         DoPartialEval(env, egfunc),
-    ]
-
-    checks = [
-        # eq(root).to(
-        #     GraphRoot(
-        #         Term.Func(
-        #             str(rvsdg_expr._handle),
-        #             var("fname", String),
-        #             PartialEvaluated(Value.ConstI64(134)),
-        #         )
-        #     )
-        # ),
     ]
 
     def extra_ruleset():
@@ -298,6 +286,8 @@ def test_geglu_tanh_approx():
                 set_(IsFloat(res)).to(Unit()),
             )
 
+            yield rewrite(Flt(rhs)).to(rhs, IsFloat(rhs))
+
         @ruleset
         def pade44_tanh_expansion(x: Term, y: Term, z: Term):
             flt = lambda f: eg.Term.LiteralF64(f64(float(f)))
@@ -352,9 +342,7 @@ def test_geglu_tanh_approx():
             | expand_pow
         )
 
-    egraph = run(
-        root, *extra_statements, checks=checks, ruleset=extra_ruleset()
-    )
+    egraph = run(root, *extra_statements, ruleset=extra_ruleset())
     # Extraction
     from sealir.eqsat.rvsdg_extract import CostModel, EGraphToRVSDG
 
@@ -406,6 +394,7 @@ def test_geglu_tanh_approx():
         "sqrt": sqrt,
         "tanh": tanh,
     }
+    # LLVM output
 
     cg = llvm_codegen(extracted, ns)
 
@@ -414,8 +403,25 @@ def test_geglu_tanh_approx():
     expect = udt(arg)
     assert got == expect
 
-    out = generate_mlir(extracted)
-    print(out)
+    # MLIR output
+
+    mlir_src = generate_mlir(extracted)
+    print(mlir_src)
+
+    from sealir.mlir_backend import Compiler, call_ufunc
+
+    comp_opts = {}
+    # comp_opts={"debug": True, "print_cmds": True}
+    comp = Compiler(mlir_compiler_options=comp_opts)
+    addr = comp.run_backend(mlir_src, symbol="_mlir_ciface_do_work")
+
+    # Run the code
+    arr = np.linspace(0, 1, 1000)
+    out = np.zeros_like(arr)
+    call_ufunc(addr, args=[arr], out=out)
+
+    expect = np.vectorize(udt)(arr)
+    np.testing.assert_allclose(out, expect, rtol=1e-6)
 
 
 def generate_mlir(root: ase.SExpr):
@@ -443,10 +449,12 @@ def generate_mlir(root: ase.SExpr):
                     ctxargs.append(f"%arg{i}")
 
                 argfmt = ", ".join(argbuf)
-                sourcebuf.append(f"func.func @{fname}({argfmt}) -> f64")
+                sourcebuf.append(
+                    f"func.func @{fname}({argfmt}) -> f64  attributes {{llvm.emit_c_interface}}"
+                )
                 sourcebuf.append("{")
                 out = yield body
-                sourcebuf.append(f"return {out}")
+                sourcebuf.append(f"return {out} : f64")
                 sourcebuf.append("}")
                 return sourcebuf
 
@@ -491,7 +499,12 @@ def generate_mlir(root: ase.SExpr):
                 argvals = []
                 for arg in args:
                     argvals.append((yield arg))
-                inst = f"{callee} {', '.join(argvals)} : f64"
+                match callee:
+                    case "arith.sitofp":
+                        typ = "i64 to f64"
+                    case _:
+                        typ = "f64"
+                inst = f"{callee} {', '.join(argvals)} : {typ}"
                 var = fresh_name()
                 sourcebuf.append(f"{var} = {inst}")
                 return var
@@ -506,7 +519,7 @@ def generate_mlir(root: ase.SExpr):
                         raise NotImplementedError(f"unknown global: {varname}")
             case rg.PyFloat(float(val)):
                 var = fresh_name()
-                inst = f"arith.constant {val:g} : f64"
+                inst = f"arith.constant {val:e} : f64"
                 sourcebuf.append(f"{var} = {inst}")
                 return var
 
@@ -536,5 +549,20 @@ def generate_mlir(root: ase.SExpr):
 
         return res
 
-    memo = ase.traverse(root, codegen)
-    return "\n".join(sourcebuf)
+    ase.traverse(root, codegen)
+    body_source = "\n".join(sourcebuf)
+
+    wrapper_1d_loop = r"""
+func.func @do_work(%arg0: memref<?xf64>, %arg1: memref<?xf64>) attributes {llvm.emit_c_interface} {
+  %c0 = arith.constant 0 : index
+  %dim = memref.dim %arg0, %c0 : memref<?xf64>
+  affine.for %arg2 = %c0 to %dim {
+    %v = affine.load %arg0[%arg2] : memref<?xf64>
+    %res = func.call @transformed_udt(%v) : (f64) -> f64
+    affine.store %res, %arg1[%arg2] : memref<?xf64>
+  }
+  return
+}
+    """
+
+    return body_source + wrapper_1d_loop
