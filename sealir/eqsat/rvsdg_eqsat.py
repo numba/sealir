@@ -73,7 +73,8 @@ class ValueList(Expr):
 
     def toValue(self) -> Value: ...
 
-    def toSet(self) -> Set[Value]: ...
+    # Egglog 9.0.1 disallow using primitives on the RHS
+    # def toSet(self) -> Set[Value]: ...
 
     def map(self, fn: Callable[[Value], Value]) -> ValueList: ...
 
@@ -508,14 +509,15 @@ def _ValueList_rules(
         ),
         subsume=True,
     ).to(ValueList(Vec[Value].empty()))
+    # Egglog 9.0.1 disallow using primitives on the RHS
     # toSet
-    yield rewrite(ValueList(vs1).toSet()).to(
-        Set(vs1[0]) | ValueList(vs1.remove(0)).toSet(),
-        # given
-        vs1.length() > i64(0),
-    )
+    # yield rewrite(ValueList(vs1).toSet()).to(
+    #     Set(vs1[0]) | ValueList(vs1.remove(0)).toSet(),
+    #     # given
+    #     vs1.length() > i64(0),
+    # )
 
-    yield rewrite(ValueList(Vec[Value]()).toSet()).to(Set[Value].empty())
+    # yield rewrite(ValueList(Vec[Value]()).toSet()).to(Set[Value].empty())
 
 
 @ruleset

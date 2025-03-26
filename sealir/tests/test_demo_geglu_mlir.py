@@ -203,7 +203,7 @@ def test_geglu_tanh_approx():
         @function
         def Pi() -> eg.Term: ...
 
-        @function(unextractable=True)
+        @function
         def IsFloat(val: eg.Term) -> Unit: ...
 
         @ruleset
