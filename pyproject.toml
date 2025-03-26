@@ -13,6 +13,10 @@ authors = [
 ]
 license = {text = "BSD-2-Clause"}
 readme = "README.md"
+dependencies = [
+    "numba_rvsdg",
+    "egglog"
+]
 
 [tool.setuptools.packages.find]
 include = ["sealir"]
