@@ -39,3 +39,17 @@ dictionary. The tree has the following key features:
   visited, all its child nodes must have been visited.
 - This design allows for efficient tree traversal without the need for 
   recursive functions.
+
+
+### Setup 
+
+
+```bash
+conda env create --file=./conda_environment.yml -n <packagename>
+```
+
+test:
+
+```
+pytest sealir/tests
+```
