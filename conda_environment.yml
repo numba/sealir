@@ -1,0 +1,13 @@
+channels:
+  - defaults
+dependencies:
+  - python=3.12
+  - llvmlite=0.44.*
+  - mlir=17.0.*
+  - pytest
+  - networkx
+  - numpy
+  - pip:
+    - egglog 
+    - numba_rvsdg
+    

@@ -15,11 +15,14 @@ license = {text = "BSD-2-Clause"}
 readme = "README.md"
 dependencies = [
     "numba_rvsdg",
-    "egglog"
+    "egglog",
+    "networkx",
+    "llvmlite",
+    "numpy",
 ]
 
 [tool.setuptools.packages.find]
-include = ["sealir"]
+include = ["sealir", "sealir.*"]
 
 
 [tool.black]
