@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sealir"
 version = "0.0.1"
-description = "S-Expression And Lambda Intemediate Representation (SEALIR)"
+description = "S-Expression Array for Lightweight Immutable Representation (SealIR)"
 authors = [
     {name = "Numba team", email = "na@na.na"}
 ]

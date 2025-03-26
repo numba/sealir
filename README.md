@@ -45,7 +45,7 @@ dictionary. The tree has the following key features:
 
 
 ```bash
-conda env create --file=./conda_environment.yml -n <packagename>
+conda env create --file=./conda_environment.yml -n sealir_dev
 ```
 
 test:
