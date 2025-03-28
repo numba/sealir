@@ -17,7 +17,6 @@ class Data: ...
 class RegionBeginData(Data):
     begin: rg.RegionBegin
     ins: str
-    ports: tuple
 
 
 class EGraphToRVSDG:
@@ -86,13 +85,10 @@ class EGraphToRVSDG:
 
             rbd: RegionBeginData
             match node_type, children:
-                case "Region", {"ins": ins, "ports": ports}:
+                case "Region", {"ins": ins}:
                     return RegionBeginData(
-                        begin=grm.write(
-                            rg.RegionBegin(ins=ins, ports=tuple(ports))
-                        ),
+                        begin=grm.write(rg.RegionBegin(ins=ins)),
                         ins=ins,
-                        ports=tuple(ports),
                     )
                 case "InputPorts", {"self": RegionBeginData() as rbd}:
                     return rbd.begin
@@ -138,6 +134,7 @@ class EGraphToRVSDG:
                             "cond": cond,
                             "then": then,
                             "orelse": orelse,
+                            "operands": operands,
                         }:
                             [cond, then, orelse] = (
                                 cond,
@@ -149,6 +146,7 @@ class EGraphToRVSDG:
                                     cond=cond,
                                     body=then,
                                     orelse=orelse,
+                                    operands=operands,
                                 )
                             )
                         case "Term.IO", {}:
@@ -308,11 +306,13 @@ class EGraphToRVSDG:
                         case "Term.Loop", {
                             "body": body_regionend,
                             "loopvar": str(loopvar),
+                            "operands": operands,
                         }:
                             return grm.write(
                                 rg.Loop(
                                     body=body_regionend,
                                     loopvar=loopvar,
+                                    operands=operands,
                                 )
                             )
                         case _:
@@ -320,7 +320,7 @@ class EGraphToRVSDG:
                                 f"invalid Term: {node_type}, {children}"
                             )
                 case "TermList", {"terms": terms}:
-                    return terms
+                    return tuple(terms)
                 case "Value", children:
                     return self.handle_Value(op, children, grm)
                 case _:

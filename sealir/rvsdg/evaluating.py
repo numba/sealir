@@ -71,8 +71,8 @@ def evaluate(
         stack[-1].update(init_scope)
 
     @contextmanager
-    def push():
-        stack.append(ChainMap({}, scope()))
+    def push(callargs):
+        stack.append(ChainMap({"__region_args__": callargs}, scope()))
         try:
             yield
         finally:
@@ -80,6 +80,9 @@ def evaluate(
 
     def scope() -> dict[str, Any]:
         return stack[-1]
+
+    def get_region_args() -> list[Any]:
+        return scope()["__region_args__"]
 
     def ensure_io(expect_io: Any) -> Type[rg.IO]:
         assert expect_io is rg.IO, expect_io
@@ -102,59 +105,81 @@ def evaluate(
                     )
                 sig = inspect.Signature(params)
                 ba = sig.bind(*callargs, **callkwargs)
-                scope().update(ba.arguments)
-                with push():
-                    return (yield body)
-            case rg.RegionBegin(ins=ins, ports=ports):
-                paired = zip(ins.split(), ports, strict=True)
+
+                # prepare region arguments
+                region_args = []
+                for k in body.begin.ins.split():
+                    if k == internal_prefix("io"):
+                        v = rg.IO
+                    else:
+                        v = ba.arguments[k]
+                    region_args.append(v)
+
+                with push(region_args):
+                    out = yield body
+                return out.get_by_name(internal_prefix("ret"))
+
+            case rg.RegionBegin(ins=ins):
+                region_args = get_region_args()
                 ports = []
-                for k, v in paired:
-                    val = yield v
-                    ports.append(val)
-                    scope()[k] = val
+                for k, v in zip(ins.split(), region_args, strict=True):
+                    ports.append(v)
                 return EvalPorts(parent=expr, values=tuple(ports))
 
             case rg.RegionEnd(begin=begin, outs=str(outs), ports=ports):
                 inports = yield begin
-                with push():
-                    inports.update_scope(scope())
-                    portvals = []
-                    for port in ports:
-                        portvals.append((yield port))
-                    dbginfo.print("In region", dict(scope()))
-                    return EvalPorts(expr, tuple(portvals))
+                inports.update_scope(scope())
+                portvals = []
+                for port in ports:
+                    portvals.append((yield port))
+                dbginfo.print("In region", dict(scope()))
+                return EvalPorts(expr, tuple(portvals))
 
-            case rg.IfElse(cond=cond, body=body, orelse=orelse):
+            case rg.IfElse(
+                cond=cond, body=body, orelse=orelse, operands=operands
+            ):
+                # handle condition
                 condval = yield cond
-                if condval:
-                    ports = yield body
-                else:
-                    ports = yield orelse
+                # handle region_args
+                ops = []
+                for op in operands:
+                    ops.append((yield op))
+                with push(ops):
+                    if condval:
+                        ports = yield body
+                    else:
+                        ports = yield orelse
                 ports.update_scope(scope())
                 dbginfo.print("end if", dict(scope()))
                 return EvalPorts(expr, ports.values)
 
-            case rg.Loop(body=body, loopvar=loopvar):
+            case rg.Loop(body=body, loopvar=loopvar, operands=operands):
+                # handle region args
+                ops = []
+                for op in operands:
+                    ops.append((yield op))
+                # loop logic
                 cond = True
                 assert isinstance(body, rg.RegionEnd)
                 begin = body.begin
-                memo = {}
-                memo[begin] = yield begin
+                with push(ops):
+                    memo = {}
+                    memo[begin] = yield begin
 
-                while cond:
-                    ports = evaluate(
-                        body,
-                        (),
-                        {},
-                        init_scope=scope(),
-                        init_memo=memo,
-                        global_ns=global_ns,
-                        dbginfo=dbginfo,
-                    )
-                    ports.update_scope(scope())
-                    cond = ports.get_by_name(loopvar)
-                    dbginfo.print("after loop iterator", dict(scope()))
-                    memo[begin] = memo[begin].replace(ports)
+                    while cond:
+                        ports = evaluate(
+                            body,
+                            (),
+                            {},
+                            init_scope=scope(),
+                            init_memo=memo,
+                            global_ns=global_ns,
+                            dbginfo=dbginfo,
+                        )
+                        ports.update_scope(scope())
+                        cond = ports.get_by_name(loopvar)
+                        dbginfo.print("after loop iterator", dict(scope()))
+                        memo[begin] = memo[begin].replace(ports)
                 return ports
 
             case rg.Unpack(val=source, idx=int(idx)):

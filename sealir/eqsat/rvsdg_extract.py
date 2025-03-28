@@ -54,7 +54,7 @@ def egraph_extraction(
     extraction = Extraction(gdct, root_eclass, cost_model)
     cost, exgraph = extraction.choose()
     te = time.time()
-    print("custom cost-model greedy extraction:", te - ts)
+    # print("custom cost-model greedy extraction:", te - ts)
 
     expr = convert_to_rvsdg(
         exgraph,

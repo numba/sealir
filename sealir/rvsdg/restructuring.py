@@ -452,12 +452,11 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             with ctx.new_function(expr):
                 args = yield args
                 body = yield body
-                retidx = body.outs.split().index(internal_prefix("ret"))
                 return grm.write(
                     rg.Func(
                         fname=fname,
                         args=args,
-                        body=grm.write(rg.Unpack(val=body, idx=retidx)),
+                        body=body,
                     )
                 )
         case ("PyAst_arg", (str(name), annotation, interloc)):
@@ -477,7 +476,6 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             begin = grm.write(
                 rg.RegionBegin(
                     ins=prep_varnames(vars),
-                    ports=ctx.load_vars(vars),
                 )
             )
             with ctx.new_block(expr) as scope:
@@ -493,6 +491,8 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             )
 
         case ("PyAst_If", (test, body, orelse, interloc)):
+            vars = sorted(ctx.scope.varmap)
+            operands = ctx.load_vars(vars)
             cond = yield test
             br_true = yield body
             br_false = yield orelse
@@ -508,6 +508,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                     cond=cond,
                     body=br_true,
                     orelse=br_false,
+                    operands=operands,
                 )
             )
             # update scope
@@ -525,7 +526,10 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             loopvar = extract_name_load(loopcondvar)
             updated_vars = ctx.updated_vars([ctx.scope_map[body]])
 
-            dow = grm.write(rg.Loop(body=loopbody, loopvar=loopvar))
+            operands = ctx.load_vars(loopbody.begin.ins.split())
+            dow = grm.write(
+                rg.Loop(body=loopbody, loopvar=loopvar, operands=operands)
+            )
             # update scope
             for i, k in enumerate(updated_vars):
                 ctx.store_var(k, grm.write(rg.Unpack(val=dow, idx=i)))
@@ -688,15 +692,9 @@ def format_rvsdg(prgm: SExpr) -> str:
             case rg.Func(fname=str(fname), args=args, body=body):
                 put(f"{fname} = Func {ase.pretty_str(args)}")
                 (yield body)
-            case rg.RegionBegin(ins=ins, ports=ports):
-                inports = []
-                for port in ports:
-                    inports.append((yield port))
+            case rg.RegionBegin(ins=ins):
                 name = fresh_name()
-                fmtins = starmap(
-                    lambda x, y: f"{x}={y}",
-                    zip(ins.split(), inports, strict=True),
-                )
+                fmtins = ins.split()
                 put(f"{name} = Region[{expr._handle}] <- {' '.join(fmtins)}")
                 return name
             case rg.RegionEnd(begin=begin, outs=str(outs), ports=ports):
@@ -711,10 +709,15 @@ def format_rvsdg(prgm: SExpr) -> str:
                     zip(outrefs, outs.split(), strict=True),
                 )
                 put(f"}} [{expr._handle}] -> {' '.join(fmtoutports)}")
-            case rg.IfElse(cond=cond, body=body, orelse=orelse):
+            case rg.IfElse(
+                cond=cond, body=body, orelse=orelse, operands=operands
+            ):
+                ops = []
+                for op in operands:
+                    ops.append((yield op))
                 condref = yield cond
                 name = fresh_name()
-                put(f"{name} = If {condref} ")
+                put(f"{name} = If {condref} <- {' '.join(ops)}")
                 with indent():
                     (yield body)
                     put("Else")
@@ -722,9 +725,15 @@ def format_rvsdg(prgm: SExpr) -> str:
                 put(f"Endif")
                 return name
 
-            case rg.Loop(body=body, loopvar=loopvar):
+            case rg.Loop(body=body, loopvar=loopvar, operands=operands):
+                ops = []
+                for op in operands:
+                    ops.append((yield op))
+
                 name = fresh_name()
-                put(f"{name} = Loop [{expr._handle}] #{loopvar}")
+                put(
+                    f"{name} = Loop [{expr._handle}] #{loopvar} <- {' '.join(ops)}"
+                )
                 with indent():
                     (yield body)
                 put(f"EndLoop")

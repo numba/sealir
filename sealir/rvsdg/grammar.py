@@ -25,7 +25,6 @@ class Args(_Root):
 
 class RegionBegin(_Root):
     ins: str
-    ports: tuple[SExpr, ...]
 
 
 class RegionEnd(_Root):
@@ -37,18 +36,20 @@ class RegionEnd(_Root):
 class Func(_Root):
     fname: str
     args: Args
-    body: SExpr
+    body: RegionEnd
 
 
 class IfElse(_Root):
     cond: SExpr
-    body: SExpr
-    orelse: SExpr
+    body: RegionEnd
+    orelse: RegionEnd
+    operands: tuple[SExpr, ...]
 
 
 class Loop(_Root):
-    body: SExpr
+    body: RegionEnd
     loopvar: str
+    operands: tuple[SExpr, ...]
 
 
 class IO(_Root):
@@ -90,22 +91,22 @@ class PyStr(_Root):
 
 
 class PyTuple(_Root):
-    elems: tuple[SExpr]
+    elems: tuple[SExpr, ...]
 
 
 class PyList(_Root):
-    elems: tuple[SExpr]
+    elems: tuple[SExpr, ...]
 
 
 class PyCall(_Root):
     func: SExpr
     io: SExpr
-    args: tuple[SExpr]
+    args: tuple[SExpr, ...]
 
 
 class PyCallPure(_Root):
     func: SExpr
-    args: tuple[SExpr]
+    args: tuple[SExpr, ...]
 
 
 class PyAttr(_Root):

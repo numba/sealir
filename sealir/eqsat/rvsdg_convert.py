@@ -72,16 +72,11 @@ def egraph_conversion(root: SExpr):
                 return eg.Term.Func(
                     uid=node_uid(expr),
                     fname=fname,
-                    body=(yield body),
+                    body=(yield body).term,
                 )
 
-            case rg.RegionBegin(ins=ins, ports=ports):
-                procports = []
-                for p in ports:
-                    procports.append((yield p))
-                rd = eg.Region(
-                    node_uid(expr), ins=ins, ports=eg.termlist(*procports)
-                )
+            case rg.RegionBegin(ins=ins):
+                rd = eg.Region(node_uid(expr), ins=ins)
                 return RegionInfo(rd, rd.begin())
 
             case rg.RegionEnd(begin=begin, outs=str(outnames), ports=ports):
@@ -98,16 +93,33 @@ def egraph_conversion(root: SExpr):
                 outs = yield source
                 return outs[idx]
 
-            case rg.IfElse(cond=cond, body=body, orelse=orelse):
+            case rg.IfElse(
+                cond=cond, body=body, orelse=orelse, operands=operands
+            ):
                 condval = yield cond
                 outs_if = yield body
                 outs_else = yield orelse
-                bra = eg.Term.Branch(condval, outs_if.term, outs_else.term)
+                out_operands = []
+                for op in operands:
+                    out_operands.append((yield op))
+                bra = eg.Term.Branch(
+                    condval,
+                    outs_if.term,
+                    outs_else.term,
+                    operands=eg.termlist(*out_operands),
+                )
                 return WrapTerm(bra)
 
-            case rg.Loop(body=body, loopvar=str(loopvar)):
+            case rg.Loop(body=body, loopvar=str(loopvar), operands=operands):
                 region = yield body
-                loop = eg.Term.Loop(region.term, loopvar=loopvar)
+                out_operands = []
+                for op in operands:
+                    out_operands.append((yield op))
+                loop = eg.Term.Loop(
+                    region.term,
+                    loopvar=loopvar,
+                    operands=eg.termlist(*out_operands),
+                )
                 return WrapTerm(loop)
 
             case rg.PyUnaryOp(op=str(op), io=io, operand=operand):
