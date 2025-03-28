@@ -310,7 +310,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     phis.append(SSAValue(phi))
             return PackedValues.make(*phis)
 
-        case rg.Loop(body=rg.RegionEnd() as body, outs=outs, loopvar=loopvar):
+        case rg.Loop(body=rg.RegionEnd() as body, loopvar=loopvar):
             # Note this is a tail loop.
             begin = body.begin
             loopentry_values = yield begin
@@ -349,7 +349,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             )
 
             loopout_values = memo[body]
-            cond_obj = loopout_values[outs.split().index(loopvar)].value
+            cond_obj = loopout_values[body.outs.split().index(loopvar)].value
 
             # get loop condition
             loopcond = builder.icmp_unsigned(

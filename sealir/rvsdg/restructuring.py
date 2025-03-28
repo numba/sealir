@@ -526,11 +526,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             loopvar = extract_name_load(loopcondvar)
             updated_vars = ctx.updated_vars([ctx.scope_map[body]])
 
-            dow = grm.write(
-                rg.Loop(
-                    body=loopbody, outs=" ".join(updated_vars), loopvar=loopvar
-                )
-            )
+            dow = grm.write(rg.Loop(body=loopbody, loopvar=loopvar))
             # update scope
             for i, k in enumerate(updated_vars):
                 ctx.store_var(k, grm.write(rg.Unpack(val=dow, idx=i)))
@@ -727,12 +723,12 @@ def format_rvsdg(prgm: SExpr) -> str:
                 put(f"Endif -> {outs}")
                 return name
 
-            case rg.Loop(body=body, outs=outs, loopvar=loopvar):
+            case rg.Loop(body=body, loopvar=loopvar):
                 name = fresh_name()
                 put(f"{name} = Loop [{expr._handle}] #{loopvar}")
                 with indent():
                     (yield body)
-                put(f"EndLoop -> {outs}")
+                put(f"EndLoop")
                 return name
 
             case rg.Unpack(val=source, idx=int(idx)):

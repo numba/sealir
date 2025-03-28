@@ -134,7 +134,7 @@ def evaluate(
                 dbginfo.print("end if", dict(scope()))
                 return EvalPorts(expr, ports.values)
 
-            case rg.Loop(body=body, outs=outs, loopvar=loopvar):
+            case rg.Loop(body=body, loopvar=loopvar):
                 cond = True
                 assert isinstance(body, rg.RegionEnd)
                 begin = body.begin

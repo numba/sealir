@@ -46,8 +46,6 @@ def egraph_extraction(
             n_inline_leaves=0, split_primitive_outputs=False
         ).to_json()
     )
-    # pprint(gdct)
-
     [root] = get_graph_root(gdct)
     root_eclass = gdct["nodes"][root]["eclass"]
 

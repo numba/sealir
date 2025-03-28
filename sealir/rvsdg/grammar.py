@@ -49,7 +49,6 @@ class IfElse(_Root):
 
 class Loop(_Root):
     body: SExpr
-    outs: str
     loopvar: str
 
 

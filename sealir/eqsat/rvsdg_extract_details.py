@@ -64,6 +64,14 @@ class EGraphToRVSDG:
                 case "String":
                     unquoted = node["op"][1:-1]
                     return unquoted
+                case "bool":
+                    match node["op"]:
+                        case "true":
+                            return True
+                        case "false":
+                            return False
+                        case _:
+                            raise AssertionError()
                 case "i64":
                     return int(node["op"])
                 case "f64":
@@ -170,6 +178,19 @@ class EGraphToRVSDG:
                                     rhs=rhs,
                                 )
                             )
+                        case "Term.InplaceAddIO", {
+                            "io": io,
+                            "a": lhs,
+                            "b": rhs,
+                        }:
+                            return grm.write(
+                                rg.PyInplaceBinOp(
+                                    op="+",
+                                    io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
                         case "Term.Mul", {"a": lhs, "b": rhs}:
                             return grm.write(
                                 rg.PyBinOpPure(
@@ -230,6 +251,28 @@ class EGraphToRVSDG:
                                     rhs=rhs,
                                 )
                             )
+                        case "Term.GtIO", {"io": io, "a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOp(
+                                    op=">",
+                                    io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
+                        case "Term.NeIO", {"io": io, "a": lhs, "b": rhs}:
+                            return grm.write(
+                                rg.PyBinOp(
+                                    op="!=",
+                                    io=io,
+                                    lhs=lhs,
+                                    rhs=rhs,
+                                )
+                            )
+                        case "Term.NotIO", {"io": io, "term": term}:
+                            return grm.write(
+                                rg.PyUnaryOp(op="not", io=io, operand=term)
+                            )
                         case "Term.AttrIO", {
                             "io": io,
                             "obj": obj,
@@ -255,9 +298,27 @@ class EGraphToRVSDG:
                             return grm.write(rg.Unpack(val=term, idx=idx))
                         case "PartialEvaluated", {"value": value}:
                             return value
+                        case "Term.Undef", {"name": name}:
+                            return grm.write(rg.Undef(name=name))
+                        case "Term.LiteralBool", {"val": bool(val)}:
+                            return grm.write(rg.PyBool(value=val))
+                        case "Term.LiteralStr", {"val": str(val)}:
+                            return grm.write(rg.PyStr(value=val))
+                        case "Term.LiteralNone", {}:
+                            return grm.write(rg.PyNone())
+                        case "Term.Loop", {
+                            "body": body_regionend,
+                            "loopvar": str(loopvar),
+                        }:
+                            return grm.write(
+                                rg.Loop(
+                                    body=body_regionend,
+                                    loopvar=loopvar,
+                                )
+                            )
                         case _:
                             raise NotImplementedError(
-                                f"invalid Term op: {op!r}"
+                                f"invalid Term: {node_type}, {children}"
                             )
                 case "TermList", {"terms": terms}:
                     return terms

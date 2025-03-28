@@ -105,9 +105,9 @@ def egraph_conversion(root: SExpr):
                 bra = eg.Term.Branch(condval, outs_if.term, outs_else.term)
                 return WrapTerm(bra)
 
-            case rg.Loop(body=body, outs=str(outs), loopvar=str(loopvar)):
+            case rg.Loop(body=body, loopvar=str(loopvar)):
                 region = yield body
-                loop = eg.Term.Loop(region.term)
+                loop = eg.Term.Loop(region.term, loopvar=loopvar)
                 return WrapTerm(loop)
 
             case rg.PyUnaryOp(op=str(op), io=io, operand=operand):
@@ -129,6 +129,9 @@ def egraph_conversion(root: SExpr):
                     case "<":
                         res = eg.Term.LtIO(ioterm, lhsterm, rhsterm)
 
+                    case ">":
+                        res = eg.Term.GtIO(ioterm, lhsterm, rhsterm)
+
                     case "+":
                         res = eg.Term.AddIO(ioterm, lhsterm, rhsterm)
 
@@ -141,6 +144,9 @@ def egraph_conversion(root: SExpr):
                     case "**":
                         res = eg.Term.PowIO(ioterm, lhsterm, rhsterm)
 
+                    case "!=":
+                        res = eg.Term.NeIO(ioterm, lhsterm, rhsterm)
+
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
                 return WrapTerm(res)
@@ -150,6 +156,8 @@ def egraph_conversion(root: SExpr):
                 lhsterm = yield lhs
                 rhsterm = yield rhs
                 match op:
+                    case "+":
+                        res = eg.Term.InplaceAddIO(ioterm, lhsterm, rhsterm)
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
                 return WrapTerm(res)
@@ -183,6 +191,12 @@ def egraph_conversion(root: SExpr):
             case rg.PyBool(bool(val)):
                 return eg.Term.LiteralBool(val)
 
+            case rg.PyStr(str(val)):
+                return eg.Term.LiteralStr(val)
+
+            case rg.PyNone():
+                return eg.Term.LiteralNone()
+
             case rg.DbgValue(
                 name=str(varname),
                 value=value,
@@ -194,8 +208,8 @@ def egraph_conversion(root: SExpr):
             case rg.ArgRef(idx=int(i), name=str(name)):
                 return eg.Term.Param(i)
 
-            case rg.Undef():
-                return eg.Term.Undef()
+            case rg.Undef(name=str(name)):
+                return eg.Term.Undef(name=name)
 
             case rg.IO():
                 return eg.Term.IO()

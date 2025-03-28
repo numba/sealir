@@ -204,7 +204,7 @@ def test_loop_analysis():
             cond = Term.Lt(na, b)
             return [cond, na, b]
 
-        return [Term.Loop(loop)]
+        return [Term.Loop(loop, loopvar="0")]
 
     # Eval with Env
     env = Env.nil()
@@ -257,7 +257,7 @@ def test_sum_loop():
             return [lt, i, n, c]
 
         # Do Loop
-        loop = Term.Loop(body)
+        loop = Term.Loop(body, loopvar="0")
 
         # Return
         return [loop.getPort(1), loop.getPort(2)]  # sum(range())
