@@ -98,7 +98,7 @@ def egraph_conversion(root: SExpr):
                 outs = yield source
                 return outs[idx]
 
-            case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
+            case rg.IfElse(cond=cond, body=body, orelse=orelse):
                 condval = yield cond
                 outs_if = yield body
                 outs_else = yield orelse

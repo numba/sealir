@@ -266,7 +266,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
         case rg.PyNone():
             return SSAValue(pyapi.make_none())
 
-        case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
+        case rg.IfElse(cond=cond, body=body, orelse=orelse):
             condval = (yield cond).value
             # unpack pybool
             condbit = builder.icmp_unsigned(

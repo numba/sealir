@@ -149,7 +149,6 @@ class EGraphToRVSDG:
                                     cond=cond,
                                     body=then,
                                     orelse=orelse,
-                                    outs=then.outs,
                                 )
                             )
                         case "Term.IO", {}:

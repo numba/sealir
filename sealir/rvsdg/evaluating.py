@@ -124,7 +124,7 @@ def evaluate(
                     dbginfo.print("In region", dict(scope()))
                     return EvalPorts(expr, tuple(portvals))
 
-            case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
+            case rg.IfElse(cond=cond, body=body, orelse=orelse):
                 condval = yield cond
                 if condval:
                     ports = yield body

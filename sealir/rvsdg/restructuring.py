@@ -508,7 +508,6 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                     cond=cond,
                     body=br_true,
                     orelse=br_false,
-                    outs=" ".join(updated_vars),
                 )
             )
             # update scope
@@ -712,7 +711,7 @@ def format_rvsdg(prgm: SExpr) -> str:
                     zip(outrefs, outs.split(), strict=True),
                 )
                 put(f"}} [{expr._handle}] -> {' '.join(fmtoutports)}")
-            case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
+            case rg.IfElse(cond=cond, body=body, orelse=orelse):
                 condref = yield cond
                 name = fresh_name()
                 put(f"{name} = If {condref} ")
@@ -720,7 +719,7 @@ def format_rvsdg(prgm: SExpr) -> str:
                     (yield body)
                     put("Else")
                     (yield orelse)
-                put(f"Endif -> {outs}")
+                put(f"Endif")
                 return name
 
             case rg.Loop(body=body, loopvar=loopvar):

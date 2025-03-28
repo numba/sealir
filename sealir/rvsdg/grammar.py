@@ -44,7 +44,6 @@ class IfElse(_Root):
     cond: SExpr
     body: SExpr
     orelse: SExpr
-    outs: str
 
 
 class Loop(_Root):
