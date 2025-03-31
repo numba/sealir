@@ -77,6 +77,8 @@ class EGraphToRVSDG:
                     return float(node["op"])
                 case "Vec_Term":
                     return get_children()
+                case "Vec_String":
+                    return get_children()
                 case _:
                     raise NotImplementedError(f"primitive of: {node_type}")
         elif key.startswith("function-"):
@@ -85,9 +87,9 @@ class EGraphToRVSDG:
 
             rbd: RegionBeginData
             match node_type, children:
-                case "Region", {"ins": ins}:
+                case "Region", {"inports": ins}:
                     return RegionBeginData(
-                        begin=grm.write(rg.RegionBegin(ins=ins)),
+                        begin=grm.write(rg.RegionBegin(inports=ins)),
                         ins=ins,
                     )
                 case "InputPorts", {"self": RegionBeginData() as rbd}:
@@ -119,14 +121,11 @@ class EGraphToRVSDG:
                             )
                         case "Term.RegionEnd", {
                             "region": region,
-                            "outs": outs,
                             "ports": ports,
                         }:
-                            assert len(outs.split()) == len(ports)
                             return grm.write(
                                 rg.RegionEnd(
                                     begin=region.begin,
-                                    outs=outs,
                                     ports=tuple(ports),
                                 )
                             )
@@ -315,6 +314,8 @@ class EGraphToRVSDG:
                                     operands=operands,
                                 )
                             )
+                        case "Term.Port", {"name": str(name), "value": value}:
+                            return grm.write(rg.Port(name=name, value=value))
                         case _:
                             raise NotImplementedError(
                                 f"invalid Term: {node_type}, {children}"
@@ -323,6 +324,9 @@ class EGraphToRVSDG:
                     return tuple(terms)
                 case "Value", children:
                     return self.handle_Value(op, children, grm)
+
+                case "InPorts", {"names": names}:
+                    return tuple(names)
                 case _:
                     raise NotImplementedError(
                         f"function of: {op!r} :: {node_type}"

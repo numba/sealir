@@ -23,14 +23,18 @@ class Args(_Root):
     arguments: tuple[SExpr, ...]
 
 
+class Port(_Root):
+    name: str
+    value: SExpr
+
+
 class RegionBegin(_Root):
-    ins: str
+    inports: tuple[str, ...]
 
 
 class RegionEnd(_Root):
     begin: RegionBegin
-    outs: str
-    ports: tuple[SExpr, ...]
+    ports: tuple[Port, ...]
 
 
 class Func(_Root):

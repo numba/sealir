@@ -75,19 +75,22 @@ def egraph_conversion(root: SExpr):
                     body=(yield body).term,
                 )
 
-            case rg.RegionBegin(ins=ins):
-                rd = eg.Region(node_uid(expr), ins=ins)
+            case rg.RegionBegin(inports=ins):
+                rd = eg.Region(node_uid(expr), inports=eg.inports(*ins))
                 return RegionInfo(rd, rd.begin())
 
-            case rg.RegionEnd(begin=begin, outs=str(outnames), ports=ports):
+            case rg.RegionEnd(begin=begin, ports=ports):
                 ri: RegionInfo = (yield begin)
                 with push(ri):
-                    outs = []
+                    portnodes = []
                     for p in ports:
-                        outs.append((yield p))
+                        portnodes.append((yield p))
                 return WrapTerm(
-                    eg.Term.RegionEnd(ri.region, outnames, eg.termlist(*outs))
+                    eg.Term.RegionEnd(ri.region, eg.termlist(*portnodes))
                 )
+
+            case rg.Port(name=str(name), value=value):
+                return eg.Term.Port(name, (yield value))
 
             case rg.Unpack(val=source, idx=int(idx)):
                 outs = yield source

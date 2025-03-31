@@ -27,8 +27,16 @@ from egglog import (
 )
 
 
+class InPorts(Expr):
+    def __init__(self, names: Vec[String]): ...
+
+
+def inports(*names: str):
+    return InPorts(names=Vec[String](*names))
+
+
 class Region(Expr):
-    def __init__(self, uid: StringLike, ins: StringLike): ...
+    def __init__(self, uid: StringLike, inports: InPorts): ...
 
     def begin(self) -> InputPorts: ...
 
@@ -90,6 +98,9 @@ class ValueList(Expr):
 class Term(Expr):
     @classmethod
     def Func(cls, uid: StringLike, fname: StringLike, body: Term) -> Term: ...
+
+    @classmethod
+    def Port(cls, name: StringLike, value: Term) -> Term: ...
 
     @classmethod
     def Branch(
@@ -162,7 +173,9 @@ class Term(Expr):
     def Call(cls, func: Term, io: Term, args: TermList) -> Term: ...
     @classmethod
     def RegionEnd(
-        self, region: Region, outs: StringLike, ports: TermList
+        self,
+        region: Region,
+        ports: TermList,
     ) -> Term: ...
 
     def getPort(self, idx: i64Like) -> Term: ...

@@ -29,10 +29,10 @@ class EvalPorts:
 
     def get_port_names(self) -> Sequence[str]:
         match self.parent:
-            case rg.RegionBegin(ins=str(ins)):
-                names = ins.split()
-            case rg.RegionEnd(outs=str(outs)):
-                names = outs.split()
+            case rg.RegionBegin(inports=ins):
+                names = ins
+            case rg.RegionEnd(ports=outs):
+                names = tuple(k.name for k in outs)
             case _:
                 raise ValueError(
                     f"get_port_names() not supported for parent={self.parent!r}"
@@ -108,7 +108,7 @@ def evaluate(
 
                 # prepare region arguments
                 region_args = []
-                for k in body.begin.ins.split():
+                for k in body.begin.inports:
                     if k == internal_prefix("io"):
                         v = rg.IO
                     else:
@@ -119,19 +119,19 @@ def evaluate(
                     out = yield body
                 return out.get_by_name(internal_prefix("ret"))
 
-            case rg.RegionBegin(ins=ins):
+            case rg.RegionBegin(inports=ins):
                 region_args = get_region_args()
                 ports = []
-                for k, v in zip(ins.split(), region_args, strict=True):
+                for k, v in zip(ins, region_args, strict=True):
                     ports.append(v)
                 return EvalPorts(parent=expr, values=tuple(ports))
 
-            case rg.RegionEnd(begin=begin, outs=str(outs), ports=ports):
+            case rg.RegionEnd(begin=begin, ports=ports):
                 inports = yield begin
                 inports.update_scope(scope())
                 portvals = []
                 for port in ports:
-                    portvals.append((yield port))
+                    portvals.append((yield port.value))
                 dbginfo.print("In region", dict(scope()))
                 return EvalPorts(expr, tuple(portvals))
 

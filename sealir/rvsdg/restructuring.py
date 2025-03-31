@@ -269,7 +269,7 @@ class RvsdgizeCtx:
     def initialize_scope(self, rb: SExpr) -> None:
         grm = self.grm
         varmap = self.scope.varmap
-        for i, k in enumerate(rb.ins.split()):
+        for i, k in enumerate(rb.inports):
             varmap[k] = grm.write(rg.Unpack(val=rb, idx=i))
 
     @contextmanager
@@ -409,24 +409,24 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
     ctx = state.context
     grm = ctx.grm
 
-    def prep_varnames(d) -> str:
-        return " ".join(d)
-
-    def fixup(regend, updated_vars):
-        updated = prep_varnames(updated_vars)
-
-        if updated == regend.outs:
+    def fixup(regend, updated_vars: Sequence[str]):
+        if updated_vars == tuple(p.name for p in regend.ports):
             return regend
         else:
-            oldports = dict(
-                zip(regend.outs.split(), regend.ports, strict=True)
-            )
-            ports = tuple(
+            # Insert Undef for the missing varnames
+            oldports = dict((p.name, p.value) for p in regend.ports)
+            portvals = tuple(
                 oldports[k] if k in oldports else grm.write(rg.Undef(k))
                 for k in updated_vars
             )
             return grm.write(
-                rg.RegionEnd(begin=regend.begin, outs=updated, ports=ports)
+                rg.RegionEnd(
+                    begin=regend.begin,
+                    ports=tuple(
+                        grm.write(rg.Port(name=k, value=v))
+                        for k, v in zip(updated_vars, portvals, strict=True)
+                    ),
+                )
             )
 
     def extract_name_load(var_load: SExpr) -> str:
@@ -473,22 +473,19 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
         case ("PyAst_block", body):
 
             vars = sorted(ctx.scope.varmap)
-            begin = grm.write(
-                rg.RegionBegin(
-                    ins=prep_varnames(vars),
-                )
-            )
+            begin = grm.write(rg.RegionBegin(inports=tuple(vars)))
             with ctx.new_block(expr) as scope:
                 ctx.initialize_scope(begin)
                 for expr in body:
                     (yield expr)
                 vars = sorted(scope.varmap)
                 ports = ctx.load_vars(vars)
-            return grm.write(
-                rg.RegionEnd(
-                    begin=begin, outs=prep_varnames(vars), ports=ports
-                )
-            )
+
+            ports = [
+                grm.write(rg.Port(name=k, value=v))
+                for k, v in zip(vars, ports, strict=True)
+            ]
+            return grm.write(rg.RegionEnd(begin=begin, ports=tuple(ports)))
 
         case ("PyAst_If", (test, body, orelse, interloc)):
             vars = sorted(ctx.scope.varmap)
@@ -526,7 +523,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             loopvar = extract_name_load(loopcondvar)
             updated_vars = ctx.updated_vars([ctx.scope_map[body]])
 
-            operands = ctx.load_vars(loopbody.begin.ins.split())
+            operands = ctx.load_vars(loopbody.begin.inports)
             dow = grm.write(
                 rg.Loop(body=loopbody, loopvar=loopvar, operands=operands)
             )
@@ -692,23 +689,19 @@ def format_rvsdg(prgm: SExpr) -> str:
             case rg.Func(fname=str(fname), args=args, body=body):
                 put(f"{fname} = Func {ase.pretty_str(args)}")
                 (yield body)
-            case rg.RegionBegin(ins=ins):
+            case rg.RegionBegin(inports=ins):
                 name = fresh_name()
-                fmtins = ins.split()
-                put(f"{name} = Region[{expr._handle}] <- {' '.join(fmtins)}")
+                put(f"{name} = Region[{expr._handle}] <- {' '.join(ins)}")
                 return name
-            case rg.RegionEnd(begin=begin, outs=str(outs), ports=ports):
+            case rg.RegionEnd(begin=begin, ports=ports):
                 (yield begin)
                 put("{")
                 outrefs = []
                 with indent():
-                    for port in ports:
-                        outrefs.append((yield port))
-                fmtoutports = starmap(
-                    lambda x, y: f"{y}={x}",
-                    zip(outrefs, outs.split(), strict=True),
-                )
-                put(f"}} [{expr._handle}] -> {' '.join(fmtoutports)}")
+                    for p in ports:
+                        ref = yield p.value
+                        outrefs.append(f"{p.name}={ref}")
+                put(f"}} [{expr._handle}] -> {' '.join(outrefs)}")
             case rg.IfElse(
                 cond=cond, body=body, orelse=orelse, operands=operands
             ):

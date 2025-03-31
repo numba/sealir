@@ -141,7 +141,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 for i, argspec in enumerate(args.arguments)
             }
             argvalues = []
-            for k in body.begin.ins.split():
+            for k in body.begin.inports:
                 if k == internal_prefix("io"):
                     v = IOState()
                 else:
@@ -151,25 +151,25 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             with push(argvalues):
                 outs = yield body
 
-            retval = outs[body.outs.split().index(internal_prefix("ret"))]
+            portnames = [p.name for p in body.ports]
+            retval = outs[portnames.index(internal_prefix("ret"))]
             builder.ret(retval.value)
 
-        case rg.RegionBegin(ins=ins):
+        case rg.RegionBegin(inports=ins):
             portvalues = []
-            for i, k in enumerate(ins.split()):
+            for i, k in enumerate(ins):
                 pv = get_region_args()[i]
                 portvalues.append(pv)
             return PackedValues.make(*portvalues)
 
         case rg.RegionEnd(
             begin=rg.RegionBegin() as begin,
-            outs=str(outs),
             ports=ports,
         ):
             yield begin
             portvalues = []
             for p in ports:
-                pv = yield p
+                pv = yield p.value
                 portvalues.append(pv)
             return PackedValues.make(*portvalues)
 
@@ -373,7 +373,8 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             )
 
             loopout_values = memo[body]
-            cond_obj = loopout_values[body.outs.split().index(loopvar)].value
+            portnames = [p.name for p in body.ports]
+            cond_obj = loopout_values[portnames.index(loopvar)].value
 
             # get loop condition
             loopcond = builder.icmp_unsigned(
