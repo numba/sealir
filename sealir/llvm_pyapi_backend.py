@@ -325,9 +325,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     phis.append(SSAValue(phi))
             return PackedValues.make(*phis)
 
-        case rg.Loop(
-            body=rg.RegionEnd() as body, loopvar=loopvar, operands=operands
-        ):
+        case rg.Loop(body=rg.RegionEnd() as body, operands=operands):
             # process operands
             ops = []
             for op in operands:
@@ -372,9 +370,9 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 init_memo=loop_memo,
             )
 
-            loopout_values = memo[body]
+            loopout_values = list(memo[body])
             portnames = [p.name for p in body.ports]
-            cond_obj = loopout_values[portnames.index(loopvar)].value
+            cond_obj = loopout_values.pop(0).value
 
             # get loop condition
             loopcond = builder.icmp_unsigned(

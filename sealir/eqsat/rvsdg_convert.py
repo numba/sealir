@@ -112,14 +112,13 @@ def egraph_conversion(root: SExpr):
                 )
                 return WrapTerm(bra)
 
-            case rg.Loop(body=body, loopvar=str(loopvar), operands=operands):
+            case rg.Loop(body=body, operands=operands):
                 region = yield body
                 out_operands = []
                 for op in operands:
                     out_operands.append((yield op))
                 loop = eg.Term.Loop(
                     region.term,
-                    loopvar=loopvar,
                     operands=eg.termlist(*out_operands),
                 )
                 return WrapTerm(loop)

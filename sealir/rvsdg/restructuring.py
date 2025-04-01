@@ -471,7 +471,6 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                 ctx.add_argument(i, x.name)
             return grm.write(rg.Args(tuple(arg_done)))
         case ("PyAst_block", body):
-
             vars = sorted(ctx.scope.varmap)
             begin = grm.write(rg.RegionBegin(inports=tuple(vars)))
             with ctx.new_block(expr) as scope:
@@ -516,17 +515,41 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             # Populate variables that are not yet defined but will be defined in
             # the loop.
             names = get_vars_defined(body)
+            loopvar = extract_name_load(loopcondvar)
             for k in names - set(ctx.scope.varmap):
                 ctx.store_var(k, grm.write(rg.Undef(k)))
-            # Process the body
-            loopbody = yield body
-            loopvar = extract_name_load(loopcondvar)
-            updated_vars = ctx.updated_vars([ctx.scope_map[body]])
 
-            operands = ctx.load_vars(loopbody.begin.inports)
-            dow = grm.write(
-                rg.Loop(body=loopbody, loopvar=loopvar, operands=operands)
+            loopbody = yield body
+
+            # rewrite the loopbody to inject loop-condition as the first port
+            def get_loopvar(ports):
+                for p in ports:
+                    if p.name == loopvar:
+                        return p.value
+                raise AssertionError("malformed")
+
+            output_loopvar = get_loopvar(loopbody.ports)
+
+            injected = grm.write(
+                rg.Port(
+                    # Note: All port names must be in sorted order.
+                    #       The _loopcond_ prefix is selected to ensure that.
+                    name=internal_prefix(
+                        f"_loopcond_{len(ctx.scope_stack):04}"
+                    ),
+                    value=output_loopvar,
+                )
             )
+            loopbody = grm.write(
+                rg.RegionEnd(
+                    begin=loopbody.begin, ports=(injected,) + loopbody.ports
+                )
+            )
+
+            # wrap up the Loop
+            updated_vars = ctx.updated_vars([ctx.scope_map[body]])
+            operands = ctx.load_vars(loopbody.begin.inports)
+            dow = grm.write(rg.Loop(body=loopbody, operands=operands))
             # update scope
             for i, k in enumerate(updated_vars):
                 ctx.store_var(k, grm.write(rg.Unpack(val=dow, idx=i)))
@@ -718,15 +741,13 @@ def format_rvsdg(prgm: SExpr) -> str:
                 put(f"Endif")
                 return name
 
-            case rg.Loop(body=body, loopvar=loopvar, operands=operands):
+            case rg.Loop(body=body, operands=operands):
                 ops = []
                 for op in operands:
                     ops.append((yield op))
 
                 name = fresh_name()
-                put(
-                    f"{name} = Loop [{expr._handle}] #{loopvar} <- {' '.join(ops)}"
-                )
+                put(f"{name} = Loop [{expr._handle}] <- {' '.join(ops)}")
                 with indent():
                     (yield body)
                 put(f"EndLoop")

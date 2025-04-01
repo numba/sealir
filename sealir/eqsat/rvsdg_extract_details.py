@@ -164,13 +164,11 @@ class EGraphToRVSDG:
                             return grm.write(rg.PyNone())
                         case "Term.Loop", {
                             "body": body_regionend,
-                            "loopvar": str(loopvar),
                             "operands": operands,
                         }:
                             return grm.write(
                                 rg.Loop(
                                     body=body_regionend,
-                                    loopvar=loopvar,
                                     operands=operands,
                                 )
                             )

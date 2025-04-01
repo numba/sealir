@@ -48,6 +48,9 @@ class EvalPorts:
             repl.append(ports.get_by_name(k))
         return EvalPorts(self.parent, tuple(repl))
 
+    def drop_first(self) -> EvalPorts:
+        return EvalPorts(parent=self.parent, values=self.values[1:])
+
 
 def evaluate(
     prgm: SExpr,
@@ -153,7 +156,7 @@ def evaluate(
                 dbginfo.print("end if", dict(scope()))
                 return EvalPorts(expr, ports.values)
 
-            case rg.Loop(body=body, loopvar=loopvar, operands=operands):
+            case rg.Loop(body=body, operands=operands):
                 # handle region args
                 ops = []
                 for op in operands:
@@ -177,10 +180,13 @@ def evaluate(
                             dbginfo=dbginfo,
                         )
                         ports.update_scope(scope())
-                        cond = ports.get_by_name(loopvar)
+                        # First port is expected to be the loop condition
+                        cond = ports[0]
                         dbginfo.print("after loop iterator", dict(scope()))
                         memo[begin] = memo[begin].replace(ports)
-                return ports
+
+                # The loop output will drop the internal loop condition
+                return ports.drop_first()
 
             case rg.Unpack(val=source, idx=int(idx)):
                 ports = yield source

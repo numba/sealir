@@ -59,9 +59,7 @@ class Term(Expr):
     ) -> Term: ...
 
     @classmethod
-    def Loop(
-        cls, body: Term, loopvar: StringLike, operands: TermList
-    ) -> Term: ...
+    def Loop(cls, body: Term, operands: TermList) -> Term: ...
 
     @classmethod
     def RegionEnd(

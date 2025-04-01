@@ -52,7 +52,6 @@ class IfElse(_Root):
 
 class Loop(_Root):
     body: RegionEnd
-    loopvar: str
     operands: tuple[SExpr, ...]
 
 
