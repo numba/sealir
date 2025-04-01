@@ -147,136 +147,6 @@ class EGraphToRVSDG:
                         case "Term.Param", {"idx": idx}:
                             # TODO: get actual param name
                             return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
-                        case "Term.Add", {"a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOpPure(
-                                    op="+",
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.AddIO", {"io": io, "a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOp(
-                                    op="+",
-                                    io=io,
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.InplaceAddIO", {
-                            "io": io,
-                            "a": lhs,
-                            "b": rhs,
-                        }:
-                            return grm.write(
-                                rg.PyInplaceBinOp(
-                                    op="+",
-                                    io=io,
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.Mul", {"a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOpPure(
-                                    op="*",
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.MulIO", {"io": io, "a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOp(
-                                    op="*",
-                                    io=io,
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.Div", {"a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOpPure(
-                                    op="/",
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.DivIO", {"io": io, "a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOp(
-                                    op="/",
-                                    io=io,
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.Pow", {"a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOpPure(
-                                    op="**",
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.PowIO", {"io": io, "a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOp(
-                                    op="**",
-                                    io=io,
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.LtIO", {"io": io, "a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOp(
-                                    op="<",
-                                    io=io,
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.GtIO", {"io": io, "a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOp(
-                                    op=">",
-                                    io=io,
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.NeIO", {"io": io, "a": lhs, "b": rhs}:
-                            return grm.write(
-                                rg.PyBinOp(
-                                    op="!=",
-                                    io=io,
-                                    lhs=lhs,
-                                    rhs=rhs,
-                                )
-                            )
-                        case "Term.NotIO", {"io": io, "term": term}:
-                            return grm.write(
-                                rg.PyUnaryOp(op="not", io=io, operand=term)
-                            )
-                        case "Term.AttrIO", {
-                            "io": io,
-                            "obj": obj,
-                            "attrname": str(attrname),
-                        }:
-                            return grm.write(
-                                rg.PyAttr(io=io, value=obj, attrname=attrname)
-                            )
-                        case "Term.LoadGlobal", {"io": io, "name": str(name)}:
-                            return grm.write(rg.PyLoadGlobal(io=io, name=name))
-                        case "Term.Call", {
-                            "func": func,
-                            "io": io,
-                            "args": args,
-                        }:
-                            return grm.write(
-                                rg.PyCall(func=func, io=io, args=tuple(args))
-                            )
 
                         case "·.get", {"self": term, "idx": idx}:
                             return grm.write(rg.Unpack(val=term, idx=idx))
@@ -338,4 +208,135 @@ class EGraphToRVSDG:
                 raise NotImplementedError(f"Value of {op!r}")
 
     def handle_Term(self, op: str, children: dict | list, grm: Grammar):
-        return NotImplemented
+        return self.handle_Py_Term(op, children, grm)
+
+    def handle_Py_Term(self, op: str, children: dict | list, grm: Grammar):
+        match op, children:
+            case "Py_Add", {"a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOpPure(
+                        op="+",
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_AddIO", {"io": io, "a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOp(
+                        op="+",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_InplaceAddIO", {
+                "io": io,
+                "a": lhs,
+                "b": rhs,
+            }:
+                return grm.write(
+                    rg.PyInplaceBinOp(
+                        op="+",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_Mul", {"a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOpPure(
+                        op="*",
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_MulIO", {"io": io, "a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOp(
+                        op="*",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_Div", {"a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOpPure(
+                        op="/",
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_DivIO", {"io": io, "a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOp(
+                        op="/",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_Pow", {"a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOpPure(
+                        op="**",
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_PowIO", {"io": io, "a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOp(
+                        op="**",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_LtIO", {"io": io, "a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOp(
+                        op="<",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_GtIO", {"io": io, "a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOp(
+                        op=">",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_NeIO", {"io": io, "a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOp(
+                        op="!=",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
+            case "Py_NotIO", {"io": io, "term": term}:
+                return grm.write(rg.PyUnaryOp(op="not", io=io, operand=term))
+            case "Py_AttrIO", {
+                "io": io,
+                "obj": obj,
+                "attrname": str(attrname),
+            }:
+                return grm.write(
+                    rg.PyAttr(io=io, value=obj, attrname=attrname)
+                )
+            case "Py_LoadGlobal", {"io": io, "name": str(name)}:
+                return grm.write(rg.PyLoadGlobal(io=io, name=name))
+            case "Py_Call", {
+                "func": func,
+                "io": io,
+                "args": args,
+            }:
+                return grm.write(rg.PyCall(func=func, io=io, args=tuple(args)))
+            case _:
+                return NotImplemented
