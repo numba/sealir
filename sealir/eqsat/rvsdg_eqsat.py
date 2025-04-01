@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
-from typing import Callable
-
 from egglog import (
     Bool,
     Expr,
