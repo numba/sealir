@@ -22,12 +22,11 @@ def middle_end(rvsdg_expr, apply_to_egraph):
     """
     # Convert to egraph
     memo = egraph_conversion(rvsdg_expr)
-    root = GraphRoot(memo[rvsdg_expr])
+
+    func = memo[rvsdg_expr]
 
     egraph = EGraph()
-    egraph.let("root", root)
-
-    apply_to_egraph(egraph, root)
+    apply_to_egraph(egraph, func)
 
     # Extraction
     cost, extracted = egraph_extraction(egraph, rvsdg_expr)
@@ -38,12 +37,16 @@ def compiler_pipeline(fn, args, *, verbose=False):
     rvsdg_expr, dbginfo = frontend(fn)
 
     # Middle end
-    def display_egraph(egraph, root):
+    def display_egraph(egraph: EGraph, func):
         # For now, the middle end is just an identity function that exercise
         # the encoding into and out of egraph.
+        root = GraphRoot(func)
+        egraph.let("root", root)
         if verbose:
             # For inspecting the egraph
             egraph.display()  # opens a webpage when run
+
+        return root
 
     cost, extracted = middle_end(rvsdg_expr, display_egraph)
     print("Extracted from EGraph".center(80, "="))

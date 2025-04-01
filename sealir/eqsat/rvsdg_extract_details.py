@@ -13,12 +13,6 @@ from .egraph_utils import EGraphJsonDict
 class Data: ...
 
 
-@dataclass(frozen=True)
-class RegionBeginData(Data):
-    begin: rg.RegionBegin
-    ins: str
-
-
 class EGraphToRVSDG:
     def __init__(self, gdct: EGraphJsonDict, rvsdg_sexpr: ase.SExpr):
         self.rvsdg_sexpr = rvsdg_sexpr
@@ -77,6 +71,8 @@ class EGraphToRVSDG:
                     return float(node["op"])
                 case "Vec_Term":
                     return get_children()
+                case "Vec_Port":
+                    return get_children()
                 case "Vec_String":
                     return get_children()
                 case _:
@@ -85,15 +81,9 @@ class EGraphToRVSDG:
             op = node["op"]
             children = get_children()
 
-            rbd: RegionBeginData
             match node_type, children:
                 case "Region", {"inports": ins}:
-                    return RegionBeginData(
-                        begin=grm.write(rg.RegionBegin(inports=ins)),
-                        ins=ins,
-                    )
-                case "InputPorts", {"self": RegionBeginData() as rbd}:
-                    return rbd.begin
+                    return grm.write(rg.RegionBegin(inports=ins))
                 case "Term", children:
                     extended_handle = self.handle_Term(op, children, grm)
                     if extended_handle is not NotImplemented:
@@ -125,11 +115,11 @@ class EGraphToRVSDG:
                         }:
                             return grm.write(
                                 rg.RegionEnd(
-                                    begin=region.begin,
+                                    begin=region,
                                     ports=tuple(ports),
                                 )
                             )
-                        case "Term.Branch", {
+                        case "Term.IfElse", {
                             "cond": cond,
                             "then": then,
                             "orelse": orelse,
@@ -314,19 +304,23 @@ class EGraphToRVSDG:
                                     operands=operands,
                                 )
                             )
-                        case "Term.Port", {"name": str(name), "value": value}:
-                            return grm.write(rg.Port(name=name, value=value))
                         case _:
                             raise NotImplementedError(
                                 f"invalid Term: {node_type}, {children}"
                             )
                 case "TermList", {"terms": terms}:
                     return tuple(terms)
+                case "PortList", {"ports": ports}:
+                    return tuple(ports)
+
                 case "Value", children:
                     return self.handle_Value(op, children, grm)
 
                 case "InPorts", {"names": names}:
                     return tuple(names)
+
+                case "Port", {"name": str(name), "term": value}:
+                    return grm.write(rg.Port(name=name, value=value))
                 case _:
                     raise NotImplementedError(
                         f"function of: {op!r} :: {node_type}"

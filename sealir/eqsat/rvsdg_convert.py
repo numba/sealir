@@ -20,11 +20,10 @@ SExpr = ase.SExpr
 
 @dataclass(frozen=True)
 class RegionInfo:
-    region: eg.RegionBegin
-    ins: eg.InputPorts
+    region: eg.Region
 
     def __getitem__(self, idx: int) -> eg.Term:
-        return self.ins.get(idx)
+        return self.region.get(idx)
 
 
 @dataclass(frozen=True)
@@ -77,7 +76,7 @@ def egraph_conversion(root: SExpr):
 
             case rg.RegionBegin(inports=ins):
                 rd = eg.Region(node_uid(expr), inports=eg.inports(*ins))
-                return RegionInfo(rd, rd.begin())
+                return RegionInfo(rd)
 
             case rg.RegionEnd(begin=begin, ports=ports):
                 ri: RegionInfo = (yield begin)
@@ -86,11 +85,11 @@ def egraph_conversion(root: SExpr):
                     for p in ports:
                         portnodes.append((yield p))
                 return WrapTerm(
-                    eg.Term.RegionEnd(ri.region, eg.termlist(*portnodes))
+                    eg.Term.RegionEnd(ri.region, eg.portlist(*portnodes))
                 )
 
             case rg.Port(name=str(name), value=value):
-                return eg.Term.Port(name, (yield value))
+                return eg.Port(name, (yield value))
 
             case rg.Unpack(val=source, idx=int(idx)):
                 outs = yield source
@@ -105,7 +104,7 @@ def egraph_conversion(root: SExpr):
                 out_operands = []
                 for op in operands:
                     out_operands.append((yield op))
-                bra = eg.Term.Branch(
+                bra = eg.Term.IfElse(
                     condval,
                     outs_if.term,
                     outs_else.term,

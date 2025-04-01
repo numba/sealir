@@ -170,7 +170,7 @@ def test_max_if_else():
             return [a]
 
         # Do Branch
-        ifelse = Term.Branch(lt, if_then, or_else)
+        ifelse = Term.IfElse(lt, if_then, or_else)
 
         # Return
         return [ifelse.getPort(0)]
