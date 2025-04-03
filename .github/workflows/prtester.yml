@@ -25,12 +25,10 @@ jobs:
       - name: Setup Miniconda
         uses: conda-incubator/setup-miniconda@505e6394dae86d6a5c7fbb6e3fb8938e3e863830 # v3.1.1
         with:
-          auto-update-conda: true
-          auto-activate-base: true
-          activate-environment: ""
+          auto-activate-base: false
+          activate-environment: sealir_tester_py312
+          environment-file: conda_environment.yml
 
       - name: Run tests
         run: |
-          conda env create --file=./conda_environment --name=tester -y
-          conda activate tester
           pytest sealir -v
