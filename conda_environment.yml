@@ -7,7 +7,7 @@ dependencies:
   - pytest
   - networkx
   - numpy
+  - pip
   - pip:
     - egglog 
     - numba_rvsdg
-    
