@@ -753,6 +753,30 @@ def format_rvsdg(prgm: SExpr) -> str:
                 put(f"EndLoop")
                 return name
 
+            case rg.PyForLoop(
+                iter_arg_idx=int(iter_arg_idx),
+                indvar_arg_idx=int(indvar_arg_idx),
+                iterlast_arg_idx=int(iterlast_arg_idx),
+                body=body,
+                operands=operands,
+            ):
+                ops = []
+                for op in operands:
+                    ops.append((yield op))
+
+                name = fresh_name()
+                put(
+                    f"{name} = PyForLoop [{expr._handle}] "
+                    f"#iter_arg_idx={iter_arg_idx} "
+                    f"#indvar_arg_idx={indvar_arg_idx} "
+                    f"#iterlast_arg_idx={iterlast_arg_idx} "
+                    f"<- {' '.join(ops)}"
+                )
+                with indent():
+                    (yield body)
+                put(f"EndPyForLoopMain")
+                return name
+
             case rg.Unpack(val=source, idx=int(idx)):
                 ref = yield source
                 return f"{ref}[{idx}]"
@@ -889,6 +913,17 @@ def format_rvsdg(prgm: SExpr) -> str:
                 indexref = yield index
                 name = fresh_name()
                 put(f"{name} = PySubscript {ioref} {valref} {indexref}")
+                return name
+
+            case rg.DbgValue(
+                name=str(varname),
+                value=value,
+                srcloc=srcloc,
+                interloc=interloc,
+            ):
+                valueref = yield value
+                name = fresh_name()
+                put(f"{name} = DbgValue {varname} {valueref}")  # TODO loc
                 return name
 
             case _:

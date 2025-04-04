@@ -22,7 +22,16 @@ from egglog import (
     ruleset,
     set_,
     union,
+    var,
 )
+from egglog.conversion import converter
+
+
+class DynInt(Expr):
+    def __init__(self, num: i64Like): ...
+
+
+converter(i64, DynInt, DynInt)
 
 
 class InPorts(Expr):
@@ -37,6 +46,8 @@ class Region(Expr):
     def __init__(self, uid: StringLike, inports: InPorts): ...
 
     def get(self, idx: i64Like) -> Term: ...
+
+    def dyn_get(self, idx: DynInt) -> Term: ...
 
 
 class Port(Expr):
@@ -92,19 +103,29 @@ class Term(Expr):
     @classmethod
     def LiteralNone(cls) -> Term: ...
 
+    # TODO: add Loc
+    # TODO: this node is merged with `value`. Extraction should look in the
+    #       eclass for DbgValue and reconstruct them.
+    @classmethod
+    def DbgValue(cls, varname: StringLike, value: Term) -> Term: ...
+
     def getPort(self, idx: i64Like) -> Term: ...
 
 
 class TermList(Expr):
     def __init__(self, terms: Vec[Term]): ...
 
-    def __getitem__(self, idx: i64) -> Term: ...
+    def __getitem__(self, idx: i64Like) -> Term: ...
+
+    def dyn_index(self, target: Term) -> DynInt: ...
 
 
 class PortList(Expr):
     def __init__(self, ports: Vec[Port]): ...
 
     def __getitem__(self, idx: i64) -> Port: ...
+
+    def getValue(self, idx: i64) -> Term: ...
 
 
 # class Debug(Expr):
@@ -123,11 +144,11 @@ def portlist(*args: Port) -> PortList:
 
 
 @function
-def PartialEval(env: Env, func: Term) -> Value: ...
+def GraphRoot(t: Term) -> Term: ...
 
 
 @function
-def GraphRoot(t: Term) -> Term: ...
+def IsConstant(t: Term) -> Unit: ...
 
 
 @function
@@ -138,12 +159,29 @@ def IsConstantTrue(t: Term) -> Unit: ...
 def IsConstantFalse(t: Term) -> Unit: ...
 
 
+@function
+def Select(cond: Term, then: Term, orelse: Term) -> Term: ...
+
+
 # ------------------------------ RuleSets ------------------------------
+
+
+def wildcard(ty):
+    wildcard._count += 1
+    return var(f"_{wildcard._count}", ty)
+
+
+wildcard._count = 0
 
 
 @ruleset
 def ruleset_portlist_basic(
-    vecport: Vec[Port], idx: i64, a: Term, portname: String
+    vecport: Vec[Port],
+    idx: i64,
+    a: Term,
+    portname: String,
+    port: Port,
+    portlist: PortList,
 ):
     yield rewrite(
         # simplify PortList indexing
@@ -153,7 +191,33 @@ def ruleset_portlist_basic(
         # given
         idx < vecport.length(),
     )
-    yield rewrite(Port(portname, a).value, subsume=True).to(a)
+    yield rule(port == Port(portname, a), port.value).then(
+        union(port.value).with_(a)
+    )
+    yield rewrite(portlist.getValue(idx)).to(portlist[idx].value)
+
+
+@ruleset
+def ruleset_portlist_ifelse(
+    idx: i64,
+    ifelse: Term,
+    then_portlist: PortList,
+    orelse_portlist: PortList,
+):
+    # IfElse
+    yield rule(
+        ifelse
+        == Term.IfElse(
+            cond=wildcard(Term),
+            then=Term.RegionEnd(wildcard(Region), then_portlist),
+            orelse=Term.RegionEnd(wildcard(Region), orelse_portlist),
+            operands=wildcard(TermList),
+        ),
+        ifelse.getPort(idx),
+    ).then(
+        then_portlist.getValue(idx),
+        orelse_portlist.getValue(idx),
+    )
 
 
 @ruleset
@@ -169,12 +233,19 @@ def ruleset_termlist_basic(vecterm: Vec[Term], idx: i64):
 
 
 @ruleset
+def ruleset_simplify_dbgvalue(
+    t: Term,
+    varname: String,
+):
+    # DbgValue is merged with base value.
+    yield rewrite(Term.DbgValue(varname, t)).to(t)
+
+
+@ruleset
 def ruleset_apply_region(
     ports: PortList,
     idx: i64,
     region: Region,
-    uid: String,
-    inports: InPorts,
     operands: TermList,
 ):
     yield rewrite(
@@ -190,14 +261,27 @@ def ruleset_apply_region(
 
 
 ruleset_rvsdg_basic = (
-    ruleset_portlist_basic | ruleset_termlist_basic | ruleset_apply_region
+    ruleset_simplify_dbgvalue
+    | ruleset_portlist_basic
+    | ruleset_portlist_ifelse
+    | ruleset_termlist_basic
+    | ruleset_apply_region
 )
 
 
 @ruleset
 def ruleset_const_propagate(a: Term, ival: i64):
-    yield rule(a == Term.LiteralI64(ival), ival != 0).then(IsConstantTrue(a))
-    yield rule(a == Term.LiteralI64(ival), ival == 0).then(IsConstantFalse(a))
+    # Constant boolean
+    yield rule(a == Term.LiteralI64(ival), ival != i64(0)).then(
+        IsConstantTrue(a)
+    )
+    yield rule(a == Term.LiteralI64(ival), ival == i64(0)).then(
+        IsConstantFalse(a)
+    )
+
+    # Constant integers
+    yield rule(a == Term.LiteralI64(ival)).then(IsConstant(a))
+    yield rule(a == Term.LiteralI64(ival)).then(IsConstant(a))
 
 
 @ruleset
@@ -214,11 +298,47 @@ def ruleset_const_fold_if_else(a: Term, b: Term, c: Term, operands: TermList):
     )
 
 
+@ruleset
+def ruleset_ifelse_propagation(
+    ifelse: Term,
+    cond: Term,
+    then: Term,
+    orelse: Term,
+    idx: i64,
+    then_ports: PortList,
+    else_ports: Vec[Port],
+):
+    yield rule(
+        # Create Select statement from IfElse outputs that are constants on
+        # both sides
+        ifelse == Term.IfElse(cond, then, orelse, wildcard(TermList)),
+        ifelse.getPort(idx),
+        then == Term.RegionEnd(wildcard(Region), then_ports),
+        orelse == Term.RegionEnd(wildcard(Region), PortList(else_ports)),
+        IsConstant(then_ports.getValue(idx)),
+        IsConstant(else_ports[idx].value),
+    ).then(
+        union(ifelse.getPort(idx)).with_(
+            Select(cond, then_ports[idx].value, else_ports[idx].value)
+        )
+    )
+
+    yield rewrite(
+        # Simplify Select if both side are the same
+        Select(cond, then, orelse)
+    ).to(
+        then,
+        # given both side are the same
+        then == orelse,
+    )
+
+
 def make_rules(*, communtative=False):
     rules = (
         ruleset_rvsdg_basic
         | ruleset_const_propagate
         | ruleset_const_fold_if_else
+        | ruleset_ifelse_propagation
     )
     # rules |= _PartialEval_rules
     # if communtative:

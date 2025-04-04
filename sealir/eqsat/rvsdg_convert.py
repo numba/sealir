@@ -215,10 +215,10 @@ def egraph_conversion(root: SExpr):
             case rg.DbgValue(
                 name=str(varname),
                 value=value,
-                srcloc=srcloc,
-                interloc=interloc,
+                srcloc=srcloc,  # TODO
+                interloc=interloc,  # TODO
             ):
-                return (yield value)
+                return eg.Term.DbgValue(varname, (yield value))
 
             case rg.ArgRef(idx=int(i), name=str(name)):
                 return eg.Term.Param(i)

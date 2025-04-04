@@ -172,6 +172,26 @@ class EGraphToRVSDG:
                                     operands=operands,
                                 )
                             )
+                        case "Term.DbgValue", {
+                            "varname": str(varname),
+                            "value": value,
+                        }:
+                            # TODO: Loc
+                            return grm.write(
+                                rg.DbgValue(
+                                    name=varname,
+                                    value=value,
+                                    srcloc=grm.write(rg.unknown_loc()),
+                                    interloc=grm.write(rg.unknown_loc()),
+                                )
+                            )
+                        case "·.dyn_get", {
+                            "self": rg.RegionBegin() as regionbegin,
+                            "idx": int(idx),
+                        }:
+                            return grm.write(
+                                rg.Unpack(val=regionbegin, idx=idx)
+                            )
                         case _:
                             raise NotImplementedError(
                                 f"invalid Term: {node_type}, {children}"
@@ -189,6 +209,18 @@ class EGraphToRVSDG:
 
                 case "Port", {"name": str(name), "term": value}:
                     return grm.write(rg.Port(name=name, value=value))
+
+                case "DynInt", {
+                    "self": termlist,
+                    "target": target,
+                } if op == "·.dyn_index":
+                    for i, term in enumerate(termlist):
+                        if ase.matches(term, target):
+                            return i
+                    raise ValueError("cannot find target")
+
+                case "DynInt", {"num": int(ival)} if op == "DynInt":
+                    return ival
                 case _:
                     raise NotImplementedError(
                         f"function of: {op!r} :: {node_type}"
@@ -336,5 +368,21 @@ class EGraphToRVSDG:
                 "args": args,
             }:
                 return grm.write(rg.PyCall(func=func, io=io, args=tuple(args)))
+            case "Py_ForLoopMain", {
+                "iter_arg_idx": int(iter_arg_idx),
+                "indvar_arg_idx": int(indvar_arg_idx),
+                "iterlast_arg_idx": int(iterlast_arg_idx),
+                "body": body,
+                "operands": operands,
+            }:
+                return grm.write(
+                    rg.PyForLoop(
+                        iter_arg_idx=iter_arg_idx,
+                        indvar_arg_idx=indvar_arg_idx,
+                        iterlast_arg_idx=iterlast_arg_idx,
+                        body=body,
+                        operands=operands,
+                    )
+                )
             case _:
                 return NotImplemented

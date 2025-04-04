@@ -8,7 +8,7 @@ from sealir.tests.test_rvsdg_egraph_roundtrip import (
 )
 
 
-def compiler_pipeline(fn, *, verbose=False):
+def compiler_pipeline(fn, *, ruleset, verbose=False):
     rvsdg_expr, dbginfo = frontend(fn)
 
     def define_egraph(egraph, func):
@@ -18,7 +18,6 @@ def compiler_pipeline(fn, *, verbose=False):
         if verbose:
             print(egraph.extract(root))
 
-        ruleset = rvsdg_eqsat.make_rules()  # | py_eqsat.make_rules()
         egraph.run(ruleset.saturate())
 
         if verbose:
@@ -42,12 +41,15 @@ def run_test(fn, jt, args):
 def test_const_fold_ifelse():
     """Testing constant folding of if-else when the condition is a constant"""
 
+    ruleset = rvsdg_eqsat.make_rules()
+
     def check_output_is_argument(extracted, argname: str):
         """Check that the return value is the argument of name `argname`."""
         outportmap = dict((p.name, p.value) for p in extracted.body.ports)
         argportidx = extracted.body.begin.inports.index(argname)
         match outportmap["!ret"]:
             case rg.Unpack(val, idx):
+                print(val)
                 assert val == extracted.body.begin
                 assert idx == argportidx
             case _:
@@ -73,7 +75,9 @@ def test_const_fold_ifelse():
         else:
             return b
 
-    jt, extracted = compiler_pipeline(ifelse_fold_select_false)
+    jt, extracted = compiler_pipeline(
+        ifelse_fold_select_false, ruleset=ruleset, verbose=True
+    )
     args = (12, 34)
     run_test(ifelse_fold_select_false, jt, args)
     check_output_is_argument(extracted, "b")
@@ -88,7 +92,9 @@ def test_const_fold_ifelse():
         else:
             return b
 
-    jt, extracted = compiler_pipeline(ifelse_fold_select_true)
+    jt, extracted = compiler_pipeline(
+        ifelse_fold_select_true, ruleset=ruleset, verbose=True
+    )
     args = (12, 34)
     run_test(ifelse_fold_select_true, jt, args)
     # prove that constant folding of the branch condition eliminated the if-else
@@ -97,16 +103,19 @@ def test_const_fold_ifelse():
     check_output_is_argument(extracted, "a")
 
 
-# def sum_ints(n):
-#     c = 0
-#     for i in range(n):
-#         c += i
-#     return c
-#     # c = 0
-#     # i = 0
-#     # while i < n:
-#     #     c = i + c
-#     #     i = i + 1
-#     # return c
+def test_forloop_lifting():
+    ruleset = rvsdg_eqsat.make_rules() | py_eqsat.make_rules()
 
-# compiler_pipeline(sum_ints, (12,), verbose=True)
+    def sum_ints(n):
+        c = 0
+        for i in range(n):
+            c += i
+        return c + i
+
+    jt, extracted = compiler_pipeline(sum_ints, ruleset=ruleset, verbose=True)
+    run_test(sum_ints, jt, args=(12,))
+
+    # Prove that the lifting to PyForLoop worked.
+    walker = ase.walk_descendants_depth_first_no_repeat(extracted)
+    forloops = [cur for _, cur in walker if isinstance(cur, rg.PyForLoop)]
+    assert len(forloops) == 1

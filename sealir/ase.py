@@ -613,6 +613,7 @@ def matches(self: SExpr, test: SExpr) -> bool:
     """Match structurally?"""
 
     def arg_eq(pair: tuple[value_type, value_type]) -> bool:
+        x, y = pair
         match (x, y):
             case (SExpr(), SExpr()):
                 return True
@@ -632,7 +633,7 @@ def matches(self: SExpr, test: SExpr) -> bool:
         match (left, right):
             case (SExpr(), SExpr()) if (
                 left._head == right._head
-                and all(reduce(arg_eq, zip(left._args, right._args)))
+                and all(map(arg_eq, zip(left._args, right._args)))
             ):
                 continue
             case _:
