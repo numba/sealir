@@ -40,8 +40,10 @@ def run_test(fn, jt, args):
 
 
 def test_const_fold_ifelse():
+    """Testing constant folding of if-else when the condition is a constant"""
 
     def check_output_is_argument(extracted, argname: str):
+        """Check that the return value is the argument of name `argname`."""
         outportmap = dict((p.name, p.value) for p in extracted.body.ports)
         argportidx = extracted.body.begin.inports.index(argname)
         match outportmap["!ret"]:
@@ -52,6 +54,8 @@ def test_const_fold_ifelse():
                 assert False
 
     def get_if_else_node(extracted):
+        """Get all rvsdg IfElse nodes"""
+
         def is_if_else(expr):
             match expr:
                 case rg.IfElse():
@@ -73,7 +77,8 @@ def test_const_fold_ifelse():
     args = (12, 34)
     run_test(ifelse_fold_select_false, jt, args)
     check_output_is_argument(extracted, "b")
-
+    # prove that constant folding of the branch condition eliminated the if-else
+    # node
     assert len(get_if_else_node(extracted)) == 0
 
     def ifelse_fold_select_true(a, b):
@@ -86,7 +91,8 @@ def test_const_fold_ifelse():
     jt, extracted = compiler_pipeline(ifelse_fold_select_true)
     args = (12, 34)
     run_test(ifelse_fold_select_true, jt, args)
-
+    # prove that constant folding of the branch condition eliminated the if-else
+    # node
     assert len(get_if_else_node(extracted)) == 0
     check_output_is_argument(extracted, "a")
 
