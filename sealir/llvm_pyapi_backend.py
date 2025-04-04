@@ -41,7 +41,6 @@ def llvm_codegen(root: ase.SExpr, ns: Mapping[str, Any] = _kwargs_default):
 
     # make function
     arity = determine_arity(root)
-    bodynode = root.body
     assert arity >= 1
     actual_num_args = arity
     fnty = ir.FunctionType(
@@ -51,39 +50,15 @@ def llvm_codegen(root: ase.SExpr, ns: Mapping[str, Any] = _kwargs_default):
 
     # init entry block and builder
     builder = ir.IRBuilder(fn.append_basic_block())
-    retval_slot = builder.alloca(ll_pyobject_ptr)
-    builder.store(ll_pyobject_ptr(None), retval_slot)  # init retval to NULL
-    bb_main = builder.append_basic_block()
-    builder.branch(bb_main)
-    builder.position_at_end(bb_main)
 
     ctx = CodegenCtx(
         llvm_module=mod,
         llvm_func=fn,
         builder=builder,
         pyapi=PythonAPI(builder),
-        retval_slot=retval_slot,
-        ports={},
         global_ns=ChainMap(ns, __builtins__),
     )
-    # print(fn)
-    # # Setup ports
-    # argidx = 0
-    # for k in bodynode.begin.ins.split():
-    #     if k == internal_prefix("io"):
-    #         ctx.ports[k] = IOState()
-    #     else:
-    #         ctx.ports[k] = ArgValue(argidx)
-    #         argidx += 1
-    # assert argidx == actual_num_args, (argidx, actual_num_args)
-
-    memo = ase.traverse(bodynode, _codegen_loop, CodegenState(context=ctx))
-
-    # builder.ret(builder.load(retval_slot))
-    # outports = dict(zip(bodynode.outs.split(), bodynode.ports, strict=True))
-    # retval = memo[outports[internal_prefix("ret")]].value
-    retval = memo[bodynode].value
-    builder.ret(retval)
+    ase.traverse(root, _codegen_loop, CodegenState(context=ctx))
 
     llvm_ir = str(mod)
     # print(llvm_ir)
@@ -143,26 +118,58 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 pyapi.printf(f"    {k} = %p\n", v.value)
         return packs
 
-    match expr:
-        case rg.Func():
-            raise TypeError
+    @contextmanager
+    def push(region_args):
+        state.context.region_args.append(tuple(region_args))
+        try:
+            yield
+        finally:
+            state.context.region_args.pop()
 
-        case rg.RegionBegin(ins=ins, ports=ports):
+    def get_region_args():
+        return state.context.region_args[-1]
+
+    match expr:
+        case rg.Func(args=args, body=body):
+            # Function prologue
+            bb_main = builder.append_basic_block()
+            builder.branch(bb_main)
+            builder.position_at_end(bb_main)
+
+            names = {
+                argspec.name: builder.function.args[i]
+                for i, argspec in enumerate(args.arguments)
+            }
+            argvalues = []
+            for k in body.begin.inports:
+                if k == internal_prefix("io"):
+                    v = IOState()
+                else:
+                    v = SSAValue(names[k])
+                argvalues.append(v)
+
+            with push(argvalues):
+                outs = yield body
+
+            portnames = [p.name for p in body.ports]
+            retval = outs[portnames.index(internal_prefix("ret"))]
+            builder.ret(retval.value)
+
+        case rg.RegionBegin(inports=ins):
             portvalues = []
-            for p in ports:
-                ctx.ports[p] = pv = yield p
+            for i, k in enumerate(ins):
+                pv = get_region_args()[i]
                 portvalues.append(pv)
             return PackedValues.make(*portvalues)
 
         case rg.RegionEnd(
             begin=rg.RegionBegin() as begin,
-            outs=str(outs),
             ports=ports,
         ):
             yield begin
             portvalues = []
             for p in ports:
-                ctx.ports[p] = pv = yield p
+                pv = yield p.value
                 portvalues.append(pv)
             return PackedValues.make(*portvalues)
 
@@ -266,8 +273,14 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
         case rg.PyNone():
             return SSAValue(pyapi.make_none())
 
-        case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
+        case rg.IfElse(cond=cond, body=body, orelse=orelse, operands=operands):
             condval = (yield cond).value
+
+            # process operands
+            ops = []
+            for op in operands:
+                ops.append((yield op))
+
             # unpack pybool
             condbit = builder.icmp_unsigned(
                 "!=", pyapi.int32(0), pyapi.object_istrue(condval)
@@ -280,12 +293,14 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             builder.cbranch(condbit, bb_then, bb_else)
             # Then
             with builder.goto_block(bb_then):
-                value_then = yield body
+                with push(ops):
+                    value_then = yield body
                 builder.branch(bb_endif)
                 bb_then_end = builder.basic_block
             # Else
             with builder.goto_block(bb_else):
-                value_else = yield orelse
+                with push(ops):
+                    value_else = yield orelse
                 builder.branch(bb_endif)
                 bb_else_end = builder.basic_block
             # EndIf
@@ -310,10 +325,17 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                     phis.append(SSAValue(phi))
             return PackedValues.make(*phis)
 
-        case rg.Loop(body=rg.RegionEnd() as body, outs=outs, loopvar=loopvar):
+        case rg.Loop(body=rg.RegionEnd() as body, operands=operands):
+            # process operands
+            ops = []
+            for op in operands:
+                ops.append((yield op))
+
             # Note this is a tail loop.
             begin = body.begin
-            loopentry_values = yield begin
+
+            with push(ops):
+                loopentry_values = yield begin
 
             bb_before = builder.basic_block
             bb_loopbody = builder.append_basic_block("loopbody")
@@ -339,7 +361,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             packed_phis = PackedValues.make(*phis)
 
             # generate body
-            loopctx = replace(ctx, ports={})
+            loopctx = replace(ctx, region_args=[])
             loop_memo = {begin: packed_phis}
             memo = ase.traverse(
                 body,
@@ -348,8 +370,9 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 init_memo=loop_memo,
             )
 
-            loopout_values = memo[body]
-            cond_obj = loopout_values[outs.split().index(loopvar)].value
+            loopout_values = list(memo[body])
+            portnames = [p.name for p in body.ports]
+            cond_obj = loopout_values.pop(0).value
 
             # get loop condition
             loopcond = builder.icmp_unsigned(
@@ -404,10 +427,10 @@ class CodegenCtx:
     llvm_func: ir.Function
     builder: ir.IRBuilder
     pyapi: PythonAPI
-    retval_slot: ir.Value
 
-    ports: dict[str, LLVMValue]
     global_ns: Mapping[str, Any]
+
+    region_args: list[LLVMValue] = field(default_factory=list)
 
 
 def determine_arity(root: ase.SExpr) -> int:

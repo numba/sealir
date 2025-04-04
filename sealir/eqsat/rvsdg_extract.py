@@ -46,8 +46,6 @@ def egraph_extraction(
             n_inline_leaves=0, split_primitive_outputs=False
         ).to_json()
     )
-    # pprint(gdct)
-
     [root] = get_graph_root(gdct)
     root_eclass = gdct["nodes"][root]["eclass"]
 
@@ -56,7 +54,7 @@ def egraph_extraction(
     extraction = Extraction(gdct, root_eclass, cost_model)
     cost, exgraph = extraction.choose()
     te = time.time()
-    print("custom cost-model greedy extraction:", te - ts)
+    # print("custom cost-model greedy extraction:", te - ts)
 
     expr = convert_to_rvsdg(
         exgraph,

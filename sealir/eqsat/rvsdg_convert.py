@@ -11,8 +11,8 @@ from dataclasses import dataclass
 
 from sealir import ase
 from sealir.rvsdg import grammar as rg
-from sealir.rvsdg import internal_prefix
 
+from . import py_eqsat
 from . import rvsdg_eqsat as eg
 
 SExpr = ase.SExpr
@@ -20,11 +20,10 @@ SExpr = ase.SExpr
 
 @dataclass(frozen=True)
 class RegionInfo:
-    region: eg.RegionBegin
-    ins: eg.InputPorts
+    region: eg.Region
 
     def __getitem__(self, idx: int) -> eg.Term:
-        return self.ins.get(idx)
+        return self.region.get(idx)
 
 
 @dataclass(frozen=True)
@@ -72,42 +71,56 @@ def egraph_conversion(root: SExpr):
                 return eg.Term.Func(
                     uid=node_uid(expr),
                     fname=fname,
-                    body=(yield body),
+                    body=(yield body).term,
                 )
 
-            case rg.RegionBegin(ins=ins, ports=ports):
-                procports = []
-                for p in ports:
-                    procports.append((yield p))
-                rd = eg.Region(
-                    node_uid(expr), ins=ins, ports=eg.termlist(*procports)
-                )
-                return RegionInfo(rd, rd.begin())
+            case rg.RegionBegin(inports=ins):
+                rd = eg.Region(node_uid(expr), inports=eg.inports(*ins))
+                return RegionInfo(rd)
 
-            case rg.RegionEnd(begin=begin, outs=str(outnames), ports=ports):
+            case rg.RegionEnd(begin=begin, ports=ports):
                 ri: RegionInfo = (yield begin)
                 with push(ri):
-                    outs = []
+                    portnodes = []
                     for p in ports:
-                        outs.append((yield p))
+                        portnodes.append((yield p))
                 return WrapTerm(
-                    eg.Term.RegionEnd(ri.region, outnames, eg.termlist(*outs))
+                    eg.Term.RegionEnd(ri.region, eg.portlist(*portnodes))
                 )
+
+            case rg.Port(name=str(name), value=value):
+                return eg.Port(name, (yield value))
 
             case rg.Unpack(val=source, idx=int(idx)):
                 outs = yield source
                 return outs[idx]
 
-            case rg.IfElse(cond=cond, body=body, orelse=orelse, outs=outs):
+            case rg.IfElse(
+                cond=cond, body=body, orelse=orelse, operands=operands
+            ):
                 condval = yield cond
                 outs_if = yield body
                 outs_else = yield orelse
-                bra = eg.Term.Branch(condval, outs_if.term, outs_else.term)
+                out_operands = []
+                for op in operands:
+                    out_operands.append((yield op))
+                bra = eg.Term.IfElse(
+                    condval,
+                    outs_if.term,
+                    outs_else.term,
+                    operands=eg.termlist(*out_operands),
+                )
                 return WrapTerm(bra)
 
-            case rg.Loop(body=body, outs=str(outs), loopvar=str(loopvar)):
+            case rg.Loop(body=body, operands=operands):
                 region = yield body
-                loop = eg.Term.Loop(region.term)
+                out_operands = []
+                for op in operands:
+                    out_operands.append((yield op))
+                loop = eg.Term.Loop(
+                    region.term,
+                    operands=eg.termlist(*out_operands),
+                )
                 return WrapTerm(loop)
 
             case rg.PyUnaryOp(op=str(op), io=io, operand=operand):
@@ -115,7 +128,7 @@ def egraph_conversion(root: SExpr):
                 operandterm = yield operand
                 match op:
                     case "not":
-                        res = eg.Term.NotIO(ioterm, operandterm)
+                        res = py_eqsat.Py_NotIO(ioterm, operandterm)
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
 
@@ -127,19 +140,25 @@ def egraph_conversion(root: SExpr):
                 rhsterm = yield rhs
                 match op:
                     case "<":
-                        res = eg.Term.LtIO(ioterm, lhsterm, rhsterm)
+                        res = py_eqsat.Py_LtIO(ioterm, lhsterm, rhsterm)
+
+                    case ">":
+                        res = py_eqsat.Py_GtIO(ioterm, lhsterm, rhsterm)
 
                     case "+":
-                        res = eg.Term.AddIO(ioterm, lhsterm, rhsterm)
+                        res = py_eqsat.Py_AddIO(ioterm, lhsterm, rhsterm)
 
                     case "*":
-                        res = eg.Term.MulIO(ioterm, lhsterm, rhsterm)
+                        res = py_eqsat.Py_MulIO(ioterm, lhsterm, rhsterm)
 
                     case "/":
-                        res = eg.Term.DivIO(ioterm, lhsterm, rhsterm)
+                        res = py_eqsat.Py_DivIO(ioterm, lhsterm, rhsterm)
 
                     case "**":
-                        res = eg.Term.PowIO(ioterm, lhsterm, rhsterm)
+                        res = py_eqsat.Py_PowIO(ioterm, lhsterm, rhsterm)
+
+                    case "!=":
+                        res = py_eqsat.Py_NeIO(ioterm, lhsterm, rhsterm)
 
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
@@ -150,6 +169,10 @@ def egraph_conversion(root: SExpr):
                 lhsterm = yield lhs
                 rhsterm = yield rhs
                 match op:
+                    case "+":
+                        res = py_eqsat.Py_InplaceAddIO(
+                            ioterm, lhsterm, rhsterm
+                        )
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
                 return WrapTerm(res)
@@ -161,17 +184,17 @@ def egraph_conversion(root: SExpr):
                 for arg in args:
                     argterms.append((yield arg))
                 return WrapTerm(
-                    eg.Term.Call(functerm, ioterm, eg.termlist(*argterms))
+                    py_eqsat.Py_Call(functerm, ioterm, eg.termlist(*argterms))
                 )
 
             case rg.PyLoadGlobal(io=io, name=str(name)):
                 ioterm = yield io
-                return eg.Term.LoadGlobal(ioterm, name)
+                return py_eqsat.Py_LoadGlobal(ioterm, name)
 
             case rg.PyAttr(io=io, value=value, attrname=str(attrname)):
                 ioterm = yield io
                 valterm = yield value
-                return WrapTerm(eg.Term.AttrIO(ioterm, valterm, attrname))
+                return WrapTerm(py_eqsat.Py_AttrIO(ioterm, valterm, attrname))
 
             case rg.PyInt(int(intval)):
                 assert intval.bit_length() < 64
@@ -182,6 +205,12 @@ def egraph_conversion(root: SExpr):
 
             case rg.PyBool(bool(val)):
                 return eg.Term.LiteralBool(val)
+
+            case rg.PyStr(str(val)):
+                return eg.Term.LiteralStr(val)
+
+            case rg.PyNone():
+                return eg.Term.LiteralNone()
 
             case rg.DbgValue(
                 name=str(varname),
@@ -194,8 +223,8 @@ def egraph_conversion(root: SExpr):
             case rg.ArgRef(idx=int(i), name=str(name)):
                 return eg.Term.Param(i)
 
-            case rg.Undef():
-                return eg.Term.Undef()
+            case rg.Undef(name=str(name)):
+                return eg.Term.Undef(name=name)
 
             case rg.IO():
                 return eg.Term.IO()

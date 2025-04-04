@@ -1,236 +1,112 @@
-# mypy: disable-error-code="empty-body"
-
-from __future__ import annotations
-
-import os
-import time
-
-from egglog import EGraph, String, eq, var
-
 from sealir import ase, rvsdg
-from sealir.eqsat.rvsdg_convert import egraph_conversion
-from sealir.eqsat.rvsdg_eqsat import (
-    DoPartialEval,
-    Env,
-    Eval,
-    GraphRoot,
-    PartialEvaluated,
-    Term,
-    Value,
-    make_rules,
-    valuelist,
+from sealir.eqsat import py_eqsat, rvsdg_eqsat
+from sealir.rvsdg import grammar as rg
+from sealir.tests.test_rvsdg_egraph_roundtrip import (
+    frontend,
+    llvm_codegen,
+    middle_end,
 )
-from sealir.eqsat.rvsdg_extract import egraph_extraction
-from sealir.llvm_pyapi_backend import llvm_codegen
 
 
-def read_env(v: str):
-    if v:
-        return int(v)
-    else:
-        return 0
+def compiler_pipeline(fn, *, verbose=False):
+    rvsdg_expr, dbginfo = frontend(fn)
 
+    def define_egraph(egraph, func):
+        root = rvsdg_eqsat.GraphRoot(func)
+        egraph.let("root", root)
 
-DEBUG = read_env(os.environ.get("DEBUG", ""))
+        if verbose:
+            print(egraph.extract(root))
 
+        ruleset = rvsdg_eqsat.make_rules()  # | py_eqsat.make_rules()
+        egraph.run(ruleset.saturate())
 
-def run(
-    root, *extra_statements, checks=[], assume=None, debug_points=None
-) -> EGraph:
-    """
-    Example assume
-    --------------
+        if verbose:
+            print(egraph.extract(root))
 
-    > def assume(egraph: EGraph):
-    >     @egraph.register
-    >     def facts(val: Value):
-    >         from egglog import eq, rule, union
-    >         yield rule(
-    >             eq(val).to(VBinOp("Lt", Value.ConstI64(0), Value.ConstI64(1)))
-    >         ).then(union(val).with_(Value.BoolTrue()))
-
-    """
-
-    egraph = EGraph()  # save_egglog_string=True)
-    egraph.let("root", root)
-    for i, stmt in enumerate(extra_statements):
-        egraph.let(f"stmt{i}", stmt)
-    # egraph.display()
-    ruleset = make_rules()
-
-    if debug_points:
-        for k, v in debug_points.items():
-            egraph.let(f"debug_point_{k}", v)
-
-    if assume is not None:
-        assume(egraph)
-
-    ts = time.time()
-    saturate(egraph, ruleset)
-    te = time.time()
-    print("saturation time", te - ts)
-
-    ts = time.time()
-    out = egraph.simplify(root, 1)
-    te = time.time()
-    print("extraction time", te - ts)
-    # print(egraph.as_egglog_string)
-    print("simplified output".center(80, "-"))
-    print(out)
-    print("=" * 80)
-    # egraph.display()
-    if checks:
-        try:
-            egraph.check(*checks)
-        except Exception:
-            if debug_points:
-                for k, v in debug_points.items():
-                    print(f"debug {k}".center(80, "-"))
-                    for each in egraph.extract_multiple(v, 5):
-                        print(each)
-                        print("-=-")
-
-            raise
-    return egraph
-
-
-def saturate(egraph: EGraph, ruleset):
-    reports = []
-    if DEBUG:
-        # Borrowed from egraph.saturate(schedule)
-
-        from pprint import pprint
-
-        from egglog.visualizer_widget import VisualizerWidget
-
-        def to_json() -> str:
-            return egraph._serialize().to_json()
-
-        egraphs = [to_json()]
-        while True:
-            report = egraph.run(ruleset)
-            reports.append(report)
-            egraphs.append(to_json())
-            # pprint({k: v for k, v in report.num_matches_per_rule.items()
-            #         if v > 0})
-            if not report.updated:
-                break
-        VisualizerWidget(egraphs=egraphs).display_or_open()
-
-    else:
-        report = egraph.run(ruleset.saturate())
-        reports.append(report)
-    return reports
-
-
-def test_max_if_else_from_source():
-    def udt(a, b):
-        if a < b:
-            c = b
-        else:
-            c = a
-        return c
-
-    rvsdg_expr, dbginfo = rvsdg.restructure_source(udt)
-    print(rvsdg.format_rvsdg(rvsdg_expr))
-
-    memo = egraph_conversion(rvsdg_expr)
-
-    egfunc = memo[rvsdg_expr]
-
-    # Eval with Env
-    env = Env.nil()
-    env = env.nest(
-        # Argument list
-        valuelist(Value.IOState(), Value.ConstI64(2), Value.ConstI64(134))
-    )
-    root = GraphRoot(egfunc)
-
-    extra_statements = [
-        DoPartialEval(env, egfunc),
-    ]
-
-    checks = [
-        eq(root).to(
-            GraphRoot(
-                Term.Func(
-                    str(rvsdg_expr._handle),
-                    var("fname", String),
-                    PartialEvaluated(Value.ConstI64(134)),
-                )
-            )
-        ),
-    ]
-
-    def run_check(extra_statements=[], checks=[]):
-        egraph = run(root, *extra_statements, checks=checks)
-        # Extraction
-        cost, extracted = egraph_extraction(
-            egraph,
-            rvsdg_expr,
-        )
-        print("COST =", cost)
+    cost, extracted = middle_end(rvsdg_expr, define_egraph)
+    if verbose:
+        print("Extracted from EGraph".center(80, "="))
+        print("cost =", cost)
         print(rvsdg.format_rvsdg(extracted))
 
-        print(extracted)
-
-        cg = llvm_codegen(extracted)
-        res = cg(2, 134)
-        assert res == 134
-
-    # Run without partial eval
-    run_check()
-    # Run with partial eval
-    run_check(extra_statements=extra_statements, checks=checks)
+    jt = llvm_codegen(extracted)
+    return jt, extracted
 
 
-def skip_test_sum_loop_from_source():
-    def udt(init, n):
-        c = init
-        i = 0
-        while i < n:
-            c = i + c
-            i = i + 1
-        return c
+def run_test(fn, jt, args):
+    res = jt(*args)
+    assert res == fn(*args)
 
-    rvsdg_expr, dbginfo = rvsdg.restructure_source(udt)
-    print(rvsdg.format_rvsdg(rvsdg_expr))
 
-    memo = egraph_conversion(rvsdg_expr)
+def test_const_fold_ifelse():
+    """Testing constant folding of if-else when the condition is a constant"""
 
-    egfunc = memo[rvsdg_expr]
+    def check_output_is_argument(extracted, argname: str):
+        """Check that the return value is the argument of name `argname`."""
+        outportmap = dict((p.name, p.value) for p in extracted.body.ports)
+        argportidx = extracted.body.begin.inports.index(argname)
+        match outportmap["!ret"]:
+            case rg.Unpack(val, idx):
+                assert val == extracted.body.begin
+                assert idx == argportidx
+            case _:
+                assert False
 
-    # Eval with Env
-    env = Env.nil()
-    env = env.nest(
-        # Argument list
-        valuelist(Value.IOState(), Value.Param(0), Value.Param(1))
-    )
-    root = GraphRoot(egfunc)
+    def get_if_else_node(extracted):
+        """Get all rvsdg IfElse nodes"""
 
-    extra_statements = [
-        DoPartialEval(env, egfunc),
-    ]
+        def is_if_else(expr):
+            match expr:
+                case rg.IfElse():
+                    return True
+            return False
 
-    checks = [
-        # eq(root).to(
-        #     GraphRoot(
-        #         Term.Func(
-        #             str(rvsdg_expr._handle),
-        #             var("fname", String),
-        #             PartialEvaluated(Value.ConstI64(134)),
-        #         )
-        #     )
-        # ),
-    ]
+        walker = ase.walk_descendants_depth_first_no_repeat(extracted)
+        if_elses = [cur for _, cur in walker if is_if_else(cur)]
+        return if_elses
 
-    egraph = run(root, *extra_statements, checks=checks)
-    # Extraction
-    cost, extracted = egraph_extraction(
-        egraph,
-        rvsdg_expr,
-    )
-    # print("COST =", cost)
-    # print(rvsdg.format_rvsdg(extracted))
+    def ifelse_fold_select_false(a, b):
+        c = 0
+        if c:
+            return a
+        else:
+            return b
 
-    # print(extracted)
+    jt, extracted = compiler_pipeline(ifelse_fold_select_false)
+    args = (12, 34)
+    run_test(ifelse_fold_select_false, jt, args)
+    check_output_is_argument(extracted, "b")
+    # prove that constant folding of the branch condition eliminated the if-else
+    # node
+    assert len(get_if_else_node(extracted)) == 0
+
+    def ifelse_fold_select_true(a, b):
+        c = 1
+        if c:
+            return a
+        else:
+            return b
+
+    jt, extracted = compiler_pipeline(ifelse_fold_select_true)
+    args = (12, 34)
+    run_test(ifelse_fold_select_true, jt, args)
+    # prove that constant folding of the branch condition eliminated the if-else
+    # node
+    assert len(get_if_else_node(extracted)) == 0
+    check_output_is_argument(extracted, "a")
+
+
+# def sum_ints(n):
+#     c = 0
+#     for i in range(n):
+#         c += i
+#     return c
+#     # c = 0
+#     # i = 0
+#     # while i < n:
+#     #     c = i + c
+#     #     i = i + 1
+#     # return c
+
+# compiler_pipeline(sum_ints, (12,), verbose=True)

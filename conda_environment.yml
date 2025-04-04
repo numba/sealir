@@ -1,5 +1,6 @@
+name: sealir_tester_py312
 channels:
-  - defaults
+  - main
 dependencies:
   - python=3.12
   - llvmlite=0.44.*
