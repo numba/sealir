@@ -774,7 +774,7 @@ def format_rvsdg(prgm: SExpr) -> str:
                 )
                 with indent():
                     (yield body)
-                put(f"EndPyForLoopMain")
+                put(f"EndPyForLoop")
                 return name
 
             case rg.Unpack(val=source, idx=int(idx)):

@@ -368,7 +368,7 @@ class EGraphToRVSDG:
                 "args": args,
             }:
                 return grm.write(rg.PyCall(func=func, io=io, args=tuple(args)))
-            case "Py_ForLoopMain", {
+            case "Py_ForLoop", {
                 "iter_arg_idx": int(iter_arg_idx),
                 "indvar_arg_idx": int(indvar_arg_idx),
                 "iterlast_arg_idx": int(iterlast_arg_idx),

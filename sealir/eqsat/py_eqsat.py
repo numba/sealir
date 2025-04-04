@@ -107,7 +107,7 @@ def Py_Call(func: Term, io: Term, args: TermList) -> Term: ...
 
 
 @function
-def Py_ForLoopMain(
+def Py_ForLoop(
     iter_arg_idx: DynInt | i64Like,
     indvar_arg_idx: DynInt,
     iterlast_arg_idx: DynInt,
@@ -178,7 +178,7 @@ def loop_rules(
         iterator == region.get(iterator_port_idx),
     ).then(
         union(loop).with_(
-            Py_ForLoopMain(
+            Py_ForLoop(
                 iter_arg_idx=iterator_port_idx,
                 # TODO: resolve DynInt|dyn_index|dyn_get
                 indvar_arg_idx=(
