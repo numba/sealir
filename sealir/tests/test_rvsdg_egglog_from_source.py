@@ -1,5 +1,10 @@
+from egglog import EGraph
+
 from sealir import ase, rvsdg
 from sealir.eqsat import py_eqsat, rvsdg_eqsat
+from sealir.eqsat.rvsdg_convert import egraph_conversion
+from sealir.eqsat.rvsdg_eqsat import GraphRoot
+from sealir.eqsat.rvsdg_extract import CostModel, egraph_extraction
 from sealir.rvsdg import grammar as rg
 from sealir.tests.test_rvsdg_egraph_roundtrip import (
     frontend,
@@ -119,3 +124,107 @@ def test_forloop_lifting():
     walker = ase.walk_descendants_depth_first_no_repeat(extracted)
     forloops = [cur for _, cur in walker if isinstance(cur, rg.PyForLoop)]
     assert len(forloops) == 1
+
+
+def test_for_range_lifting():
+    from egglog import Vec, function, i64, rule, ruleset, union
+
+    from sealir.eqsat.py_eqsat import (
+        Py_Call,
+        Py_ForLoop,
+        Py_LoadGlobal,
+        Term,
+        TermList,
+    )
+    from sealir.eqsat.rvsdg_eqsat import DynInt, Term, wildcard
+
+    @function
+    def My_ForRange(
+        range_args: TermList,
+        indvar_arg_idx: DynInt,
+        iterlast_arg_idx: DynInt,
+        body: Term,
+        operands: TermList,
+    ) -> Term: ...
+
+    _wc = wildcard
+
+    @ruleset
+    def ruleset_for_range_lift(
+        iter_arg_idx: i64,
+        body: Term,
+        forloop: Term,
+        operands: Vec[Term],
+        iter_res: Term,
+        iter_args: Vec[Term],
+        range_res: Term,
+        range_args: TermList,
+        indvar_arg_idx: DynInt,
+        iterlast_arg_idx: DynInt,
+    ):
+        # Lift Py_ForLoop into My_ForRange
+        yield rule(
+            forloop
+            == Py_ForLoop(
+                iter_arg_idx=DynInt(iter_arg_idx),
+                indvar_arg_idx=indvar_arg_idx,
+                iterlast_arg_idx=iterlast_arg_idx,
+                body=body,
+                operands=TermList(operands),
+            ),
+            iter_res == operands[iter_arg_idx],
+            iter_res
+            == Py_Call(
+                func=Py_LoadGlobal(io=_wc(Term), name="iter"),
+                io=_wc(Term),
+                args=TermList(iter_args),
+            ).getPort(1),
+            range_res == iter_args[0],
+            range_res
+            == Py_Call(
+                func=Py_LoadGlobal(io=_wc(Term), name="range"),
+                io=_wc(Term),
+                args=range_args,
+            ).getPort(1),
+        ).then(
+            union(forloop).with_(
+                My_ForRange(
+                    range_args=range_args,
+                    indvar_arg_idx=indvar_arg_idx,
+                    iterlast_arg_idx=iterlast_arg_idx,
+                    body=body,
+                    operands=TermList(operands),
+                )
+            ),
+            union(forloop).with_(Term.LiteralStr("dbg_for_range")),
+        )
+
+    rs_schedule = (
+        rvsdg_eqsat.make_rules()
+        | py_eqsat.make_rules()
+        | ruleset_for_range_lift
+    )
+
+    def sum_ints(n):
+        c = 0
+        for i in range(n):
+            c += i
+        return c + i
+
+    fn = sum_ints
+
+    rvsdg_expr, dbginfo = frontend(fn)
+    print(rvsdg.format_rvsdg(rvsdg_expr))
+
+    # Convert to egraph
+    memo = egraph_conversion(rvsdg_expr)
+
+    func = memo[rvsdg_expr]
+
+    egraph = EGraph()
+
+    root = rvsdg_eqsat.GraphRoot(func)
+    egraph.let("root", root)
+
+    egraph.run(rs_schedule.saturate())
+    egraph.check(Term.LiteralStr("dbg_for_range"))
