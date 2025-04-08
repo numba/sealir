@@ -14,6 +14,8 @@ class Data: ...
 
 
 class EGraphToRVSDG:
+    allow_dynamic_op = False
+
     def __init__(self, gdct: EGraphJsonDict, rvsdg_sexpr: ase.SExpr):
         self.rvsdg_sexpr = rvsdg_sexpr
         self.gdct = gdct
@@ -39,6 +41,8 @@ class EGraphToRVSDG:
     def handle(
         self, key: str, child_keys: list[str] | dict[str, str], grm: Grammar
     ):
+        allow_dynamic_op = self.allow_dynamic_op
+
         nodes = self.gdct["nodes"]
         memo = self.memo
 
@@ -188,7 +192,7 @@ class EGraphToRVSDG:
                         case "·.dyn_get", {
                             "self": rg.RegionBegin() as regionbegin,
                             "idx": int(idx),
-                        }:
+                        } if allow_dynamic_op:
                             return grm.write(
                                 rg.Unpack(val=regionbegin, idx=idx)
                             )
@@ -213,7 +217,7 @@ class EGraphToRVSDG:
                 case "DynInt", {
                     "self": termlist,
                     "target": target,
-                } if op == "·.dyn_index":
+                } if op == "·.dyn_index" and allow_dynamic_op:
                     for i, term in enumerate(termlist):
                         if ase.matches(term, target):
                             return i

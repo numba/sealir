@@ -187,6 +187,10 @@ def loop_rules(
                 iterlast_arg_idx=bodyoperands.dyn_index(
                     region.dyn_get(indvar_idx)
                 ),
+                # The `then` region can be used directly because by RVSDG Loop
+                # design the input/output ports are the same in the IfElse
+                # region and Loop region. (Loop region just have an extra
+                # loop-condition port prepended)
                 body=then,
                 operands=loopoperands,
             )

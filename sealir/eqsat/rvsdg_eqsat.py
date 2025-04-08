@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from egglog import (
     Bool,
     Expr,
@@ -25,6 +27,8 @@ from egglog import (
     var,
 )
 from egglog.conversion import converter
+
+MAXCOST = sys.maxsize
 
 
 class DynInt(Expr):
@@ -118,6 +122,10 @@ class TermList(Expr):
     def __getitem__(self, idx: i64Like) -> Term: ...
 
     def dyn_index(self, target: Term) -> DynInt: ...
+
+
+@function(cost=MAXCOST)  # max cost to make it unextractable
+def _dyn_index_partial(terms: Vec[Term], target: Term) -> DynInt: ...
 
 
 class PortList(Expr):
@@ -233,6 +241,35 @@ def ruleset_termlist_basic(vecterm: Vec[Term], idx: i64):
 
 
 @ruleset
+def ruleset_termlist_dyn_index(vecterm: Vec[Term], target: Term):
+    # Simplify TermList.dyn_index into DynInt(i64)
+    yield rewrite(TermList(vecterm).dyn_index(target)).to(
+        _dyn_index_partial(vecterm, target),
+        # given
+        vecterm.contains(target),
+    )
+    last = vecterm.length() - 1
+    yield rewrite(
+        _dyn_index_partial(vecterm, target),
+        subsume=True,
+    ).to(
+        # Recurse into vecterm.pop()
+        _dyn_index_partial(vecterm.pop(), target),
+        # given
+        vecterm[last] != target,
+    )
+    yield rewrite(
+        _dyn_index_partial(vecterm, target),
+        subsume=True,
+    ).to(
+        # Found as the last element
+        DynInt(last),
+        # given
+        vecterm[last] == target,
+    )
+
+
+@ruleset
 def ruleset_simplify_dbgvalue(
     t: Term,
     varname: String,
@@ -260,12 +297,22 @@ def ruleset_apply_region(
     ).then(union(region.get(idx)).with_(operands[idx]))
 
 
+@ruleset
+def ruleset_region_dyn_get(region: Region, idx: i64):
+    yield rewrite(
+        region.dyn_get(DynInt(idx)),
+        subsume=True,
+    ).to(region.get(idx))
+
+
 ruleset_rvsdg_basic = (
     ruleset_simplify_dbgvalue
     | ruleset_portlist_basic
     | ruleset_portlist_ifelse
     | ruleset_termlist_basic
     | ruleset_apply_region
+    | ruleset_termlist_dyn_index
+    | ruleset_region_dyn_get
 )
 
 
