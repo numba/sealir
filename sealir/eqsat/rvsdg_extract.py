@@ -18,11 +18,6 @@ MAX_COST = float("inf")
 
 
 class CostModel:
-    graph_data: EGraphJsonDict
-
-    def __init__(self, graph_data: EGraphJsonDict):
-        self.graph_data = graph_data
-
     def get_cost_function(
         self,
         nodename: str,
@@ -38,7 +33,7 @@ def egraph_extraction(
     egraph: EGraph,
     rvsdg_sexpr,
     *,
-    cost_model_class=CostModel,
+    cost_model=None,
     converter_class=EGraphToRVSDG,
 ):
     gdct: EGraphJsonDict = json.loads(
@@ -49,12 +44,9 @@ def egraph_extraction(
     [root] = get_graph_root(gdct)
     root_eclass = gdct["nodes"][root]["eclass"]
 
-    ts = time.time()
-    cost_model = cost_model_class(gdct)
+    cost_model = CostModel() if cost_model is None else cost_model
     extraction = Extraction(gdct, root_eclass, cost_model)
     cost, exgraph = extraction.choose()
-    te = time.time()
-    # print("custom cost-model greedy extraction:", te - ts)
 
     expr = convert_to_rvsdg(
         exgraph,
@@ -184,6 +176,7 @@ class Extraction:
             cost = self.cost_model.get_cost_function(
                 nodename, node.op, node.cost, nodes, child_costs
             )
+            print("!!!", nodename, "--->", cost)
             return cost
 
         # Repeatedly compute cost and propagate while keeping the best variant
