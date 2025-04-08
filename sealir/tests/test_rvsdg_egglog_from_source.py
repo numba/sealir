@@ -3,8 +3,6 @@ from egglog import EGraph
 from sealir import ase, rvsdg
 from sealir.eqsat import py_eqsat, rvsdg_eqsat
 from sealir.eqsat.rvsdg_convert import egraph_conversion
-from sealir.eqsat.rvsdg_eqsat import GraphRoot
-from sealir.eqsat.rvsdg_extract import CostModel, egraph_extraction
 from sealir.rvsdg import grammar as rg
 from sealir.tests.test_rvsdg_egraph_roundtrip import (
     frontend,
