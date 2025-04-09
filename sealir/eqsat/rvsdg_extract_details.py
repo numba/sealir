@@ -15,6 +15,7 @@ class Data: ...
 
 class EGraphToRVSDG:
     allow_dynamic_op = False
+    grammar = Grammar
 
     def __init__(self, gdct: EGraphJsonDict, rvsdg_sexpr: ase.SExpr):
         self.rvsdg_sexpr = rvsdg_sexpr
@@ -24,7 +25,7 @@ class EGraphToRVSDG:
     def run(self, node_and_children):
         memo = self.memo
         with self.rvsdg_sexpr._tape as tape:
-            grm = Grammar(tape)
+            grm = self.grammar(tape)
             for key, child_keys in node_and_children:
                 try:
                     last = memo[key] = self.handle(key, child_keys, grm)

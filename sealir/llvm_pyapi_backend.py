@@ -494,7 +494,17 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             return SSAValue(obj)
 
         case _:
-            raise NotImplementedError(expr, type(expr))
+            if ctx.codegen_extension is not None:
+                args = []
+                for arg in expr._args:
+                    args.append((yield arg))
+                res = ctx.codegen_extension(expr, tuple(args), builder, pyapi)
+            else:
+                res = NotImplemented
+            if res is NotImplemented:
+                raise NotImplementedError(expr, type(expr))
+            else:
+                return res
 
 
 @dataclass(frozen=True)
@@ -507,6 +517,8 @@ class CodegenCtx:
     global_ns: Mapping[str, Any]
 
     region_args: list[LLVMValue] = field(default_factory=list)
+
+    codegen_extension: Callable | None = None
 
 
 def determine_arity(root: ase.SExpr) -> int:
@@ -685,6 +697,11 @@ class PythonAPI:
             )
         else:
             raise OverflowError("integer too big (%d bits)" % (bits))
+
+    def long_as_longlong(self, numobj):
+        fnty = ir.FunctionType(self.ulonglong, [self.pyobj])
+        fn = self._get_function(fnty, name="PyLong_AsLongLong")
+        return self.builder.call(fn, [numobj])
 
     def float_from_double(self, fval):
         func_name = "PyFloat_FromDouble"

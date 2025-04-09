@@ -176,7 +176,6 @@ class Extraction:
             cost = self.cost_model.get_cost_function(
                 nodename, node.op, node.cost, nodes, child_costs
             )
-            print("!!!", nodename, "--->", cost)
             return cost
 
         # Repeatedly compute cost and propagate while keeping the best variant

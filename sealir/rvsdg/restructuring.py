@@ -927,9 +927,12 @@ def format_rvsdg(prgm: SExpr) -> str:
                 return name
 
             case _:
-                print("----debug")
-                print("\n".join(buffer))
-                raise NotImplementedError(expr)
+                argrefs = []
+                for arg in expr._args:
+                    argrefs.append((yield arg))
+                name = fresh_name()
+                put(f"{name} = {expr._head} {' '.join(argrefs)}")
+                return name
 
     ase.traverse(prgm, formatter)
 
