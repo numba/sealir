@@ -73,7 +73,6 @@ def convert_to_rvsdg(
     decls = state.__egg_decls__
 
     # Do the conversion back into RVSDG
-    conversion = converter_class(gdct, rvsdg_sexpr)
     node_iterator = list(nx.dfs_postorder_nodes(exgraph, source=root))
 
     def egg_fn_to_arg_names(egg_fn: str) -> tuple[str, ...]:
@@ -92,12 +91,14 @@ def convert_to_rvsdg(
                 case "primitive":
                     pass
                 case "function":
+                    # TODO: put this into the converter_class
                     arg_names = egg_fn_to_arg_names(egg_fn)
                     children = dict(zip(arg_names, children, strict=True))
                 case _:
                     raise NotImplementedError(f"kind is {kind!r}")
             yield node, children
 
+    conversion = converter_class(gdct, rvsdg_sexpr, egg_fn_to_arg_names)
     return conversion.run(iterator(node_iterator))
 
 

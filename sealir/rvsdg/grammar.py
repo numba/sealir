@@ -32,7 +32,12 @@ class Port(_Root):
     value: SExpr
 
 
+class Attrs(_Root):
+    attrs: tuple[SExpr, ...]
+
+
 class RegionBegin(_Root):
+    attrs: SExpr
     inports: tuple[str, ...]
 
 

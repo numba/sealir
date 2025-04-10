@@ -74,8 +74,12 @@ def egraph_conversion(root: SExpr):
                     body=(yield body).term,
                 )
 
-            case rg.RegionBegin(inports=ins):
-                rd = eg.Region(node_uid(expr), inports=eg.inports(*ins))
+            case rg.RegionBegin(inports=ins, attrs=attrs):
+                rd = eg.Region(
+                    node_uid(expr),
+                    inports=eg.inports(*ins),
+                )
+                assert isinstance(attrs, rg.Attrs)
                 return RegionInfo(rd)
 
             case rg.RegionEnd(begin=begin, ports=ports):

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Iterable, Iterator
 
 from sealir import ase
 from sealir.rvsdg import Grammar
 from sealir.rvsdg import grammar as rg
 
-from .egraph_utils import EGraphJsonDict
+from .egraph_utils import EGraphJsonDict, NodeDict
 
 
 @dataclass(frozen=True)
@@ -17,10 +18,13 @@ class EGraphToRVSDG:
     allow_dynamic_op = False
     grammar = Grammar
 
-    def __init__(self, gdct: EGraphJsonDict, rvsdg_sexpr: ase.SExpr):
+    def __init__(
+        self, gdct: EGraphJsonDict, rvsdg_sexpr: ase.SExpr, egg_fn_to_arg_names
+    ):
         self.rvsdg_sexpr = rvsdg_sexpr
         self.gdct = gdct
         self.memo = {}
+        self.egg_fn_to_arg_names = egg_fn_to_arg_names
 
     def run(self, node_and_children):
         memo = self.memo
@@ -38,6 +42,46 @@ class EGraphToRVSDG:
     def lookup_sexpr(self, uid: int) -> ase.SExpr:
         tape: ase.Tape = self.rvsdg_sexpr._tape
         return Grammar.downcast(tape.read_value(uid))
+
+    def search_calls(self, self_key: str, op: str) -> Iterator[str]:
+        nodes = self.gdct["nodes"]
+        for k, v in nodes.items():
+            children = v["children"]
+            if children and children[0] == self_key and v["op"] == op:
+                yield k
+
+    def search_method_calls(self, self_key: str, method: str) -> Iterator[str]:
+        return self.search_calls(self_key, f"·.{method}")
+
+    def search_eclass_siblings(self, self_key: str) -> Iterator[str]:
+        child = self.gdct["nodes"][self_key]
+        eclass = child["eclass"]
+        for k, v in self.gdct["nodes"].items():
+            if self_key != k and v["eclass"] == eclass:
+                yield k
+
+    def filter_by_type(
+        self, target: str, iterable: Iterable[str]
+    ) -> Iterator[str]:
+        for k in iterable:
+            if self.gdct["nodes"][k]["op"] == target:
+                yield k
+
+    def dispatch(self, key: str, grm: Grammar):
+        node = self.gdct["nodes"][key]
+        child_keys = node["children"]
+        for k in child_keys:
+            self.dispatch(k, grm)
+        kind, _, egg_fn = key.split("-")
+        if kind == "function":
+            arg_names = self.egg_fn_to_arg_names(egg_fn)
+            child_keys = dict(zip(arg_names, child_keys, strict=True))
+        ret = self.memo[key] = self.handle(key, child_keys, grm)
+        return ret
+
+    def get_children(self, key):
+        node = self.gdct["nodes"][key]
+        return node["children"]
 
     def handle(
         self, key: str, child_keys: list[str] | dict[str, str], grm: Grammar
@@ -58,37 +102,15 @@ class EGraphToRVSDG:
                 return [memo[v] for v in child_keys]
 
         if key.startswith("primitive-"):
-            match node_type:
-                case "String":
-                    unquoted = node["op"][1:-1]
-                    return unquoted
-                case "bool":
-                    match node["op"]:
-                        case "true":
-                            return True
-                        case "false":
-                            return False
-                        case _:
-                            raise AssertionError()
-                case "i64":
-                    return int(node["op"])
-                case "f64":
-                    return float(node["op"])
-                case "Vec_Term":
-                    return get_children()
-                case "Vec_Port":
-                    return get_children()
-                case "Vec_String":
-                    return get_children()
-                case _:
-                    raise NotImplementedError(f"primitive of: {node_type}")
+            return self.handle_primitive(node_type, node, get_children())
         elif key.startswith("function-"):
             op = node["op"]
             children = get_children()
 
             match node_type, children:
                 case "Region", {"inports": ins}:
-                    return grm.write(rg.RegionBegin(inports=ins))
+                    attrs = self.handle_region_attributes(key, grm)
+                    return grm.write(rg.RegionBegin(inports=ins, attrs=attrs))
                 case "Term", children:
                     extended_handle = self.handle_Term(op, children, grm)
                     if extended_handle is not NotImplemented:
@@ -227,11 +249,42 @@ class EGraphToRVSDG:
                 case "DynInt", {"num": int(ival)} if op == "DynInt":
                     return ival
                 case _:
+                    handler = getattr(self, f"handle_{node_type}", None)
+                    if handler is not None:
+                        res = handler(key, op, children, grm)
+                        if res is not NotImplemented:
+                            return res
                     raise NotImplementedError(
-                        f"function of: {op!r} :: {node_type}"
+                        f"function of: {op!r} :: {node_type}, {children}"
                     )
         else:
             raise NotImplementedError(key)
+
+    def handle_primitive(self, node_type: str, node, children: tuple):
+        match node_type:
+            case "String":
+                unquoted = node["op"][1:-1]
+                return unquoted
+            case "bool":
+                match node["op"]:
+                    case "true":
+                        return True
+                    case "false":
+                        return False
+                    case _:
+                        raise AssertionError()
+            case "i64":
+                return int(node["op"])
+            case "f64":
+                return float(node["op"])
+            case "Vec_Term":
+                return children
+            case "Vec_Port":
+                return children
+            case "Vec_String":
+                return children
+            case _:
+                raise NotImplementedError(f"primitive of: {node_type}")
 
     def handle_Value(self, op: str, children: dict | list, grm: Grammar):
         match op, children:
@@ -400,3 +453,6 @@ class EGraphToRVSDG:
                 )
             case _:
                 return NotImplemented
+
+    def handle_region_attributes(self, key: str, grm: Grammar):
+        return grm.write(rg.Attrs(()))

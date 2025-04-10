@@ -472,7 +472,11 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             return grm.write(rg.Args(tuple(arg_done)))
         case ("PyAst_block", body):
             vars = sorted(ctx.scope.varmap)
-            begin = grm.write(rg.RegionBegin(inports=tuple(vars)))
+            begin = grm.write(
+                rg.RegionBegin(
+                    inports=tuple(vars), attrs=grm.write(rg.Attrs(()))
+                )
+            )
             with ctx.new_block(expr) as scope:
                 ctx.initialize_scope(begin)
                 for expr in body:
@@ -712,9 +716,14 @@ def format_rvsdg(prgm: SExpr) -> str:
             case rg.Func(fname=str(fname), args=args, body=body):
                 put(f"{fname} = Func {ase.pretty_str(args)}")
                 (yield body)
-            case rg.RegionBegin(inports=ins):
+            case rg.RegionBegin(inports=ins, attrs=rg.Attrs() as attrs):
                 name = fresh_name()
-                put(f"{name} = Region[{expr._handle}] <- {' '.join(ins)}")
+                heading = f"{name} = Region[{expr._handle}] <- {' '.join(ins)}"
+                if not attrs.attrs:
+                    put(heading)
+                else:
+                    fmtattrs = ase.pretty_str(attrs)
+                    put(f"{heading}; #attrs {fmtattrs}")
                 return name
             case rg.RegionEnd(begin=begin, ports=ports):
                 (yield begin)
