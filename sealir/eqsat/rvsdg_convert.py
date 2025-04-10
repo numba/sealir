@@ -148,6 +148,9 @@ def egraph_conversion(root: SExpr):
                     case "+":
                         res = py_eqsat.Py_AddIO(ioterm, lhsterm, rhsterm)
 
+                    case "-":
+                        res = py_eqsat.Py_SubIO(ioterm, lhsterm, rhsterm)
+
                     case "*":
                         res = py_eqsat.Py_MulIO(ioterm, lhsterm, rhsterm)
 

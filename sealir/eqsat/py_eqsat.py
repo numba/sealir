@@ -55,11 +55,19 @@ def Py_AddIO(io: Term, a: Term, b: Term) -> Term: ...
 
 
 @function
+def Py_Add(a: Term, b: Term) -> Term: ...
+
+
+@function
 def Py_InplaceAdd(a: Term, b: Term) -> Term: ...
 
 
 @function
 def Py_InplaceAddIO(io: Term, a: Term, b: Term) -> Term: ...
+
+
+@function
+def Py_SubIO(io: Term, a: Term, b: Term) -> Term: ...
 
 
 @function

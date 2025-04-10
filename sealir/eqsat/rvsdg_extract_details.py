@@ -277,6 +277,15 @@ class EGraphToRVSDG:
                         rhs=rhs,
                     )
                 )
+            case "Py_SubIO", {"io": io, "a": lhs, "b": rhs}:
+                return grm.write(
+                    rg.PyBinOp(
+                        op="-",
+                        io=io,
+                        lhs=lhs,
+                        rhs=rhs,
+                    )
+                )
             case "Py_Mul", {"a": lhs, "b": rhs}:
                 return grm.write(
                     rg.PyBinOpPure(
