@@ -12,6 +12,7 @@ from egglog import (
     StringLike,
     Unit,
     Vec,
+    delete,
     eq,
     f64,
     f64Like,
@@ -243,7 +244,7 @@ def ruleset_termlist_basic(vecterm: Vec[Term], idx: i64):
 @ruleset
 def ruleset_termlist_dyn_index(vecterm: Vec[Term], target: Term):
     # Simplify TermList.dyn_index into DynInt(i64)
-    yield rewrite(TermList(vecterm).dyn_index(target)).to(
+    yield rewrite(TermList(vecterm).dyn_index(target), subsume=True).to(
         _dyn_index_partial(vecterm, target),
         # given
         vecterm.contains(target),
@@ -305,6 +306,61 @@ def ruleset_region_dyn_get(region: Region, idx: i64):
     ).to(region.get(idx))
 
 
+@ruleset
+def ruleset_region_propgate_output(
+    body: Term, portlist: PortList, region: Region, idx: i64
+):
+    yield rule(
+        body == Term.RegionEnd(ports=portlist, region=region),
+        body.getPort(idx),
+    ).then(portlist.getValue(idx))
+
+
+@function(unextractable=True)
+def _define_region_outputs(body: Term, idx: i64, end: i64) -> Term: ...
+
+
+@ruleset
+def ruleset_func_outputs(
+    func: Term,
+    uid: String,
+    fname: String,
+    body: Term,
+    region: Region,
+    portlist: PortList,
+    ports: Vec[Port],
+    idx: i64,
+    end: i64,
+):
+    yield rule(
+        func == Term.Func(uid=uid, fname=fname, body=body),
+        body == Term.RegionEnd(region, ports=portlist),
+        portlist == PortList(ports),
+    ).then(
+        # Need this because limitation Vec.
+        # Defer the expansion in rules below
+        _define_region_outputs(body, i64(0), ports.length())
+    )
+
+    # Expand _define_region_outputs
+    yield rule(
+        x := _define_region_outputs(body, idx, end),
+        idx < end,
+    ).then(
+        # March to next index
+        _define_region_outputs(body, idx + 1, end),
+        # Define
+        union(x).with_(body.getPort(idx)),
+        # Delete _define_region_outputs
+        delete(x),
+    )
+
+    yield rule(
+        # Delete if out of range
+        x := _define_region_outputs(body, idx, idx)
+    ).then(delete(x))
+
+
 ruleset_rvsdg_basic = (
     ruleset_simplify_dbgvalue
     | ruleset_portlist_basic
@@ -313,6 +369,8 @@ ruleset_rvsdg_basic = (
     | ruleset_apply_region
     | ruleset_termlist_dyn_index
     | ruleset_region_dyn_get
+    | ruleset_region_propgate_output
+    | ruleset_func_outputs
 )
 
 
