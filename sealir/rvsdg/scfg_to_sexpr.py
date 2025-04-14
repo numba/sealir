@@ -132,6 +132,8 @@ class ConvertToSExpr(ast.NodeTransformer):
     def visit_Compare(self, node: ast.Compare) -> SExpr:
         [(op, comp)] = zip(node.ops, node.comparators, strict=True)  # TODO
         match op:
+            case ast.Eq():
+                opname = "=="
             case ast.NotEq():
                 opname = "!="
             case ast.Lt():

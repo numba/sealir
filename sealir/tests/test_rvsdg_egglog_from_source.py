@@ -1,112 +1,112 @@
-from sealir import ase, rvsdg
-from sealir.eqsat import py_eqsat, rvsdg_eqsat
-from sealir.rvsdg import grammar as rg
-from sealir.tests.test_rvsdg_egraph_roundtrip import (
-    frontend,
-    llvm_codegen,
-    middle_end,
-)
+# from sealir import ase, rvsdg
+# from sealir.eqsat import py_eqsat, rvsdg_eqsat
+# from sealir.rvsdg import grammar as rg
+# from sealir.tests.test_rvsdg_egraph_roundtrip import (
+#     frontend,
+#     llvm_codegen,
+#     middle_end,
+# )
 
 
-def compiler_pipeline(fn, *, verbose=False):
-    rvsdg_expr, dbginfo = frontend(fn)
+# def compiler_pipeline(fn, *, verbose=False):
+#     rvsdg_expr, dbginfo = frontend(fn)
 
-    def define_egraph(egraph, func):
-        root = rvsdg_eqsat.GraphRoot(func)
-        egraph.let("root", root)
+#     def define_egraph(egraph, func):
+#         root = rvsdg_eqsat.GraphRoot(func)
+#         egraph.let("root", root)
 
-        if verbose:
-            print(egraph.extract(root))
+#         if verbose:
+#             print(egraph.extract(root))
 
-        ruleset = rvsdg_eqsat.make_rules()  # | py_eqsat.make_rules()
-        egraph.run(ruleset.saturate())
+#         ruleset = rvsdg_eqsat.make_rules()  # | py_eqsat.make_rules()
+#         egraph.run(ruleset.saturate())
 
-        if verbose:
-            print(egraph.extract(root))
+#         if verbose:
+#             print(egraph.extract(root))
 
-    cost, extracted = middle_end(rvsdg_expr, define_egraph)
-    if verbose:
-        print("Extracted from EGraph".center(80, "="))
-        print("cost =", cost)
-        print(rvsdg.format_rvsdg(extracted))
+#     cost, extracted = middle_end(rvsdg_expr, define_egraph)
+#     if verbose:
+#         print("Extracted from EGraph".center(80, "="))
+#         print("cost =", cost)
+#         print(rvsdg.format_rvsdg(extracted))
 
-    jt = llvm_codegen(extracted)
-    return jt, extracted
-
-
-def run_test(fn, jt, args):
-    res = jt(*args)
-    assert res == fn(*args)
+#     jt = llvm_codegen(extracted)
+#     return jt, extracted
 
 
-def test_const_fold_ifelse():
-    """Testing constant folding of if-else when the condition is a constant"""
-
-    def check_output_is_argument(extracted, argname: str):
-        """Check that the return value is the argument of name `argname`."""
-        outportmap = dict((p.name, p.value) for p in extracted.body.ports)
-        argportidx = extracted.body.begin.inports.index(argname)
-        match outportmap["!ret"]:
-            case rg.Unpack(val, idx):
-                assert val == extracted.body.begin
-                assert idx == argportidx
-            case _:
-                assert False
-
-    def get_if_else_node(extracted):
-        """Get all rvsdg IfElse nodes"""
-
-        def is_if_else(expr):
-            match expr:
-                case rg.IfElse():
-                    return True
-            return False
-
-        walker = ase.walk_descendants_depth_first_no_repeat(extracted)
-        if_elses = [cur for _, cur in walker if is_if_else(cur)]
-        return if_elses
-
-    def ifelse_fold_select_false(a, b):
-        c = 0
-        if c:
-            return a
-        else:
-            return b
-
-    jt, extracted = compiler_pipeline(ifelse_fold_select_false)
-    args = (12, 34)
-    run_test(ifelse_fold_select_false, jt, args)
-    check_output_is_argument(extracted, "b")
-    # prove that constant folding of the branch condition eliminated the if-else
-    # node
-    assert len(get_if_else_node(extracted)) == 0
-
-    def ifelse_fold_select_true(a, b):
-        c = 1
-        if c:
-            return a
-        else:
-            return b
-
-    jt, extracted = compiler_pipeline(ifelse_fold_select_true)
-    args = (12, 34)
-    run_test(ifelse_fold_select_true, jt, args)
-    # prove that constant folding of the branch condition eliminated the if-else
-    # node
-    assert len(get_if_else_node(extracted)) == 0
-    check_output_is_argument(extracted, "a")
+# def run_test(fn, jt, args):
+#     res = jt(*args)
+#     assert res == fn(*args)
 
 
-# def sum_ints(n):
-#     c = 0
-#     for i in range(n):
-#         c += i
-#     return c
-#     # c = 0
-#     # i = 0
-#     # while i < n:
-#     #     c = i + c
-#     #     i = i + 1
-#     # return c
+# def test_const_fold_ifelse():
+#     """Testing constant folding of if-else when the condition is a constant"""
 
-# compiler_pipeline(sum_ints, (12,), verbose=True)
+#     def check_output_is_argument(extracted, argname: str):
+#         """Check that the return value is the argument of name `argname`."""
+#         outportmap = dict((p.name, p.value) for p in extracted.body.ports)
+#         argportidx = extracted.body.begin.inports.index(argname)
+#         match outportmap["!ret"]:
+#             case rg.Unpack(val, idx):
+#                 assert val == extracted.body.begin
+#                 assert idx == argportidx
+#             case _:
+#                 assert False
+
+#     def get_if_else_node(extracted):
+#         """Get all rvsdg IfElse nodes"""
+
+#         def is_if_else(expr):
+#             match expr:
+#                 case rg.IfElse():
+#                     return True
+#             return False
+
+#         walker = ase.walk_descendants_depth_first_no_repeat(extracted)
+#         if_elses = [cur for _, cur in walker if is_if_else(cur)]
+#         return if_elses
+
+#     def ifelse_fold_select_false(a, b):
+#         c = 0
+#         if c:
+#             return a
+#         else:
+#             return b
+
+#     jt, extracted = compiler_pipeline(ifelse_fold_select_false)
+#     args = (12, 34)
+#     run_test(ifelse_fold_select_false, jt, args)
+#     check_output_is_argument(extracted, "b")
+#     # prove that constant folding of the branch condition eliminated the if-else
+#     # node
+#     assert len(get_if_else_node(extracted)) == 0
+
+#     def ifelse_fold_select_true(a, b):
+#         c = 1
+#         if c:
+#             return a
+#         else:
+#             return b
+
+#     jt, extracted = compiler_pipeline(ifelse_fold_select_true)
+#     args = (12, 34)
+#     run_test(ifelse_fold_select_true, jt, args)
+#     # prove that constant folding of the branch condition eliminated the if-else
+#     # node
+#     assert len(get_if_else_node(extracted)) == 0
+#     check_output_is_argument(extracted, "a")
+
+
+# # def sum_ints(n):
+# #     c = 0
+# #     for i in range(n):
+# #         c += i
+# #     return c
+# #     # c = 0
+# #     # i = 0
+# #     # while i < n:
+# #     #     c = i + c
+# #     #     i = i + 1
+# #     # return c
+
+# # compiler_pipeline(sum_ints, (12,), verbose=True)

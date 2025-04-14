@@ -16,7 +16,6 @@ from sealir.rvsdg import internal_prefix
 import mlir.dialects.arith as arith
 import mlir.dialects.func as func
 import mlir.dialects.math as math
-import mlir.dialects.scf as scf
 
 import mlir.passmanager as passmanager
 import mlir.execution_engine as execution_engine
@@ -59,12 +58,10 @@ def llvm_codegen(root: ase.SExpr):
 
     function_entry = ir.InsertionPoint(entry)
 
-    with function_entry, loc, context:
-        memo = ase.traverse(root, _codegen_loop, CodegenState(context=context, fun=fun, module=module, region_args=[]))
+    memo = ase.traverse(root.body, _codegen_loop, CodegenState(context=context, loc=loc, fun=fun, function_entry=function_entry))
 
     module.dump()
     pass_man = passmanager.PassManager(context=context)
-    pass_man.add("convert-scf-to-cf")
     pass_man.add("convert-func-to-llvm")
     pass_man.enable_verifier(True)
     pass_man.run(module.operation)
@@ -110,64 +107,67 @@ class JitCallable:
 @dataclass(frozen=True)
 class CodegenState(ase.TraverseState):
     context: int
+    loc: int
     fun: int
-    module: int
-    region_args: int
+    function_entry: int
 
 def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
+    context = state.context
+
     def ensure_io(val):
-        # assert isinstance(val, IOState), val
-        # TODO: Assert properly here
+        assert isinstance(val, IOState), val
         return val
 
     def _handle_binop(op: str, lhsval, rhsval):
-        match op:
-            case "+":
-                res = arith.addf(lhsval, rhsval)
-            case "-":
-                res = arith.subf(lhsval, rhsval)
-            case "*":
-                res = arith.mulf(lhsval, rhsval)
-            case "/":
-                res = arith.divf(lhsval, rhsval)
-            case "//":
-                res = math.trunc(arith.divf(lhsval, rhsval))
-            case "**":
-                res = math.powf(lhsval, rhsval)
-            case "<":
-                res = arith.cmpf(4, lhsval, rhsval)
-            case ">":
-                res = arith.cmpf(3, lhsval, rhsval)
-            case "==":
-                res = arith.cmpf(1, lhsval, rhsval)
-            case "!=":
-                res = arith.cmpf(6, lhsval, rhsval)
-            case _:
-                raise NotImplementedError(op)
+        with state.function_entry, state.loc:
+            match op:
+                case "+":
+                    res =arith.addf(lhsval, rhsval)
+                case "-":
+                    res = arith.subf(lhsval, rhsval)
+                case "*":
+                    res = arith.mulf(lhsval, rhsval)
+                case "/":
+                    res = arith.divf(lhsval, rhsval)
+                case "//":
+                    res = math.trunc(arith.divf(lhsval, rhsval))
+                case "**":
+                    res = math.powf(lhsval, rhsval)
+
+                # compare
+                case "<" | ">" | "==" | "!=" | "in":
+                    res = ctx.pyapi.object_richcompare(lhsval, rhsval, op)
+                case _:
+                    raise NotImplementedError(op)
+
         return res
 
     @contextmanager
     def push(region_args):
-        state.region_args.append(tuple(region_args))
+        state.context.region_args.append(tuple(region_args))
         try:
             yield
         finally:
-            state.region_args.pop()
+            state.context.region_args.pop()
 
     def get_region_args():
-        return state.region_args[-1]
+        return state.context.region_args[-1]
 
     match expr:
         case rg.Func(args=args, body=body):
+            # Function prologue
+            bb_main = builder.append_basic_block()
+            builder.branch(bb_main)
+            builder.position_at_end(bb_main)
 
             names = {
-                argspec.name: state.fun.arguments[i]
+                argspec.name: builder.function.args[i]
                 for i, argspec in enumerate(args.arguments)
             }
             argvalues = []
             for k in body.begin.inports:
                 if k == internal_prefix("io"):
-                    v = SSAValue(arith.constant(ir.F64Type.get(), 0.0))
+                    v = IOState()
                 else:
                     v = SSAValue(names[k])
                 argvalues.append(v)
@@ -177,8 +177,8 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
 
             portnames = [p.name for p in body.ports]
             retval = outs[portnames.index(internal_prefix("ret"))]
-            global func
-            func.ReturnOp([retval.value])
+            builder.ret(retval.value)
+
         case rg.RegionBegin(inports=ins):
             portvalues = []
             for i, k in enumerate(ins):
@@ -226,15 +226,23 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             rhsval = (yield rhs).value
             match op:
                 case "+":
-                    res = arith.addf(lhsval, rhsval)
+                    res = ctx.pyapi.number_add(lhsval, rhsval, inplace=True)
                 case "-":
-                    res = arith.subf(lhsval, rhsval)
+                    res = ctx.pyapi.number_subtract(
+                        lhsval, rhsval, inplace=True
+                    )
                 case "*":
-                    res = arith.mulf(lhsval, rhsval)
+                    res = ctx.pyapi.number_multiply(
+                        lhsval, rhsval, inplace=True
+                    )
                 case "/":
-                    res = arith.divf(lhsval, rhsval)
+                    res = ctx.pyapi.number_truedivide(
+                        lhsval, rhsval, inplace=True
+                    )
                 case "//":
-                    res = math.trunc(arith.divf(lhsval, rhsval))
+                    res = ctx.pyapi.number_floordivide(
+                        lhsval, rhsval, inplace=True
+                    )
                 case _:
                     raise NotImplementedError(op)
             return PackedValues.make(ioval, SSAValue(res))
@@ -253,14 +261,18 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
 
         case rg.DbgValue(value=value):
             val = yield value
+            global func
+            with state.function_entry, state.loc:
+                func.ReturnOp([val.value])
             return val
 
         case rg.PyInt(int(ival)) | rg.PyBool(int(ival)):
-            const = arith.constant(ir.IntegerType.get_signed(64), ival)
-            return SSAValue(const)
+            const = llvm_ir.Constant(pyapi.py_ssize_t, int(ival))
+            return SSAValue(pyapi.long_from_ssize_t(const))
 
         case rg.PyFloat(float(fval)):
-            const = arith.constant(ir.F64Type.get(), fval)
+            with state.loc, state.context, state.function_entry:
+                const = arith.constant(ir.F64Type.get(), fval)
             return SSAValue(const)
 
         case rg.PyStr(str(text)):
@@ -297,17 +309,49 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             for op in operands:
                 ops.append((yield op))
 
-            if_op = scf.IfOp(cond=condval, results_= [ir.F64Type.get()] * len(body.ports), hasElse=bool(orelse))
+            # unpack pybool
+            condbit = builder.icmp_unsigned(
+                "!=", pyapi.int32(0), pyapi.object_istrue(condval)
+            )
 
-            with ir.InsertionPoint(if_op.then_block):
-                value_then = yield body
-                scf.YieldOp([x.value for x in value_then])
+            bb_then = builder.append_basic_block("then")
+            bb_else = builder.append_basic_block("else")
+            bb_endif = builder.append_basic_block("endif")
 
-            with ir.InsertionPoint(if_op.else_block):
-                value_else = yield orelse
-                scf.YieldOp([x.value for x in value_else])
-
-            return PackedValues.make(*[SSAValue(x) for x in if_op.results])
+            builder.cbranch(condbit, bb_then, bb_else)
+            # Then
+            with builder.goto_block(bb_then):
+                with push(ops):
+                    value_then = yield body
+                builder.branch(bb_endif)
+                bb_then_end = builder.basic_block
+            # Else
+            with builder.goto_block(bb_else):
+                with push(ops):
+                    value_else = yield orelse
+                builder.branch(bb_endif)
+                bb_else_end = builder.basic_block
+            # EndIf
+            builder.position_at_end(bb_endif)
+            assert len(value_then) == len(value_else)
+            phis: list[LLVMValue] = []
+            for left, right in zip(value_then, value_else, strict=True):
+                if isinstance(left, IOState) or isinstance(right, IOState):
+                    # handle iostate
+                    assert isinstance(left, IOState) and isinstance(
+                        right, IOState
+                    )
+                    phis.append(left)
+                else:
+                    # otherwise
+                    left = left.value
+                    right = right.value
+                    assert left.type == right.type
+                    phi = builder.phi(left.type)
+                    phi.add_incoming(left, bb_then_end)
+                    phi.add_incoming(right, bb_else_end)
+                    phis.append(SSAValue(phi))
+            return PackedValues.make(*phis)
 
         case rg.Loop(body=rg.RegionEnd() as body, operands=operands):
             # process operands
@@ -321,7 +365,6 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             with push(ops):
                 loopentry_values = yield begin
 
-            for_op = scf.ForOp()
             bb_before = builder.basic_block
             bb_loopbody = builder.append_basic_block("loopbody")
             bb_endloop = builder.append_basic_block("endloop")
@@ -437,9 +480,7 @@ class PackedValues(LLVMValue):
 
     def __post_init__(self):
         for v in self.values:
-            # TODO: Assert properly here
-            pass
-            # assert isinstance(v, (SSAValue, IOState)), type(v)
+            assert isinstance(v, (SSAValue, IOState)), type(v)
 
     def __getitem__(self, idx) -> SSAValue:
         return self.values[idx]

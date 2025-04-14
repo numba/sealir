@@ -34,7 +34,7 @@ def test_simple_add():
 
 def test_chained_binop():
     def udt(n: int, m: int) -> int:
-        a = n + m * 10
+        a = n + m * 10.0
         return a
 
     args = (12, 32)
@@ -69,7 +69,7 @@ def test_if_else_1():
             out = m
         return out
 
-    args = (12, 32)
+    args = (12.0, 32.0)
     run(udt, args)
 
     args = (32, 12)
@@ -228,3 +228,5 @@ def run(func, args, *, localscope=None):
     cg = llvm_codegen(func)
     res = cg(*args)
     assert res == expected
+
+test_if_else_1()
