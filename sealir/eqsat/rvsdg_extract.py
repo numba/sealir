@@ -85,7 +85,14 @@ def convert_to_rvsdg(
 
     def iterator(node_iter):
         for node in node_iter:
-            children = [child for _, child in exgraph.out_edges(node)]
+            # Get children nodes in order
+            children = [
+                (data["label"], child)
+                for _, child, data in exgraph.out_edges(node, data=True)
+            ]
+            if children:
+                children.sort()
+                _, children = zip(*children)
             # extract argument names
             kind, _, egg_fn = node.split("-")
             match kind:
@@ -220,7 +227,7 @@ class Extraction:
                 child_eclass = nodes[u].eclass
                 child_key, cost = selections[child_eclass].best()
                 sentry_cost(cost)
-                G.add_edge(cur, child_key, label=str(i))
+                G.add_edge(cur, child_key, label=int(i))
                 todolist.append(child_key)
 
         return rootcost, G
