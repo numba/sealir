@@ -22,6 +22,7 @@ class CostModel:
         self,
         nodename: str,
         op: str,
+        ty: str,
         cost: float,
         nodes: dict[str, Node],
         child_costs: list[float],
@@ -122,6 +123,7 @@ class Node:
 
 class Extraction:
     nodes: dict[str, Node]
+    node_types: dict[str, str]
     root_eclass: str
     cost_model: CostModel
 
@@ -129,6 +131,10 @@ class Extraction:
         self.root_eclass = root_eclass
         self.class_data = defaultdict(set)
         self.nodes = {k: Node(**v) for k, v in graph_json["nodes"].items()}
+        self.node_types = {
+            k: graph_json["class_data"][node.eclass]["type"]
+            for k, node in self.nodes.items()
+        }
         for k, node in self.nodes.items():
             self.class_data[node.eclass].add(k)
         self.cost_model = cost_model
@@ -174,8 +180,9 @@ class Extraction:
                     child_costs.append(best)
                 else:
                     child_costs.append(MAX_COST)
+            ty = self.node_types[nodename]
             cost = self.cost_model.get_cost_function(
-                nodename, node.op, node.cost, nodes, child_costs
+                nodename, node.op, ty, node.cost, nodes, child_costs
             )
             return cost
 
