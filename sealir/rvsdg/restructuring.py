@@ -722,7 +722,7 @@ def format_rvsdg(prgm: SExpr) -> str:
                 if not attrs.attrs:
                     put(heading)
                 else:
-                    fmtattrs = ase.pretty_str(attrs)
+                    fmtattrs = format_attributes(attrs)
                     put(f"{heading}; #attrs {fmtattrs}")
                 return name
             case rg.RegionEnd(begin=begin, ports=ports):
@@ -964,3 +964,8 @@ def convert_to_rvsdg(grm: rg.Grammar, prgm: SExpr):
     if _DEBUG:
         print(format_rvsdg(out))
     return out
+
+
+def format_attributes(sexpr) -> str:
+    # TODO: this needs proper extension ability
+    return ase.pretty_str(sexpr)
