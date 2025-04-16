@@ -230,6 +230,26 @@ def ruleset_portlist_ifelse(
 
 
 @ruleset
+def ruleset_portlist_loop(
+    loop: Term,
+    body: Term,
+    operands: Vec[Term],
+    idx: i64,
+    ports: PortList,
+    region: Region,
+):
+    # Loop
+    yield rule(
+        loop == Term.Loop(body=body, operands=TermList(operands)),
+        body == Term.RegionEnd(region=region, ports=ports),
+        loop.getPort(idx),
+    ).then(
+        # Offset by one because the loop condition port (port 0) is stripped
+        ports.getValue(idx + 1),
+    )
+
+
+@ruleset
 def ruleset_termlist_basic(vecterm: Vec[Term], idx: i64):
     yield rewrite(
         # simplify TermList indexing
@@ -365,6 +385,7 @@ ruleset_rvsdg_basic = (
     ruleset_simplify_dbgvalue
     | ruleset_portlist_basic
     | ruleset_portlist_ifelse
+    | ruleset_portlist_loop
     | ruleset_termlist_basic
     | ruleset_apply_region
     | ruleset_termlist_dyn_index
