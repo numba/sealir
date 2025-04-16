@@ -68,6 +68,8 @@ class EGraphToRVSDG:
                 yield k
 
     def dispatch(self, key: str, grm: Grammar):
+        if key in self.memo:
+            return self.memo[key]
         node = self.gdct["nodes"][key]
         child_keys = node["children"]
         for k in child_keys:
