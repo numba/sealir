@@ -964,4 +964,3 @@ def convert_to_rvsdg(grm: rg.Grammar, prgm: SExpr):
     if _DEBUG:
         print(format_rvsdg(out))
     return out
-

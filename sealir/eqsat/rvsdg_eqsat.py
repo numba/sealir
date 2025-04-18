@@ -61,6 +61,9 @@ class Port(Expr):
     @property
     def value(self) -> Term: ...
 
+    @property
+    def name(self) -> String: ...
+
 
 class Term(Expr):
     @classmethod
@@ -200,8 +203,9 @@ def ruleset_portlist_basic(
         # given
         idx < vecport.length(),
     )
-    yield rule(port == Port(portname, a), port.value).then(
-        union(port.value).with_(a)
+    yield rule(port == Port(portname, a)).then(
+        union(port.value).with_(a),
+        set_(port.name).to(portname),
     )
     yield rewrite(portlist.getValue(idx)).to(portlist[idx].value)
 
