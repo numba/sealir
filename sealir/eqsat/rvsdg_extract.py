@@ -5,8 +5,9 @@ import json
 import math
 import time
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pprint import pformat, pprint
+from typing import NamedTuple
 
 import networkx as nx
 from egglog import EGraph
@@ -146,10 +147,21 @@ class Extraction:
             self.class_data[node.eclass].add(k)
         self.cost_model = cost_model
 
-    def _compute_cost(self, max_iter=10000) -> dict[str, Bucket]:
-        """Compute cost for the EGraph.
-
+    def _compute_cost(
+        self, max_iter=10000, max_no_progress=500
+    ) -> dict[str, Bucket]:
+        """
         Uses dynamic programming with iterative cost propagation
+
+        Args:
+            max_iter (int, optional): Maximum number of iterations to compute
+            costs. Defaults to 10000. max_no_progress (int, optional): Maximum
+            iterations without cost improvement. Defaults to 500.
+
+        Returns:
+            dict[str, Bucket]: A mapping of equivalence classes to their lowest
+            cost representations.
+
 
         Performance notes
 
@@ -195,6 +207,7 @@ class Extraction:
 
         # Repeatedly compute cost and propagate while keeping the best variant
         # for each eclass. If root score is computed, return early.
+        no_progress = NoProgress(max_no_progress)
         for round_i in range(max_iter):
             # propagate
             for k, node in nodes.items():
@@ -203,6 +216,7 @@ class Extraction:
             # root score is computed?
             if math.isfinite(selections[self.root_eclass].best()[1]):
                 break
+            no_progress(selections)
 
         return selections
 
@@ -233,6 +247,50 @@ class Extraction:
         return rootcost, G
 
 
+class ExtractionError(Exception):
+    pass
+
+
+@dataclass
+class NoProgress:
+    max_no_progress: int
+    "Maximum iteration without progress"
+    _last_iteration: int = 0
+    _last_captured: dict[str, float] = field(default_factory=dict)
+
+    def __call__(self, selections: dict[str, Bucket]) -> None:
+        """
+        Check if no progress has been made in the current iteration.
+
+        Tracks iterations and compares the current state of selections with the
+        last captured state. Raises ExtractionError if no improvement is
+        detected, indicating a potential stagnation.
+
+        Args:
+            selections (dict[str, Bucket]): A dictionary of buckets
+            representing different selections.
+
+        """
+        it = self._last_iteration
+        self._last_iteration += 1
+        if it % self.max_no_progress != 0:
+            # skipped
+            return
+        state = {k: bkt.best().cost for k, bkt in selections.items()}
+        if self._last_captured:
+            if state == self._last_captured:
+                raise ExtractionError(
+                    "extraction stopped due to lack of progress for "
+                    f"{self.max_no_progress} iterations"
+                )
+        self._last_captured = state
+
+
+class _NameAndCostTuple(NamedTuple):
+    name: str
+    cost: float
+
+
 def sentry_cost(cost: float) -> None:
     if math.isinf(cost):
         raise ValueError("invalid cost extracted")
@@ -245,8 +303,9 @@ class Bucket:
     def put(self, cost: float, key: str) -> None:
         self.data[key] = min(cost, self.data[key])
 
-    def best(self) -> tuple[str, float]:
-        return min(self.data.items(), key=lambda kv: kv[1])
+    def best(self) -> _NameAndCostTuple:
+        best = min(self.data.items(), key=lambda kv: kv[1])
+        return _NameAndCostTuple(*best)
 
     def __len__(self) -> int:
         return len(self.data)
