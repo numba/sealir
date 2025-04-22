@@ -332,12 +332,41 @@ def ruleset_region_dyn_get(region: Region, idx: i64):
 
 @ruleset
 def ruleset_region_propgate_output(
-    body: Term, portlist: PortList, region: Region, idx: i64
+    body: Term,
+    portlist: PortList,
+    region: Region,
+    idx: i64,
+    vecports: Vec[Port],
+    stop: i64,
 ):
+    @function
+    def _propagate_regionend(
+        start: i64Like,
+        stop: i64Like,
+        portlist: PortList,
+    ) -> Unit: ...
+
     yield rule(
         body == Term.RegionEnd(ports=portlist, region=region),
-        body.getPort(idx),
-    ).then(portlist.getValue(idx))
+        portlist == PortList(vecports),
+    ).then(_propagate_regionend(0, vecports.length(), portlist))
+    yield rule(
+        stmt := _propagate_regionend(idx, stop, portlist),
+        idx < stop,
+    ).then(
+        # define the PortList.getValue
+        portlist.getValue(idx),
+        # subsume the temp statement
+        delete(stmt),
+    )
+
+    yield rule(
+        # Step to idx + 1
+        _propagate_regionend(idx, stop, portlist),
+        idx + 1 < stop,
+    ).then(
+        _propagate_regionend(idx + 1, stop, portlist),
+    )
 
 
 @function(unextractable=True)
