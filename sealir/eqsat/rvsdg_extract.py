@@ -148,7 +148,7 @@ class Extraction:
         self.cost_model = cost_model
 
     def _compute_cost(
-        self, max_iter=10000, max_no_progress=500
+        self, max_iter=1000, max_no_progress=100
     ) -> dict[str, Bucket]:
         """
         Uses dynamic programming with iterative cost propagation
