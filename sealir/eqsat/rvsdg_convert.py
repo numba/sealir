@@ -203,6 +203,14 @@ def egraph_conversion(root: SExpr):
                 valterm = yield value
                 return WrapTerm(py_eqsat.Py_AttrIO(ioterm, valterm, attrname))
 
+            case rg.PySubscript(io=io, value=value, index=index):
+                ioterm = yield io
+                valterm = yield value
+                idxterm = yield index
+                return WrapTerm(
+                    py_eqsat.Py_SubscriptIO(ioterm, valterm, idxterm)
+                )
+
             case rg.PyInt(int(intval)):
                 assert intval.bit_length() < 64
                 return eg.Term.LiteralI64(intval)
