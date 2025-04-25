@@ -472,7 +472,11 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             return grm.write(rg.Args(tuple(arg_done)))
         case ("PyAst_block", body):
             vars = sorted(ctx.scope.varmap)
-            begin = grm.write(rg.RegionBegin(inports=tuple(vars)))
+            begin = grm.write(
+                rg.RegionBegin(
+                    inports=tuple(vars), attrs=grm.write(rg.Attrs(()))
+                )
+            )
             with ctx.new_block(expr) as scope:
                 ctx.initialize_scope(begin)
                 for expr in body:
@@ -679,7 +683,7 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             raise NotImplementedError(expr)
 
 
-def format_rvsdg(prgm: SExpr) -> str:
+def format_rvsdg(prgm: SExpr, *, format_attrs=ase.pretty_str) -> str:
 
     def _inf_counter():
         c = 0
@@ -712,9 +716,14 @@ def format_rvsdg(prgm: SExpr) -> str:
             case rg.Func(fname=str(fname), args=args, body=body):
                 put(f"{fname} = Func {ase.pretty_str(args)}")
                 (yield body)
-            case rg.RegionBegin(inports=ins):
+            case rg.RegionBegin(inports=ins, attrs=rg.Attrs() as attrs):
                 name = fresh_name()
-                put(f"{name} = Region[{expr._handle}] <- {' '.join(ins)}")
+                heading = f"{name} = Region[{expr._handle}] <- {' '.join(ins)}"
+                if not attrs.attrs:
+                    put(heading)
+                else:
+                    fmtattrs = format_attrs(attrs)
+                    put(f"{heading}; #attrs {fmtattrs}")
                 return name
             case rg.RegionEnd(begin=begin, ports=ports):
                 (yield begin)
@@ -751,6 +760,30 @@ def format_rvsdg(prgm: SExpr) -> str:
                 with indent():
                     (yield body)
                 put(f"EndLoop")
+                return name
+
+            case rg.PyForLoop(
+                iter_arg_idx=int(iter_arg_idx),
+                indvar_arg_idx=int(indvar_arg_idx),
+                iterlast_arg_idx=int(iterlast_arg_idx),
+                body=body,
+                operands=operands,
+            ):
+                ops = []
+                for op in operands:
+                    ops.append((yield op))
+
+                name = fresh_name()
+                put(
+                    f"{name} = PyForLoop [{expr._handle}] "
+                    f"#iter_arg_idx={iter_arg_idx} "
+                    f"#indvar_arg_idx={indvar_arg_idx} "
+                    f"#iterlast_arg_idx={iterlast_arg_idx} "
+                    f"<- {' '.join(ops)}"
+                )
+                with indent():
+                    (yield body)
+                put(f"EndPyForLoop")
                 return name
 
             case rg.Unpack(val=source, idx=int(idx)):
@@ -891,10 +924,24 @@ def format_rvsdg(prgm: SExpr) -> str:
                 put(f"{name} = PySubscript {ioref} {valref} {indexref}")
                 return name
 
+            case rg.DbgValue(
+                name=str(varname),
+                value=value,
+                srcloc=srcloc,
+                interloc=interloc,
+            ):
+                valueref = yield value
+                name = fresh_name()
+                put(f"{name} = DbgValue {varname} {valueref}")  # TODO loc
+                return name
+
             case _:
-                print("----debug")
-                print("\n".join(buffer))
-                raise NotImplementedError(expr)
+                argrefs = []
+                for arg in expr._args:
+                    argrefs.append((yield arg))
+                name = fresh_name()
+                put(f"{name} = {expr._head} {' '.join(argrefs)}")
+                return name
 
     ase.traverse(prgm, formatter)
 

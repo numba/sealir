@@ -19,6 +19,10 @@ class Loc(_Root):
     col_last: int
 
 
+def unknown_loc() -> Loc:
+    return Loc(filename="", line_first=0, line_last=0, col_first=0, col_last=0)
+
+
 class Args(_Root):
     arguments: tuple[SExpr, ...]
 
@@ -28,7 +32,12 @@ class Port(_Root):
     value: SExpr
 
 
+class Attrs(_Root):
+    attrs: tuple[SExpr, ...]
+
+
 class RegionBegin(_Root):
+    attrs: SExpr
     inports: tuple[str, ...]
 
 
@@ -153,6 +162,14 @@ class PyInplaceBinOp(_Root):
 class PyLoadGlobal(_Root):
     io: SExpr
     name: str
+
+
+class PyForLoop(_Root):
+    iter_arg_idx: int
+    indvar_arg_idx: int
+    iterlast_arg_idx: int
+    body: SExpr
+    operands: tuple[SExpr, ...]
 
 
 class Var(_Root):

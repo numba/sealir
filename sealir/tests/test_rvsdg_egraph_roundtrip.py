@@ -16,7 +16,7 @@ def frontend(fn):
     return rvsdg_expr, dbginfo
 
 
-def middle_end(rvsdg_expr, apply_to_egraph):
+def middle_end(rvsdg_expr, apply_to_egraph, cost_model=None):
     """The middle end encode the RVSDG into a EGraph to apply rewrite rules.
     After that, it is extracted back into RVSDG.
     """
@@ -29,7 +29,9 @@ def middle_end(rvsdg_expr, apply_to_egraph):
     apply_to_egraph(egraph, func)
 
     # Extraction
-    cost, extracted = egraph_extraction(egraph, rvsdg_expr)
+    cost, extracted = egraph_extraction(
+        egraph, rvsdg_expr, cost_model=cost_model
+    )
     return cost, extracted
 
 

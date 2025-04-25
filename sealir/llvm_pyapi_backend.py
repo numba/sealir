@@ -248,17 +248,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             return SSAValue(pyapi.float_from_double(const))
 
         case rg.PyStr(str(text)):
-            module = builder.module
-            encoded = bytearray(text.encode("utf-8") + b"\x00")
-            byte_string = ir.Constant(
-                ir.ArrayType(ll_byte, len(encoded)), encoded
-            )
-            unique_name = module.get_unique_name("const_string")
-            gv = ir.GlobalVariable(module, byte_string.type, unique_name)
-            gv.global_constant = True
-            gv.initializer = byte_string
-            gv.linkage = "internal"
-            res = pyapi.string_from_string(builder.bitcast(gv, pyapi.cstring))
+            res = pyapi.make_string(text)
             return SSAValue(res)
 
         case rg.PyTuple(elems):
@@ -388,6 +378,92 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             # Returns the value from the loop body because this is a tail loop
             return loopout_values
 
+        case rg.PyForLoop(
+            iter_arg_idx=int(iter_arg_idx),
+            indvar_arg_idx=int(indvar_arg_idx),
+            iterlast_arg_idx=int(iterlast_arg_idx),
+            body=rg.RegionEnd() as body,
+            operands=operands,
+        ):
+            # process operands
+            ops = []
+            for op in operands:
+                ops.append((yield op))
+
+            begin = body.begin
+
+            with push(ops):
+                loopentry_values = yield begin
+
+            sentinel = pyapi.make_string("__scfg_sentinel__")
+            bb_before = builder.basic_block
+            bb_loopheader = builder.append_basic_block("loopheader")
+            bb_loopbody = builder.append_basic_block("loopbody")
+            bb_endloop = builder.append_basic_block("endloop")
+
+            builder.branch(bb_loopheader)
+            builder.position_at_end(bb_loopheader)
+
+            phis: list[SSAValue] = []
+            fixups = {}
+            for i, var in enumerate(loopentry_values):
+                if isinstance(var, IOState):
+                    # iostate
+                    phis.append(var)
+                else:
+                    phi = builder.phi(var.value.type)
+                    phi.add_incoming(var.value, bb_before)
+                    fixups[i] = phi
+                    phis.append(SSAValue(phi))
+
+            # Do indvar = next(iterator)
+            iterator = phis[iter_arg_idx].value
+
+            nextobj = ctx.global_ns["next"]
+            ptr = pyapi.py_ssize_t(id(nextobj))
+            nextptr = builder.inttoptr(
+                ptr, ll_pyobject_ptr, name="global.next"
+            )
+            nextres = pyapi.call_function_objargs(
+                nextptr, [iterator, sentinel]
+            )
+
+            oldindvar = phis[indvar_arg_idx].value
+            is_valid = builder.icmp_unsigned("!=", nextres, sentinel)
+            indvar = builder.select(
+                is_valid,
+                nextres,
+                oldindvar,
+                name="forloop.indvar",
+            )
+            phis[indvar_arg_idx] = SSAValue(indvar)
+            phis[iterlast_arg_idx] = SSAValue(oldindvar)
+            builder.cbranch(is_valid, bb_loopbody, bb_endloop)
+
+            # Generate loop body
+            builder.position_at_end(bb_loopbody)
+            packed_phis = PackedValues.make(*phis)
+
+            loopctx = replace(ctx, region_args=[])
+            loop_memo = {begin: packed_phis}
+            memo = ase.traverse(
+                body,
+                _codegen_loop,
+                CodegenState(context=loopctx),
+                init_memo=loop_memo,
+            )
+
+            loopout_values = list(memo[body])
+
+            for i, phi in fixups.items():
+                phi.add_incoming(loopout_values[i].value, builder.basic_block)
+
+            # back jump
+            builder.branch(bb_loopheader)
+            # end loop
+            builder.position_at_end(bb_endloop)
+            return packed_phis
+
         case rg.PyCall(func=func, io=io, args=args):
             ioval = ensure_io((yield io))
             callee = (yield func).value
@@ -418,7 +494,17 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             return SSAValue(obj)
 
         case _:
-            raise NotImplementedError(expr, type(expr))
+            if ctx.codegen_extension is not None:
+                args = []
+                for arg in expr._args:
+                    args.append((yield arg))
+                res = ctx.codegen_extension(expr, tuple(args), builder, pyapi)
+            else:
+                res = NotImplemented
+            if res is NotImplemented:
+                raise NotImplementedError(expr, type(expr))
+            else:
+                return res
 
 
 @dataclass(frozen=True)
@@ -431,6 +517,8 @@ class CodegenCtx:
     global_ns: Mapping[str, Any]
 
     region_args: list[LLVMValue] = field(default_factory=list)
+
+    codegen_extension: Callable | None = None
 
 
 def determine_arity(root: ase.SExpr) -> int:
@@ -610,6 +698,11 @@ class PythonAPI:
         else:
             raise OverflowError("integer too big (%d bits)" % (bits))
 
+    def long_as_longlong(self, numobj):
+        fnty = ir.FunctionType(self.ulonglong, [self.pyobj])
+        fn = self._get_function(fnty, name="PyLong_AsLongLong")
+        return self.builder.call(fn, [numobj])
+
     def float_from_double(self, fval):
         func_name = "PyFloat_FromDouble"
         fnty = ir.FunctionType(self.pyobj, [self.double])
@@ -772,6 +865,19 @@ class PythonAPI:
         fname = "PyObject_GetAttrString"
         fn = self._get_function(fnty, name=fname)
         return self.builder.call(fn, [obj, attrname])
+
+    def make_string(self, text: str):
+        builder = self.builder
+        module = builder.module
+        encoded = bytearray(text.encode("utf-8") + b"\x00")
+        byte_string = ir.Constant(ir.ArrayType(ll_byte, len(encoded)), encoded)
+        unique_name = module.get_unique_name("const_string")
+        gv = ir.GlobalVariable(module, byte_string.type, unique_name)
+        gv.global_constant = True
+        gv.initializer = byte_string
+        gv.linkage = "internal"
+        res = self.string_from_string(builder.bitcast(gv, self.cstring))
+        return res
 
     def make_none(self):
         obj = self.borrow_none()

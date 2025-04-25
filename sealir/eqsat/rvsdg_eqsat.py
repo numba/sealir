@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 from egglog import (
     Bool,
     Expr,
@@ -10,6 +12,7 @@ from egglog import (
     StringLike,
     Unit,
     Vec,
+    delete,
     eq,
     f64,
     f64Like,
@@ -22,7 +25,18 @@ from egglog import (
     ruleset,
     set_,
     union,
+    var,
 )
+from egglog.conversion import converter
+
+MAXCOST = sys.maxsize
+
+
+class DynInt(Expr):
+    def __init__(self, num: i64Like): ...
+
+
+converter(i64, DynInt, DynInt)
 
 
 class InPorts(Expr):
@@ -38,12 +52,17 @@ class Region(Expr):
 
     def get(self, idx: i64Like) -> Term: ...
 
+    def dyn_get(self, idx: DynInt) -> Term: ...
+
 
 class Port(Expr):
     def __init__(self, name: StringLike, term: Term): ...
 
     @property
     def value(self) -> Term: ...
+
+    @property
+    def name(self) -> String: ...
 
 
 class Term(Expr):
@@ -92,19 +111,33 @@ class Term(Expr):
     @classmethod
     def LiteralNone(cls) -> Term: ...
 
+    # TODO: add Loc
+    # TODO: this node is merged with `value`. Extraction should look in the
+    #       eclass for DbgValue and reconstruct them.
+    @classmethod
+    def DbgValue(cls, varname: StringLike, value: Term) -> Term: ...
+
     def getPort(self, idx: i64Like) -> Term: ...
 
 
 class TermList(Expr):
     def __init__(self, terms: Vec[Term]): ...
 
-    def __getitem__(self, idx: i64) -> Term: ...
+    def __getitem__(self, idx: i64Like) -> Term: ...
+
+    def dyn_index(self, target: Term) -> DynInt: ...
+
+
+@function(cost=MAXCOST)  # max cost to make it unextractable
+def _dyn_index_partial(terms: Vec[Term], target: Term) -> DynInt: ...
 
 
 class PortList(Expr):
     def __init__(self, ports: Vec[Port]): ...
 
     def __getitem__(self, idx: i64) -> Port: ...
+
+    def getValue(self, idx: i64) -> Term: ...
 
 
 # class Debug(Expr):
@@ -123,11 +156,11 @@ def portlist(*args: Port) -> PortList:
 
 
 @function
-def PartialEval(env: Env, func: Term) -> Value: ...
+def GraphRoot(t: Term) -> Term: ...
 
 
 @function
-def GraphRoot(t: Term) -> Term: ...
+def IsConstant(t: Term) -> Unit: ...
 
 
 @function
@@ -138,12 +171,29 @@ def IsConstantTrue(t: Term) -> Unit: ...
 def IsConstantFalse(t: Term) -> Unit: ...
 
 
+@function
+def Select(cond: Term, then: Term, orelse: Term) -> Term: ...
+
+
 # ------------------------------ RuleSets ------------------------------
+
+
+def wildcard(ty):
+    wildcard._count += 1
+    return var(f"_{wildcard._count}", ty)
+
+
+wildcard._count = 0
 
 
 @ruleset
 def ruleset_portlist_basic(
-    vecport: Vec[Port], idx: i64, a: Term, portname: String
+    vecport: Vec[Port],
+    idx: i64,
+    a: Term,
+    portname: String,
+    port: Port,
+    portlist: PortList,
 ):
     yield rewrite(
         # simplify PortList indexing
@@ -153,7 +203,54 @@ def ruleset_portlist_basic(
         # given
         idx < vecport.length(),
     )
-    yield rewrite(Port(portname, a).value, subsume=True).to(a)
+    yield rule(port == Port(portname, a)).then(
+        union(port.value).with_(a),
+        set_(port.name).to(portname),
+    )
+    yield rewrite(portlist.getValue(idx)).to(portlist[idx].value)
+
+
+@ruleset
+def ruleset_portlist_ifelse(
+    idx: i64,
+    ifelse: Term,
+    then_portlist: PortList,
+    orelse_portlist: PortList,
+):
+    # IfElse
+    yield rule(
+        ifelse
+        == Term.IfElse(
+            cond=wildcard(Term),
+            then=Term.RegionEnd(wildcard(Region), then_portlist),
+            orelse=Term.RegionEnd(wildcard(Region), orelse_portlist),
+            operands=wildcard(TermList),
+        ),
+        ifelse.getPort(idx),
+    ).then(
+        then_portlist.getValue(idx),
+        orelse_portlist.getValue(idx),
+    )
+
+
+@ruleset
+def ruleset_portlist_loop(
+    loop: Term,
+    body: Term,
+    operands: Vec[Term],
+    idx: i64,
+    ports: PortList,
+    region: Region,
+):
+    # Loop
+    yield rule(
+        loop == Term.Loop(body=body, operands=TermList(operands)),
+        body == Term.RegionEnd(region=region, ports=ports),
+        loop.getPort(idx),
+    ).then(
+        # Offset by one because the loop condition port (port 0) is stripped
+        ports.getValue(idx + 1),
+    )
 
 
 @ruleset
@@ -169,12 +266,48 @@ def ruleset_termlist_basic(vecterm: Vec[Term], idx: i64):
 
 
 @ruleset
+def ruleset_termlist_dyn_index(vecterm: Vec[Term], target: Term):
+    # Simplify TermList.dyn_index into DynInt(i64)
+    yield rewrite(TermList(vecterm).dyn_index(target), subsume=True).to(
+        _dyn_index_partial(vecterm, target),
+        # given
+        vecterm.contains(target),
+    )
+    last = vecterm.length() - 1
+    yield rewrite(
+        _dyn_index_partial(vecterm, target),
+        subsume=True,
+    ).to(
+        # Recurse into vecterm.pop()
+        _dyn_index_partial(vecterm.pop(), target),
+        # given
+        vecterm[last] != target,
+    )
+    yield rewrite(
+        _dyn_index_partial(vecterm, target),
+        subsume=True,
+    ).to(
+        # Found as the last element
+        DynInt(last),
+        # given
+        vecterm[last] == target,
+    )
+
+
+@ruleset
+def ruleset_simplify_dbgvalue(
+    t: Term,
+    varname: String,
+):
+    # DbgValue is merged with base value.
+    yield rewrite(Term.DbgValue(varname, t)).to(t)
+
+
+@ruleset
 def ruleset_apply_region(
     ports: PortList,
     idx: i64,
     region: Region,
-    uid: String,
-    inports: InPorts,
     operands: TermList,
 ):
     yield rewrite(
@@ -189,15 +322,125 @@ def ruleset_apply_region(
     ).then(union(region.get(idx)).with_(operands[idx]))
 
 
+@ruleset
+def ruleset_region_dyn_get(region: Region, idx: i64):
+    yield rewrite(
+        region.dyn_get(DynInt(idx)),
+        subsume=True,
+    ).to(region.get(idx))
+
+
+@ruleset
+def ruleset_region_propgate_output(
+    body: Term,
+    portlist: PortList,
+    region: Region,
+    idx: i64,
+    vecports: Vec[Port],
+    stop: i64,
+):
+    @function
+    def _propagate_regionend(
+        start: i64Like,
+        stop: i64Like,
+        portlist: PortList,
+    ) -> Unit: ...
+
+    yield rule(
+        body == Term.RegionEnd(ports=portlist, region=region),
+        portlist == PortList(vecports),
+    ).then(_propagate_regionend(0, vecports.length(), portlist))
+    yield rule(
+        stmt := _propagate_regionend(idx, stop, portlist),
+        idx < stop,
+    ).then(
+        # define the PortList.getValue
+        portlist.getValue(idx),
+        # subsume the temp statement
+        delete(stmt),
+    )
+
+    yield rule(
+        # Step to idx + 1
+        _propagate_regionend(idx, stop, portlist),
+        idx + 1 < stop,
+    ).then(
+        _propagate_regionend(idx + 1, stop, portlist),
+    )
+
+
+@function(unextractable=True)
+def _define_region_outputs(body: Term, idx: i64, end: i64) -> Term: ...
+
+
+@ruleset
+def ruleset_func_outputs(
+    func: Term,
+    uid: String,
+    fname: String,
+    body: Term,
+    region: Region,
+    portlist: PortList,
+    ports: Vec[Port],
+    idx: i64,
+    end: i64,
+):
+    yield rule(
+        func == Term.Func(uid=uid, fname=fname, body=body),
+        body == Term.RegionEnd(region, ports=portlist),
+        portlist == PortList(ports),
+    ).then(
+        # Need this because limitation Vec.
+        # Defer the expansion in rules below
+        _define_region_outputs(body, i64(0), ports.length())
+    )
+
+    # Expand _define_region_outputs
+    yield rule(
+        x := _define_region_outputs(body, idx, end),
+        idx < end,
+    ).then(
+        # March to next index
+        _define_region_outputs(body, idx + 1, end),
+        # Define
+        union(x).with_(body.getPort(idx)),
+        # Delete _define_region_outputs
+        delete(x),
+    )
+
+    yield rule(
+        # Delete if out of range
+        x := _define_region_outputs(body, idx, idx)
+    ).then(delete(x))
+
+
 ruleset_rvsdg_basic = (
-    ruleset_portlist_basic | ruleset_termlist_basic | ruleset_apply_region
+    ruleset_simplify_dbgvalue
+    | ruleset_portlist_basic
+    | ruleset_portlist_ifelse
+    | ruleset_portlist_loop
+    | ruleset_termlist_basic
+    | ruleset_apply_region
+    | ruleset_termlist_dyn_index
+    | ruleset_region_dyn_get
+    | ruleset_region_propgate_output
+    | ruleset_func_outputs
 )
 
 
 @ruleset
 def ruleset_const_propagate(a: Term, ival: i64):
-    yield rule(a == Term.LiteralI64(ival), ival != 0).then(IsConstantTrue(a))
-    yield rule(a == Term.LiteralI64(ival), ival == 0).then(IsConstantFalse(a))
+    # Constant boolean
+    yield rule(a == Term.LiteralI64(ival), ival != i64(0)).then(
+        IsConstantTrue(a)
+    )
+    yield rule(a == Term.LiteralI64(ival), ival == i64(0)).then(
+        IsConstantFalse(a)
+    )
+
+    # Constant integers
+    yield rule(a == Term.LiteralI64(ival)).then(IsConstant(a))
+    yield rule(a == Term.LiteralI64(ival)).then(IsConstant(a))
 
 
 @ruleset
@@ -214,11 +457,47 @@ def ruleset_const_fold_if_else(a: Term, b: Term, c: Term, operands: TermList):
     )
 
 
+@ruleset
+def ruleset_ifelse_propagation(
+    ifelse: Term,
+    cond: Term,
+    then: Term,
+    orelse: Term,
+    idx: i64,
+    then_ports: PortList,
+    else_ports: Vec[Port],
+):
+    yield rule(
+        # Create Select statement from IfElse outputs that are constants on
+        # both sides
+        ifelse == Term.IfElse(cond, then, orelse, wildcard(TermList)),
+        ifelse.getPort(idx),
+        then == Term.RegionEnd(wildcard(Region), then_ports),
+        orelse == Term.RegionEnd(wildcard(Region), PortList(else_ports)),
+        IsConstant(then_ports.getValue(idx)),
+        IsConstant(else_ports[idx].value),
+    ).then(
+        union(ifelse.getPort(idx)).with_(
+            Select(cond, then_ports[idx].value, else_ports[idx].value)
+        )
+    )
+
+    yield rewrite(
+        # Simplify Select if both side are the same
+        Select(cond, then, orelse)
+    ).to(
+        then,
+        # given both side are the same
+        then == orelse,
+    )
+
+
 def make_rules(*, communtative=False):
     rules = (
         ruleset_rvsdg_basic
         | ruleset_const_propagate
         | ruleset_const_fold_if_else
+        | ruleset_ifelse_propagation
     )
     # rules |= _PartialEval_rules
     # if communtative:
