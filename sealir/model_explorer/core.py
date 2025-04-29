@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pickle
 
-import model_explorer
 from egglog import EGraph
 
 from sealir.grammar import NamedSExpr
@@ -63,6 +62,7 @@ def visualize_egraph(egraph: EGraph, *, filepath: str) -> None:
         filepath (str): The base filepath where the JSON representation will be
                         saved. File extensions is always appended.
     """
+    import model_explorer
     model_explorer.visualize(
         prepare_egraph(egraph, filepath), extensions=_extensions
     )
@@ -78,6 +78,7 @@ def visualize_rvsdg(rvsdg_root: NamedSExpr, *, filepath: str) -> None:
         filepath (str): The base filepath where the pickled representation will
                         be saved. File extension is always appended.
     """
+    import model_explorer
     model_explorer.visualize(
         prepare_rvsdg(rvsdg_root, filepath), extensions=_extensions
     )
