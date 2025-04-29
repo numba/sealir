@@ -27,9 +27,9 @@ class RvsdgAdapter(Adapter):
 
     def convert(self, model_path: str, settings: Dict) -> ModelExplorerGraphs:
         with open(model_path, "rb") as fin:
-            grm, tape, handle = pickle.load(fin)
+            payload = pickle.load(fin)
 
-        root = grm.downcast(ase.BasicSExpr(tape, handle))
+        root = grammar.deserialize(payload)
         graph = graph_builder.Graph(id="egraph")
 
         # assign RVSDG region to namespaces by nesting them
