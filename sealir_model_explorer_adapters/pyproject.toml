@@ -1,0 +1,13 @@
+[project]
+name = "sealir-model-explorer-adapters"
+version = "0.0.1"
+
+dependencies = [
+  "ai-edge-model-explorer",
+  "sealir",
+]
+
+[tool.setuptools.packages.find]
+where = [".."]
+include = ["sealir_model_explorer_adapters",
+           "sealir_model_explorer_adapters.*"]

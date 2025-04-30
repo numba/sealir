@@ -280,6 +280,18 @@ class NamedSExpr(ase.SExpr, Generic[Tgrammar, Trule]):
             out[self.__match_args__[-1]] = tuple(args[i:])
         return out
 
+    def _serialize(self) -> tuple:
+        """
+        Returns an object that is suitable for serializing.
+        """
+        return self._grammar, self._tape, self._handle
+
+
+def deserialize(payload) -> NamedSExpr:
+    """Reconstruct a NamedSExpr given the output from `NamedSExpr._serialize()`."""
+    grm, tape, handle = payload
+    return grm.downcast(ase.BasicSExpr(tape, handle))
+
 
 class TreeRewriter(rewriter.TreeRewriter[T]):
     grammar: Grammar | None = None

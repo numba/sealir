@@ -62,6 +62,10 @@ class HandleSentry(IntEnum):
         return f"<{self.name}>"
 
 
+def _passthru(x):
+    return x
+
+
 class Tape:
     """
     An append-only Tape for storing all S-expressions.
@@ -89,7 +93,7 @@ class Tape:
         self._tokenmap = {(type(None), None): 0}
         self._num_records = 0
         self._open_counter = 0
-        self._downcast = lambda x: x
+        self._downcast = _passthru
 
     def __len__(self) -> int:
         return self._num_records
