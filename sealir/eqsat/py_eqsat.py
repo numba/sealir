@@ -107,6 +107,10 @@ def Py_AttrIO(io: Term, obj: Term, attrname: StringLike) -> Term: ...
 
 
 @function
+def Py_SubscriptIO(io: Term, obj: Term, index: Term) -> Term: ...
+
+
+@function
 def Py_LoadGlobal(io: Term, name: StringLike) -> Term: ...
 
 

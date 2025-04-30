@@ -935,6 +935,8 @@ def format_rvsdg(prgm: SExpr, *, format_attrs=ase.pretty_str) -> str:
                 put(f"{name} = DbgValue {varname} {valueref}")  # TODO loc
                 return name
 
+            case rg.Attrs() as attrs:
+                return "#attrs " + format_attrs(attrs)
             case _:
                 argrefs = []
                 for arg in expr._args:
