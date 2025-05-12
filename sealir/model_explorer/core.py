@@ -63,6 +63,7 @@ def visualize_egraph(egraph: EGraph, *, filepath: str) -> None:
                         saved. File extensions is always appended.
     """
     import model_explorer
+
     model_explorer.visualize(
         prepare_egraph(egraph, filepath), extensions=_extensions
     )
@@ -79,6 +80,7 @@ def visualize_rvsdg(rvsdg_root: NamedSExpr, *, filepath: str) -> None:
                         be saved. File extension is always appended.
     """
     import model_explorer
+
     model_explorer.visualize(
         prepare_rvsdg(rvsdg_root, filepath), extensions=_extensions
     )
