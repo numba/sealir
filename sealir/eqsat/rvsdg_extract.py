@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pprint import pformat, pprint
-from typing import NamedTuple
+from typing import Any, NamedTuple, Sequence
 
 import networkx as nx
 from egglog import EGraph
@@ -18,6 +18,40 @@ from .rvsdg_extract_details import EGraphToRVSDG
 MAX_COST = float("inf")
 
 
+@dataclass(frozen=True)
+class CostFunc:
+
+    def compute(self, child_costs: Sequence[float]):
+        raise NotImplementedError
+
+
+@dataclass(frozen=True)
+class SimpleCostFunc(CostFunc):
+    self_cost: float
+    """Cost for the current node
+    """
+
+    def compute(self, child_costs: Sequence[float]):
+        """Compute local cost of the node."""
+        return self.self_cost
+
+
+@dataclass(frozen=True)
+class ControlCostFunc(CostFunc):
+    self_cost: float
+    """Cost for the current node
+    """
+    multipliers: tuple[float]
+    """Multipliers for each children
+    """
+
+    def compute(self, child_costs: Sequence[float]):
+        """Compute local cost of the node."""
+        return self.self_cost + sum(
+            c * v for c, v in zip(child_costs, self.multipliers, strict=True)
+        )
+
+
 class CostModel:
     def get_cost_function(
         self,
@@ -25,10 +59,20 @@ class CostModel:
         op: str,
         ty: str,
         cost: float,
-        nodes: dict[str, Node],
-        child_costs: list[float],
-    ) -> float:
-        return cost + sum(child_costs)
+        children: Sequence[str],
+    ) -> CostFunc:
+        return self.get_control(cost, multipliers=tuple([1.0] * len(children)))
+
+    def get_simple(self, self_cost) -> CostFunc:
+        """Get a simple cost function suitable for arithmetic expressions.
+
+        This produce a more intuitive cost.
+        """
+        return SimpleCostFunc(self_cost=self_cost)
+
+    def get_control(self, self_cost, multipliers) -> CostFunc:
+        """Get a cost function suitable for control-flow construct."""
+        return ControlCostFunc(self_cost=self_cost, multipliers=multipliers)
 
 
 def egraph_extraction(
@@ -129,11 +173,18 @@ class Node:
     subsumed: bool
 
 
+def render_extraction_graph(G: nx.MultiDiGraph, filename: str):
+    """Render extraction-graph to SVG."""
+    nx.drawing.nx_pydot.to_pydot(G).write_svg(filename + ".svg")
+
+
 class Extraction:
     nodes: dict[str, Node]
     node_types: dict[str, str]
     root_eclass: str
     cost_model: CostModel
+
+    _DEBUG = False
 
     def __init__(self, graph_json: EGraphJsonDict, root_eclass, cost_model):
         self.root_eclass = root_eclass
@@ -187,34 +238,80 @@ class Extraction:
 
         selections: dict[str, Bucket] = defaultdict(Bucket)
 
-        def compute_cost(nodename: str, node: Node):
-            if node.subsumed:
-                return MAX_COST
-            child_costs = []
-            for child in node.children:
-                child_node = nodes[child]
-                choices = selections[child_node.eclass]
-                if choices:
-                    _, best = choices.best()
-                    child_costs.append(best)
-                else:
-                    child_costs.append(MAX_COST)
-            ty = self.node_types[nodename]
-            cost = self.cost_model.get_cost_function(
-                nodename, node.op, ty, node.cost, nodes, child_costs
+        # Create a eclass depedency graph
+        G = nx.DiGraph()
+        for eclass, enodes in eclassmap.items():
+            G.add_node(eclass, shape="diamond")
+            for k in enodes:
+                enode = nodes[k]
+                if not enode.subsumed:
+                    G.add_node(k, shape="rect")
+                    G.add_edge(eclass, k)
+                    for child in enode.children:
+                        G.add_edge(k, nodes[child].eclass)
+
+        # Get edge weights multiplier
+        edge_weights: dict[tuple[str, str], float]
+        edge_weights = defaultdict(lambda: float(1))
+        backedges = _find_backedges_dfs_edges(G, source=self.root_eclass)
+        for edge in backedges:
+            edge_weights[edge] = 2
+
+        for u, v in G.edges:
+            edgeattrs = G[u][v]
+            edgeattrs["cost"] = edgeattrs["label"] = edge_weights[u, v]
+
+        Gdag = G.copy()
+        Gdag.remove_edges_from(backedges)
+        if self._DEBUG:
+            render_extraction_graph(Gdag, "Gdag")
+
+        # Get per-node cost function
+        cm = self.cost_model
+        nodecostmap: dict[str, CostFunc] = {}
+        for k in G.nodes:
+            if k not in eclassmap:
+                node = nodes[k]
+                children_eclasses = [nodes[c].eclass for c in node.children]
+                nodecostmap[k] = cm.get_cost_function(
+                    nodename=k,
+                    op=node.op,
+                    ty=self.node_types[k],
+                    cost=node.cost,
+                    children=children_eclasses,
+                )
+        if self._DEBUG:
+            render_extraction_graph(G, "eclass")
+
+        topo_ordered = list(nx.topological_sort(Gdag))
+
+        def propagate_cost():
+            dagcost = DagCost(
+                Gdag=Gdag,
+                eclassmap=eclassmap,
+                selections=selections,
+                nodecostmap=nodecostmap,
+                edge_weights=edge_weights,
+                nodes=nodes,
             )
-            return cost
+
+            for k in reversed(topo_ordered):
+                if k not in eclassmap:
+                    node = nodes[k]
+
+                    cost_dag = dagcost.compute_cost(k)
+                    cost = sum(cost_dag.values())
+                    selections[node.eclass].put(cost, k)
 
         # Repeatedly compute cost and propagate while keeping the best variant
         # for each eclass. If root score is computed, return early.
         no_progress = NoProgress(max_no_progress)
         for round_i in range(max_iter):
             # propagate
-            for k, node in nodes.items():
-                cost = compute_cost(k, node)
-                selections[node.eclass].put(cost, k)
+            propagate_cost()
             # root score is computed?
-            if math.isfinite(selections[self.root_eclass].best()[1]):
+            if math.isfinite(selections[self.root_eclass].best().cost):
+                # TODO: implement change rate based termination
                 break
             no_progress(selections)
 
@@ -225,7 +322,6 @@ class Extraction:
 
         nodes = self.nodes
         chosen_root, rootcost = selections[self.root_eclass].best()
-        sentry_cost(rootcost)
 
         # make selected graph
         G = nx.MultiDiGraph()
@@ -240,11 +336,120 @@ class Extraction:
             for i, u in enumerate(nodes[cur].children):
                 child_eclass = nodes[u].eclass
                 child_key, cost = selections[child_eclass].best()
-                sentry_cost(cost)
                 G.add_edge(cur, child_key, label=int(i))
                 todolist.append(child_key)
 
+        if self._DEBUG:
+            render_extraction_graph(G, "chosen")
         return rootcost, G
+
+
+def _find_backedges_dfs_edges(G, source) -> list[tuple[str, str]]:
+    """
+    Find backedges by comparing graph edges to DFS tree edges.
+
+    Parameters:
+        G: networkx.DiGraph, the directed graph
+
+    Returns:
+        List of tuples (u, v) representing backedges
+    """
+    # Get DFS tree edges
+    dfs_tree_edges = set(nx.dfs_edges(G, source))
+    # All graph edges
+    all_edges = set(G.edges())
+    # Backedges are edges not in the DFS tree but in cycles
+    backedges = []
+    for edge in all_edges - dfs_tree_edges:
+        u, v = edge
+        # Check if v is reachable from u in the DFS tree (indicating a cycle)
+        if nx.has_path(G, v, u):
+            backedges.append(edge)
+    return backedges
+
+
+@dataclass
+class _DagCostStats:
+    cache_miss: int = 0
+    cache_hit: int = 0
+
+
+@dataclass(frozen=True)
+class DagCost:
+    """
+    Compute cost of a node in both node-based and edge-based cost computation.
+
+    Node-based cost computation deduplicates repeated nodes in subgraphs by
+    removing backedges.
+
+    Edge-based cost computation includes self cost, which for simple operations
+    is just its computation cost, but for control nodes it includes a factor of
+    its children's costs, such as loops that should contain trip-count
+    multiplied with the loop body's cost.
+    """
+
+    Gdag: nx.DiGraph
+    nodes: dict[str, Node]
+    eclassmap: dict[str, Any]
+    selections: dict[str, Bucket]
+    nodecostmap: dict[str, CostFunc]
+    edge_weights: dict[tuple[str, str], float]
+    "maps eclass to Bucket"
+    _cache: dict[str, dict[str, float]] = field(default_factory=dict)
+    _stats: _DagCostStats = field(default_factory=_DagCostStats)
+
+    def compute_cost(self, nodename: str) -> dict[str, float]:
+        if (cc := self._cache.get(nodename)) is None:
+            self._stats.cache_miss += 1
+            cc = self._cache[nodename] = self._compute_cost(nodename)
+        else:
+            self._stats.cache_hit += 1
+        return cc
+
+    def _compute_cost(self, nodename: str) -> dict[str, float]:
+        assert (
+            nodename not in self.eclassmap
+        ), f"nodename ({nodename!r}) cannot be eclass"
+        selections = self.selections
+        costs = {}
+
+        ## compute the local node cost
+        nodes = self.nodes
+        node = nodes[nodename]
+        edge_weights = self.edge_weights
+        child_edge_weights = [
+            edge_weights[nodename, nodes[child].eclass]
+            for child in node.children
+        ]
+        child_costs = []
+        for child, edge_weight in zip(
+            node.children, child_edge_weights, strict=True
+        ):
+            child_eclass = nodes[child].eclass
+            if choices := selections[child_eclass]:
+                cc = choices.best().cost * edge_weight
+            else:
+                cc = MAX_COST
+            child_costs.append(cc)
+
+        cf = self.nodecostmap[nodename]
+        local_cost = cf.compute(child_costs)
+        costs[nodename] = local_cost
+        # compute children node cost
+        children = set(self.Gdag.successors(nodename))
+        for child in children:
+            costs.update(self._compute_choice(child))
+        return costs
+
+    def _compute_choice(self, eclass: str) -> dict[str, float]:
+        selections = self.selections
+
+        choices = selections[eclass]
+        if not choices:
+            return {eclass: MAX_COST}
+        best = choices.best()
+
+        return self.compute_cost(best.name)
 
 
 class ExtractionError(Exception):
@@ -276,7 +481,10 @@ class NoProgress:
         if it % self.max_no_progress != 0:
             # skipped
             return
-        state = {k: bkt.best().cost for k, bkt in selections.items()}
+        state = {
+            k: bkt.best().cost if bkt else MAX_COST
+            for k, bkt in selections.items()
+        }
         if self._last_captured:
             if state == self._last_captured:
                 raise ExtractionError(
