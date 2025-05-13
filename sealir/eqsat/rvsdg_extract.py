@@ -41,7 +41,7 @@ class ControlCostFunc(CostFunc):
     self_cost: float
     """Cost for the current node
     """
-    multipliers: tuple[float]
+    multipliers: tuple[float, ...]
     """Multipliers for each children
     """
 
@@ -63,16 +63,20 @@ class CostModel:
     ) -> CostFunc:
         return self.get_control(cost, multipliers=tuple([1.0] * len(children)))
 
-    def get_simple(self, self_cost) -> CostFunc:
+    def get_simple(self, self_cost: float) -> CostFunc:
         """Get a simple cost function suitable for arithmetic expressions.
 
         This produce a more intuitive cost.
         """
         return SimpleCostFunc(self_cost=self_cost)
 
-    def get_control(self, self_cost, multipliers) -> CostFunc:
+    def get_control(
+        self, self_cost: float, multipliers: Sequence[float]
+    ) -> CostFunc:
         """Get a cost function suitable for control-flow construct."""
-        return ControlCostFunc(self_cost=self_cost, multipliers=multipliers)
+        return ControlCostFunc(
+            self_cost=self_cost, multipliers=tuple(multipliers)
+        )
 
 
 def egraph_extraction(
