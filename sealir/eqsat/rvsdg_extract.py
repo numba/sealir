@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import heapq
 import json
 import math
-import time
+import operator
 from collections import defaultdict
 from dataclasses import dataclass, field
-from pprint import pformat, pprint
-from typing import Any, NamedTuple, Sequence
+from itertools import starmap
+from pprint import pformat
+from typing import Any, Callable, NamedTuple, Sequence
 
 import networkx as nx
 from egglog import EGraph
@@ -20,36 +20,11 @@ MAX_COST = float("inf")
 
 @dataclass(frozen=True)
 class CostFunc:
+    equation: Callable
+    constants: dict[str, str]
 
-    def compute(self, child_costs: Sequence[float]):
-        raise NotImplementedError
-
-
-@dataclass(frozen=True)
-class SimpleCostFunc(CostFunc):
-    self_cost: float
-    """Cost for the current node
-    """
-
-    def compute(self, child_costs: Sequence[float]):
-        """Compute local cost of the node."""
-        return self.self_cost
-
-
-@dataclass(frozen=True)
-class ControlCostFunc(CostFunc):
-    self_cost: float
-    """Cost for the current node
-    """
-    multipliers: tuple[float, ...]
-    """Multipliers for each children
-    """
-
-    def compute(self, child_costs: Sequence[float]):
-        """Compute local cost of the node."""
-        return self.self_cost + sum(
-            c * v for c, v in zip(child_costs, self.multipliers, strict=True)
-        )
+    def compute(self, *child_costs: float, **constants: float):
+        return self.equation(*child_costs, **constants)
 
 
 class CostModel:
@@ -61,22 +36,48 @@ class CostModel:
         cost: float,
         children: Sequence[str],
     ) -> CostFunc:
-        return self.get_control(cost, multipliers=tuple([1.0] * len(children)))
+        return self.get_scaled(cost, multipliers=tuple([1.0] * len(children)))
 
     def get_simple(self, self_cost: float) -> CostFunc:
         """Get a simple cost function suitable for arithmetic expressions.
 
-        This produce a more intuitive cost.
+        This produce a more intuitive cost. Cost of children is not used.
         """
-        return SimpleCostFunc(self_cost=self_cost)
+        return self.get_equation(lambda *args: self_cost, {})
 
-    def get_control(
+    def get_scaled(
         self, self_cost: float, multipliers: Sequence[float]
     ) -> CostFunc:
-        """Get a cost function suitable for control-flow construct."""
-        return ControlCostFunc(
-            self_cost=self_cost, multipliers=tuple(multipliers)
+        """Get a cost function that scales the cost of its children"""
+        multipliers = tuple(multipliers)
+        return self.get_equation(
+            lambda *args: self_cost
+            + sum(starmap(operator.mul, zip(args, multipliers, strict=True))),
+            {},
         )
+
+    def get_equation(
+        self, equ: Callable, constants: dict[str, str]
+    ) -> CostFunc:
+        """Get a custom cost function.
+
+        Parameters:
+
+        equ: must accept `(*args, **kwargs)`, where the `*args` are the
+             children costs and `**kwargs` are the constants.
+
+        constants: is a mapping from keywords for `equ` to the child eclass.
+        """
+        return CostFunc(equ, constants)
+
+    def eval_constant_node(
+        self, nodename: str, op: str, ty: str
+    ) -> int | float | None:
+        if nodename.startswith("primitive-i64-"):
+            return int(op)
+        elif nodename.startswith("primitive-f64"):
+            return float(op)
+        return None
 
 
 def egraph_extraction(
@@ -287,6 +288,18 @@ class Extraction:
         if self._DEBUG:
             render_extraction_graph(G, "eclass")
 
+        # Get constant eclasses
+        constants = {}
+        for eclass, members in eclassmap.items():
+            for m in members:
+                if (
+                    val := cm.eval_constant_node(
+                        m, self.nodes[m].op, self.node_types[m]
+                    )
+                ) is not None:
+                    constants[eclass] = val
+                    break
+
         topo_ordered = list(nx.topological_sort(Gdag))
 
         def propagate_cost():
@@ -297,6 +310,7 @@ class Extraction:
                 nodecostmap=nodecostmap,
                 edge_weights=edge_weights,
                 nodes=nodes,
+                constants=constants,
             )
 
             for k in reversed(topo_ordered):
@@ -399,6 +413,8 @@ class DagCost:
     nodecostmap: dict[str, CostFunc]
     edge_weights: dict[tuple[str, str], float]
     "maps eclass to Bucket"
+    constants: dict[str, Any]
+    "maps eclass to constant value"
     _cache: dict[str, dict[str, float]] = field(default_factory=dict)
     _stats: _DagCostStats = field(default_factory=_DagCostStats)
 
@@ -437,7 +453,14 @@ class DagCost:
             child_costs.append(cc)
 
         cf = self.nodecostmap[nodename]
-        local_cost = cf.compute(child_costs)
+
+        # Get constants for the cost function
+        constants = {}
+        if hasattr(cf, "constants"):
+            for k, eclass in cf.constants.items():
+                constants[k] = self.constants[eclass]
+
+        local_cost = cf.compute(*child_costs, **constants)
         costs[nodename] = local_cost
         # compute children node cost
         children = set(self.Gdag.successors(nodename))

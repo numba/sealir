@@ -1,5 +1,4 @@
 import json
-import re
 
 from egglog import (
     EGraph,
@@ -14,11 +13,9 @@ from egglog import (
 
 from sealir.eqsat.rvsdg_eqsat import GraphRoot
 from sealir.eqsat.rvsdg_extract import (
-    ControlCostFunc,
     CostModel,
     EGraphJsonDict,
     Extraction,
-    SimpleCostFunc,
     get_graph_root,
 )
 
@@ -43,14 +40,23 @@ def Pow(lhs: Term, i: i64Like) -> Term: ...
 def Loop(body_expr: Term) -> Term: ...
 
 
+@function
+def Repeat(body_expr: Term, ntime: i64Like) -> Term: ...
+
+
 class MyCostModel(CostModel):
     def get_cost_function(self, nodename, op, ty, cost, children):
         match op, tuple(children):
             case "Pow", _:
                 cost = 10
             case "Loop", (expr,):
-                return self.get_control(self_cost=13, multipliers=[23])
+                return self.get_scaled(self_cost=13, multipliers=[23])
+            case "Repeat", (expr, ntimes):
 
+                def equ(expr, _, ntimes):
+                    return expr * ntimes
+
+                return self.get_equation(equ, constants=dict(ntimes=ntimes))
         return self.get_simple(cost)
 
 
@@ -117,9 +123,9 @@ def test_cost_duplicated_term():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert re.match(r"function-\d+-Term___init__", term1[0])
-    assert re.match(r"function-\d+-Term___init__", term2[0])
-    assert re.match(r"function-\d+-Term___init__", term3[0])
+    assert term1[0].endswith("Term___init__")
+    assert term2[0].endswith("Term___init__")
+    assert term3[0].endswith("Term___init__")
     assert term1 == term3
     assert term2 != term3
     assert add1 != add2
@@ -157,8 +163,8 @@ def test_simplify_pow_2():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert re.match(r"function-\d+-Term___init__", term1[0])
-    assert re.match(r"function-\d+-Term___init__", term2[0])
+    assert term1[0].endswith("Term___init__")
+    assert term2[0].endswith("Term___init__")
     assert term1 == term2
     assert graphroot.endswith("GraphRoot")
     assert mul1.endswith("Mul")
@@ -192,7 +198,7 @@ def test_simplify_pow_3():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert re.match(r"function-\d+-Term___init__", term1[0])
+    assert term1[0].endswith("Term___init__")
     assert term1 == term2
     assert term1 == term3
     assert graphroot.endswith("GraphRoot")
@@ -201,17 +207,16 @@ def test_simplify_pow_3():
 
 
 def test_simple_cost_func():
-    scf = SimpleCostFunc(self_cost=10)
-    cost = scf.compute([7, 8, 9])
+    scf = CostModel().get_simple(self_cost=10)
+    cost = scf.compute(7, 8, 9)
+    # cost is just self_cost
     assert cost == 10
-    assert CostModel().get_simple(self_cost=10) == scf
 
 
-def test_control_cost_func():
-    ccf = ControlCostFunc(self_cost=10, multipliers=(2, 3, 4))
-    cost = ccf.compute([7, 8, 9])
+def test_scaled_cost_func():
+    ccf = CostModel().get_scaled(10, [2, 3, 4])
+    cost = ccf.compute(7, 8, 9)
     assert cost == 10 + (2 * 7) + (3 * 8) + (4 * 9)
-    assert CostModel().get_control(10, [2, 3, 4]) == ccf
 
 
 def test_loop_multiplier():
@@ -235,10 +240,36 @@ def test_loop_multiplier():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert re.match(r"function-\d+-Term___init__", term1[0])
+    assert term1[0].endswith("Term___init__")
     assert term1 == term2
     assert term1 == term3
     assert graphroot.endswith("GraphRoot")
     assert mul1.endswith("Mul")
     assert mul2.endswith("Mul")
     assert loop.endswith("Loop")
+
+
+def test_const_factor():
+    A = Term("A")
+    expr = Repeat(A, 13)
+    egraph = EGraph()
+    egraph.register(GraphRoot(expr))
+    cost, exgraph = _extraction(egraph, cost_model=MyCostModel())
+    [extracted] = _flatten_multidigraph(exgraph)
+    dagcost = 2 + 1 + 1
+    #         ^ Term("A")
+    #             ^ literal 13
+    #                 ^ GraphRoot
+    repeatcost = 2 * 13
+    #            ^ Term("A")
+    #                 ^ ntimes
+    assert cost == repeatcost + dagcost
+    match extracted:
+        case (graphroot, (repeat, term, literal)):
+            pass
+        case _:
+            assert False, f"failed to match: {extracted}"
+    assert term[0].endswith("Term___init__")
+    assert literal.startswith("primitive-i64-")
+    assert graphroot.endswith("GraphRoot")
+    assert repeat.endswith("Repeat")
