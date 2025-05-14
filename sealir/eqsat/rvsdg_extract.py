@@ -462,10 +462,14 @@ class DagCost:
 
         local_cost = cf.compute(*child_costs, **constants)
         costs[nodename] = local_cost
+
+        # Stop early if any of the cost is infinity.
+        # This will stop cycles because those edges have infinite edge weights
+        if any(map(math.isinf, costs.values())):
+            return costs
         # compute children node cost
-        children = set(self.Gdag.successors(nodename))
-        for child in children:
-            costs.update(self._compute_choice(child))
+        for child in node.children:
+            costs.update(self._compute_choice(nodes[child].eclass))
         return costs
 
     def _compute_choice(self, eclass: str) -> dict[str, float]:
