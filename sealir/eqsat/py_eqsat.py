@@ -87,6 +87,14 @@ def Py_DivIO(io: Term, a: Term, b: Term) -> Term: ...
 
 
 @function
+def Py_MatMult(a: Term, b: Term) -> Term: ...
+
+
+@function
+def Py_MatMultIO(io: Term, a: Term, b: Term) -> Term: ...
+
+
+@function
 def Py_Ne(a: Term, b: Term) -> Term: ...
 
 

@@ -161,6 +161,9 @@ def egraph_conversion(root: SExpr):
                     case "/":
                         res = py_eqsat.Py_DivIO(ioterm, lhsterm, rhsterm)
 
+                    case "@":
+                        res = py_eqsat.Py_MatMultIO(ioterm, lhsterm, rhsterm)
+
                     case "**":
                         res = py_eqsat.Py_PowIO(ioterm, lhsterm, rhsterm)
 
