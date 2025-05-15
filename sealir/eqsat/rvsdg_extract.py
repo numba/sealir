@@ -243,7 +243,7 @@ class Extraction:
 
         selections: dict[str, Bucket] = defaultdict(Bucket)
 
-        # Create a eclass depedency graph
+        # Create an eclass dependency graph
         G = nx.DiGraph()
         for eclass, enodes in eclassmap.items():
             G.add_node(eclass, shape="diamond")
@@ -260,6 +260,7 @@ class Extraction:
         edge_weights = defaultdict(lambda: float(1))
         backedges = _find_backedges_dfs_edges(G, source=self.root_eclass)
         for edge in backedges:
+            # Backedge is penalized
             edge_weights[edge] = 2
 
         for u, v in G.edges:
@@ -464,7 +465,7 @@ class DagCost:
         costs[nodename] = local_cost
 
         # Stop early if any of the cost is infinity.
-        # This will stop cycles because those edges have infinite edge weights
+        # This will stop cycles to current node.
         if any(map(math.isinf, costs.values())):
             return costs
         # compute children node cost
