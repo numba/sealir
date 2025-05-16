@@ -52,7 +52,6 @@ def test_const_fold_ifelse():
         argportidx = extracted.body.begin.inports.index(argname)
         match outportmap["!ret"]:
             case rg.Unpack(val, idx):
-                print(val)
                 assert val == extracted.body.begin
                 assert idx == argportidx
             case _:

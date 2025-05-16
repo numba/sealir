@@ -940,7 +940,11 @@ def format_rvsdg(prgm: SExpr, *, format_attrs=ase.pretty_str) -> str:
             case _:
                 argrefs = []
                 for arg in expr._args:
-                    argrefs.append((yield arg))
+                    if isinstance(arg, SExpr):
+                        text = yield arg
+                    else:
+                        text = repr(arg)
+                    argrefs.append(text)
                 name = fresh_name()
                 put(f"{name} = {expr._head} {' '.join(argrefs)}")
                 return name
