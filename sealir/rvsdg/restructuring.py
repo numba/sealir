@@ -452,11 +452,22 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             with ctx.new_function(expr):
                 args = yield args
                 body = yield body
+
+                def strip_unused(term: rg.RegionEnd):
+                    ports = [
+                        p
+                        for p in term.ports
+                        if p.name.startswith(internal_prefix(""))
+                    ]
+                    return grm.write(
+                        rg.RegionEnd(begin=term.begin, ports=tuple(ports))
+                    )
+
                 return grm.write(
                     rg.Func(
                         fname=fname,
                         args=args,
-                        body=body,
+                        body=strip_unused(body),
                     )
                 )
         case ("PyAst_arg", (str(name), annotation, interloc)):
