@@ -293,6 +293,8 @@ class ConvertToSExpr(ast.NodeTransformer):
                 return "//"
             case ast.Pow():
                 return "**"
+            case ast.MatMult():
+                return "@"
             # unary
             case ast.Not():
                 return "not"

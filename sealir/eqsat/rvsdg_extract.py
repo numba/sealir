@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import operator
-from collections import defaultdict
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from itertools import starmap
 from pprint import pformat
@@ -204,7 +204,10 @@ class Extraction:
         self.cost_model = cost_model
 
     def _compute_cost(
-        self, max_iter=1000, max_no_progress=100
+        self,
+        max_iter=1000,
+        max_no_progress=100,
+        epsilon=1e-6,
     ) -> dict[str, Bucket]:
         """
         Uses dynamic programming with iterative cost propagation
@@ -243,7 +246,7 @@ class Extraction:
 
         selections: dict[str, Bucket] = defaultdict(Bucket)
 
-        # Create a eclass depedency graph
+        # Create an eclass dependency graph
         G = nx.DiGraph()
         for eclass, enodes in eclassmap.items():
             G.add_node(eclass, shape="diamond")
@@ -254,22 +257,6 @@ class Extraction:
                     G.add_edge(eclass, k)
                     for child in enode.children:
                         G.add_edge(k, nodes[child].eclass)
-
-        # Get edge weights multiplier
-        edge_weights: dict[tuple[str, str], float]
-        edge_weights = defaultdict(lambda: float(1))
-        backedges = _find_backedges_dfs_edges(G, source=self.root_eclass)
-        for edge in backedges:
-            edge_weights[edge] = 2
-
-        for u, v in G.edges:
-            edgeattrs = G[u][v]
-            edgeattrs["cost"] = edgeattrs["label"] = edge_weights[u, v]
-
-        Gdag = G.copy()
-        Gdag.remove_edges_from(backedges)
-        if self._DEBUG:
-            render_extraction_graph(Gdag, "Gdag")
 
         # Get per-node cost function
         cm = self.cost_model
@@ -300,15 +287,16 @@ class Extraction:
                     constants[eclass] = val
                     break
 
-        topo_ordered = list(nx.topological_sort(Gdag))
+        # Use BFS layers to estimate topological sort
+        topo_ordered = []
+        for layer in nx.bfs_layers(G, self.root_eclass):
+            topo_ordered += layer
 
-        def propagate_cost():
-            dagcost = DagCost(
-                Gdag=Gdag,
+        def propagate_cost(state_tracker):
+            dagcost = SubgraphCost(
                 eclassmap=eclassmap,
                 selections=selections,
                 nodecostmap=nodecostmap,
-                edge_weights=edge_weights,
                 nodes=nodes,
                 constants=constants,
             )
@@ -321,17 +309,34 @@ class Extraction:
                     cost = sum(cost_dag.values())
                     selections[node.eclass].put(cost, k)
 
+            state_tracker(selections)
+
         # Repeatedly compute cost and propagate while keeping the best variant
         # for each eclass. If root score is computed, return early.
-        no_progress = NoProgress(max_no_progress)
+        costchanged = ConvergenceTracker(epsilon=epsilon)
+        state_tracker = ExtractionStateTracker()
+
+        last_changed_i = 0
         for round_i in range(max_iter):
             # propagate
-            propagate_cost()
-            # root score is computed?
-            if math.isfinite(selections[self.root_eclass].best().cost):
-                # TODO: implement change rate based termination
-                break
-            no_progress(selections)
+            propagate_cost(state_tracker)
+            # check convergence condition
+            if state_tracker.last:
+                costchanged.update(state_tracker)
+                if costchanged.converged():
+                    # root score is computed?
+                    if math.isfinite(state_tracker.current[self.root_eclass]):
+                        break
+
+                    # root score is missing?
+                    if round_i - last_changed_i >= max_no_progress:
+                        # no changes for max_no_progress iteration
+                        raise ExtractionError(
+                            "extraction stopped due to lack of progress for "
+                            f"{max_no_progress} iterations"
+                        )
+                else:
+                    last_changed_i = round_i
 
         return selections
 
@@ -362,61 +367,52 @@ class Extraction:
         return rootcost, G
 
 
-def _find_backedges_dfs_edges(G, source) -> list[tuple[str, str]]:
-    """
-    Find backedges by comparing graph edges to DFS tree edges.
-
-    Parameters:
-        G: networkx.DiGraph, the directed graph
-
-    Returns:
-        List of tuples (u, v) representing backedges
-    """
-    # Get DFS tree edges
-    dfs_tree_edges = set(nx.dfs_edges(G, source))
-    # All graph edges
-    all_edges = set(G.edges())
-    # Backedges are edges not in the DFS tree but in cycles
-    backedges = []
-    for edge in all_edges - dfs_tree_edges:
-        u, v = edge
-        # Check if v is reachable from u in the DFS tree (indicating a cycle)
-        if nx.has_path(G, v, u):
-            backedges.append(edge)
-    return backedges
-
-
 @dataclass
-class _DagCostStats:
+class _SubgraphCostStats:
     cache_miss: int = 0
     cache_hit: int = 0
 
 
 @dataclass(frozen=True)
-class DagCost:
+class SubgraphCost:
     """
-    Compute cost of a node in both node-based and edge-based cost computation.
+    Computes costs for nodes in a subgraph, optimizing for efficiency and
+    handling complex dependencies.
 
-    Node-based cost computation deduplicates repeated nodes in subgraphs by
-    removing backedges.
+    This class calculates the cost of nodes in a subgraph by combining local
+    node costs with the costs of their child nodes, selected optimally from
+    eclasses. It combines two cost computation strategies:
 
-    Edge-based cost computation includes self cost, which for simple operations
-    is just its computation cost, but for control nodes it includes a factor of
-    its children's costs, such as loops that should contain trip-count
-    multiplied with the loop body's cost.
+    - **Local cost computation**: Evaluates a node's cost using its cost
+      function, which for simple operations reflects basic computation cost and
+      for control nodes (e.g., loops) may incorporate factors like loop trip
+      counts multiplied by the loop body's cost.
+    - **Child-dependent cost computation**: Aggregates costs from child nodes,
+      using the best available node from each child's e-class to ensure optimal
+      selections. Each child and grand-child node is accounted for only once,
+      preventing redundant cost contributions from shared nodes in the
+      subgraph.
+
+    To avoid redundant computations in cyclic subgraphs, the class uses caching
+    and stops cost computation if costs become infinite (e.g., due to cycles).
+    This effectively handles repeated nodes without recomputing their costs.
+
     """
 
-    Gdag: nx.DiGraph
     nodes: dict[str, Node]
+    "Maps node names to Node objects."
     eclassmap: dict[str, Any]
+    "Maps node names to their eclasses."
     selections: dict[str, Bucket]
+    "Maps eclasses to Buckets containing node choices."
     nodecostmap: dict[str, CostFunc]
-    edge_weights: dict[tuple[str, str], float]
-    "maps eclass to Bucket"
+    "Maps node names to cost functions."
     constants: dict[str, Any]
-    "maps eclass to constant value"
+    "Maps eclasses to constant values (eclass of primitive nodes)"
     _cache: dict[str, dict[str, float]] = field(default_factory=dict)
-    _stats: _DagCostStats = field(default_factory=_DagCostStats)
+    "Stores computed node costs for reuse."
+    _stats: _SubgraphCostStats = field(default_factory=_SubgraphCostStats)
+    "Tracks cache hits and misses."
 
     def compute_cost(self, nodename: str) -> dict[str, float]:
         if (cc := self._cache.get(nodename)) is None:
@@ -433,21 +429,14 @@ class DagCost:
         selections = self.selections
         costs = {}
 
-        ## compute the local node cost
+        # ---- Local cost computation ----
         nodes = self.nodes
         node = nodes[nodename]
-        edge_weights = self.edge_weights
-        child_edge_weights = [
-            edge_weights[nodename, nodes[child].eclass]
-            for child in node.children
-        ]
         child_costs = []
-        for child, edge_weight in zip(
-            node.children, child_edge_weights, strict=True
-        ):
+        for child in node.children:
             child_eclass = nodes[child].eclass
             if choices := selections[child_eclass]:
-                cc = choices.best().cost * edge_weight
+                cc = choices.best().cost
             else:
                 cc = MAX_COST
             child_costs.append(cc)
@@ -462,10 +451,15 @@ class DagCost:
 
         local_cost = cf.compute(*child_costs, **constants)
         costs[nodename] = local_cost
-        # compute children node cost
-        children = set(self.Gdag.successors(nodename))
-        for child in children:
-            costs.update(self._compute_choice(child))
+
+        # Stop early if any of the cost is infinity.
+        # This will stop cycles to current node.
+        if any(map(math.isinf, costs.values())):
+            return costs
+
+        # ---- Child-dependent cost computation ----
+        for child in node.children:
+            costs.update(self._compute_choice(nodes[child].eclass))
         return costs
 
     def _compute_choice(self, eclass: str) -> dict[str, float]:
@@ -483,42 +477,73 @@ class ExtractionError(Exception):
     pass
 
 
-@dataclass
-class NoProgress:
-    max_no_progress: int
-    "Maximum iteration without progress"
-    _last_iteration: int = 0
-    _last_captured: dict[str, float] = field(default_factory=dict)
+@dataclass(frozen=True)
+class ExtractionStateTracker:
+    """Keeps history of the last two selection states."""
 
-    def __call__(self, selections: dict[str, Bucket]) -> None:
-        """
-        Check if no progress has been made in the current iteration.
+    stack: deque[dict[str, float]] = field(
+        default_factory=lambda: deque(maxlen=2)
+    )
 
-        Tracks iterations and compares the current state of selections with the
-        last captured state. Raises ExtractionError if no improvement is
-        detected, indicating a potential stagnation.
-
-        Args:
-            selections (dict[str, Bucket]): A dictionary of buckets
-            representing different selections.
-
-        """
-        it = self._last_iteration
-        self._last_iteration += 1
-        if it % self.max_no_progress != 0:
-            # skipped
-            return
+    def __call__(self, selections: dict[str, Bucket]) -> dict[str, float]:
         state = {
             k: bkt.best().cost if bkt else MAX_COST
             for k, bkt in selections.items()
         }
-        if self._last_captured:
-            if state == self._last_captured:
-                raise ExtractionError(
-                    "extraction stopped due to lack of progress for "
-                    f"{self.max_no_progress} iterations"
-                )
-        self._last_captured = state
+        if len(self.stack) >= 2:
+            self.stack.popleft()
+            # print("DROPPED")
+        self.stack.append(state)
+        return state
+
+    @property
+    def last(self) -> dict[str, float] | None:
+        if len(self.stack) >= 2:
+            return self.stack[0]
+        return None
+
+    @property
+    def current(self) -> dict[str, float]:
+        return self.stack[-1]
+
+
+@dataclass
+class ConvergenceTracker:
+    """
+    Convergence happens when the number of valid costs are unchanging and
+    the maximum cost changes is below epsilon.
+    """
+
+    epsilon: float
+    max_change: float = 0
+    num_valid_last: int = 0
+    num_valid_curr: int = 0
+
+    def update(self, tracker: ExtractionStateTracker) -> None:
+        last = tracker.last
+        curr = tracker.current
+
+        max_change = float(0)
+        num_valid_last = 0
+        num_valid_curr = 0
+        assert last
+        for eclass in curr:
+            curr_cost = curr[eclass]
+            prev_cost = last[eclass]
+            if math.isfinite(curr_cost) and math.isfinite(prev_cost):
+                max_change = max(max_change, abs(curr_cost - prev_cost))
+            else:
+                num_valid_last += math.isinf(prev_cost)
+                num_valid_curr += math.isinf(curr_cost)
+        self.max_change = max_change
+        self.num_valid_last = num_valid_last
+        self.num_valid_curr = num_valid_curr
+
+    def converged(self) -> bool:
+        return (
+            self.num_valid_last == self.num_valid_curr
+            and self.max_change < self.epsilon
+        )
 
 
 class _NameAndCostTuple(NamedTuple):
