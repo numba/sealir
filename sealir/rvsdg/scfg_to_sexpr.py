@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import warnings
 from pprint import pprint
 from typing import TypeAlias
 
@@ -28,8 +29,9 @@ class ConvertToSExpr(ast.NodeTransformer):
         args = self.visit(node.args)
         body = [self.visit(stmt) for stmt in node.body]
         # TODO: "decorator_list" "returns", "type_comment", "type_params",
-        # decorator_list = [self.visit(x) for x in node.decorator_list]
-        assert not node.decorator_list
+        if node.decorator_list:
+            warnings.warn("decorators are not handled")
+            # decorator_list = [self.visit(x) for x in node.decorator_list]
         return self._tape.expr(
             "PyAst_FunctionDef",
             fname,
