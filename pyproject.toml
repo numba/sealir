@@ -23,3 +23,6 @@ dependencies = [
 [tool.black]
 line-length = 79
 target-version = ['py312']
+
+[tool.hatch.build.targets.conda]
+channels = ["numba"]
