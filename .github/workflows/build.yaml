@@ -1,0 +1,63 @@
+name: Build Distributions
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-wheel:
+    name: Build wheel
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install hatch
+        run: pip install hatch
+
+      - name: Build wheel
+        run: hatch build
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/*.whl
+
+  build-conda:
+    name: Build conda package
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup conda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: '3.12'
+
+      - name: Install conda-build and hatch-conda-build
+        shell: bash -l {0}
+        run: |
+          conda install -y conda-build
+          pip install hatch hatch-conda-build
+
+      - name: Build conda package
+        shell: bash -l {0}
+        run: hatch build -t conda
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: conda-package
+          path: dist/conda/*.conda
