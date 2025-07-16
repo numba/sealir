@@ -7,6 +7,7 @@ import sys
 from egglog import (
     Bool,
     Expr,
+    Map,
     Set,
     String,
     StringLike,
@@ -128,6 +129,10 @@ class TermList(Expr):
     def dyn_index(self, target: Term) -> DynInt: ...
 
 
+class TermDict(Expr):
+    def __init__(self, term_map: Map[String, Term]): ...
+
+
 @function(cost=MAXCOST)  # max cost to make it unextractable
 def _dyn_index_partial(terms: Vec[Term], target: Term) -> DynInt: ...
 
@@ -149,6 +154,13 @@ class PortList(Expr):
 
 def termlist(*args: Term) -> TermList:
     return TermList(Vec(*args))
+
+
+def termdict(**kwargs: Term) -> TermDict:
+    mapping = Map[String, Term].empty()
+    for k, v in kwargs.items():
+        mapping = mapping.insert(k, v)
+    return TermDict(mapping)
 
 
 def portlist(*args: Port) -> PortList:

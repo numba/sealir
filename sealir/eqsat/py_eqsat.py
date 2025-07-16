@@ -19,6 +19,7 @@ from sealir.eqsat.rvsdg_eqsat import (
     Region,
     Select,
     Term,
+    TermDict,
     TermList,
     wildcard,
 )
@@ -124,6 +125,12 @@ def Py_LoadGlobal(io: Term, name: StringLike) -> Term: ...
 
 @function
 def Py_Call(func: Term, io: Term, args: TermList) -> Term: ...
+
+
+@function
+def Py_CallKwargs(
+    func: Term, io: Term, args: TermList, kwargs: TermDict
+) -> Term: ...
 
 
 @function

@@ -73,6 +73,14 @@ class ConvertToSExpr(ast.NodeTransformer):
             self.get_loc(node),
         )
 
+    def visit_keyword(self, node: ast.keyword) -> SExpr:
+        return self._tape.expr(
+            "PyAst_keyword",
+            node.arg,
+            self.visit(node.value),
+            self.get_loc(node),
+        )
+
     def visit_Name(self, node: ast.Name) -> SExpr:
         match node.ctx:
             case ast.Load():
@@ -169,17 +177,27 @@ class ConvertToSExpr(ast.NodeTransformer):
         )
 
     def visit_Call(self, node: ast.Call) -> SExpr:
-        # TODO
-        assert not node.keywords
         posargs = self._tape.expr(
             "PyAst_callargs_pos", *map(self.visit, node.args)
         )
-        return self._tape.expr(
-            "PyAst_Call",
-            self.visit(node.func),
-            posargs,
-            self.get_loc(node),
-        )
+        if node.keywords:
+            kwargs = self._tape.expr(
+                "PyAst_callargs_kw", *map(self.visit, node.keywords)
+            )
+            return self._tape.expr(
+                "PyAst_CallKwargs",
+                self.visit(node.func),
+                posargs,
+                kwargs,
+                self.get_loc(node),
+            )
+        else:
+            return self._tape.expr(
+                "PyAst_Call",
+                self.visit(node.func),
+                posargs,
+                self.get_loc(node),
+            )
 
     def visit_While(self, node: ast.While) -> SExpr:
         # ("test", "body", "orelse")

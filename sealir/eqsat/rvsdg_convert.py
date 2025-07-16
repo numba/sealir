@@ -197,6 +197,30 @@ def egraph_conversion(root: SExpr):
                     py_eqsat.Py_Call(functerm, ioterm, eg.termlist(*argterms))
                 )
 
+            case rg.PyCallKwargs(
+                func=func,
+                io=io,
+                args=rg.Posargs() as posargs,
+                kwargs=rg.Kwargs() as kwargs,
+            ):
+                functerm = yield func
+                ioterm = yield io
+                posarg_terms = []
+                for arg in posargs.args:
+                    posarg_terms.append((yield arg))
+                kwarg_dict = {}
+                kw: rg.Keyword
+                for kw in kwargs.kwargs:
+                    kwarg_dict[kw.name] = yield kw.value
+                return WrapTerm(
+                    py_eqsat.Py_CallKwargs(
+                        functerm,
+                        ioterm,
+                        eg.termlist(*posarg_terms),
+                        eg.termdict(**kwarg_dict),
+                    )
+                )
+
             case rg.PyLoadGlobal(io=io, name=str(name)):
                 ioterm = yield io
                 return py_eqsat.Py_LoadGlobal(ioterm, name)

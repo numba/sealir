@@ -225,3 +225,26 @@ def test_for_range_lifting():
 
     egraph.run(rs_schedule.saturate())
     egraph.check(Term.LiteralStr("dbg_for_range"))
+
+
+def test_keyword_argument():
+    import numpy as np
+
+    def softmax(x, axis):
+        """Compute softmax values for each sets of scores in x."""
+        e_x = np.exp(x - np.max(x, axis=axis, keepdims=True))
+        return e_x / np.sum(e_x, axis=axis, keepdims=True)
+
+    # call frontend
+    rvsdg_expr, dbginfo = frontend(softmax)
+    print(rvsdg.format_rvsdg(rvsdg_expr))
+
+    # convert to egraph
+    memo = egraph_conversion(rvsdg_expr)
+    func = memo[rvsdg_expr]
+
+    egraph = EGraph()
+    root = rvsdg_eqsat.GraphRoot(func)
+    egraph.let("root", root)
+
+    # egraph.display()
