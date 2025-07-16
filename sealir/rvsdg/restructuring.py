@@ -9,7 +9,8 @@ import sys
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from itertools import starmap
-from typing import Any, Sequence, TypeAlias, TypedDict, cast
+from types import FunctionType
+from typing import Any, NamedTuple, Sequence, TypeAlias, TypedDict, cast
 
 from numba_rvsdg.core.datastructures.ast_transforms import (
     AST2SCFGTransformer,
@@ -69,13 +70,22 @@ class BakeInLocAsStr(ast.NodeTransformer):
             return super().generic_visit(node)
 
 
-def restructure_source(function):
-    # TODO: a lot of duplication here
-    # Get source info
+class SourceInfo(NamedTuple):
+    """Information about the source code of a function."""
 
+    srcfile: str
+    srclineoffset: int
+    lines: list[str]
+    line_offset: int
+    col_offset: int
+
+
+def get_source_info(function: FunctionType):
+    """Extract source file information and offsets for a function."""
     srcfile = inspect.getsourcefile(function)
+    assert srcfile is not None
     try:
-        srcfile = pathlib.Path(srcfile).relative_to(os.getcwd())
+        srcfile = str(pathlib.Path(srcfile).relative_to(os.getcwd()))
     except ValueError:
         pass  # ignore fail to get relative path
     srclineoffset = min(
@@ -94,20 +104,78 @@ def restructure_source(function):
 
     col_offset = min(filter(bool, map(count_space, lines)))
 
+    return SourceInfo(srcfile, srclineoffset, lines, line_offset, col_offset)
+
+
+def get_source_info_from_ast(ast_node: ast.AST):
+    """Extract source file information from an AST node."""
+    # Try to get filename from the AST node
+    srcfile = getattr(ast_node, "filename", "<unknown>")
+
+    if srcfile == "<unknown>":
+        # Fallback to trying to get it from nested nodes
+        for node in ast.walk(ast_node):
+            if hasattr(node, "filename") and node.filename:
+                srcfile = node.filename
+                break
+
+    # Convert to relative path if possible
+    if srcfile != "<unknown>":
+        try:
+            srcfile = str(pathlib.Path(srcfile).relative_to(os.getcwd()))
+        except (ValueError, OSError):
+            pass  # ignore fail to get relative path
+
+    # Get line offset from AST node
+    srclineoffset = getattr(ast_node, "lineno", 1)
+
+    # For AST input, we don't have the original source lines
+    # So we generate placeholder lines or use ast.unparse
+    try:
+        lines = ast.unparse(ast_node).splitlines()
+        lines = [line + "\n" for line in lines]  # Add newlines back
+    except AttributeError:
+        # Fallback for older Python versions without ast.unparse
+        lines = ["<AST source unavailable>\n"]
+
+    line_offset = srclineoffset
+
+    # Calculate column offset from AST
+    col_offset = getattr(ast_node, "col_offset", 0)
+
+    return SourceInfo(srcfile, srclineoffset, lines, line_offset, col_offset)
+
+
+def restructure_source(function: FunctionType | ast.AST):
+    # Get source info based on input type
+    if isinstance(function, ast.AST):
+        source_info = get_source_info_from_ast(function)
+        raw_tree = function
+    else:
+        source_info = get_source_info(function)
+        [raw_tree] = unparse_code(function)
+
     # Bake in the source location into the AST as dangling strings
     # (like docstrings)
-    [raw_tree] = unparse_code(function)
+    raw_tree = BakeInLocAsStr(
+        source_info.srcfile,
+        source_info.srclineoffset - 1,
+        source_info.col_offset,
+    ).visit(raw_tree)
 
-    raw_tree = BakeInLocAsStr(srcfile, srclineoffset - 1, col_offset).visit(
-        raw_tree
-    )
     # SCF
     ast2scfg_transformer = AST2SCFGTransformer([raw_tree])
     astcfg = ast2scfg_transformer.transform_to_ASTCFG()
     scfg = astcfg.to_SCFG()
     scfg.restructure()
     scfg2ast = SCFG2ASTTransformer()
-    original_ast = unparse_code(function)[0]
+
+    # Handle original AST differently based on input type
+    if isinstance(function, ast.AST):
+        original_ast = function
+    else:
+        original_ast = unparse_code(function)[0]
+
     transformed_ast = scfg2ast.transform(original=original_ast, scfg=scfg)
 
     transformed_ast = ast.fix_missing_locations(transformed_ast)
@@ -115,13 +183,13 @@ def restructure_source(function):
     inter_source = ast.unparse(transformed_ast)
     [transformed_ast] = ast.parse(inter_source).body
     debugger = SourceDebugInfo(
-        line_offset,
-        lines,
+        source_info.line_offset,
+        source_info.lines,
         inter_source.splitlines(),
         suppress=not _DEBUG,
     )
 
-    prgm = rvsdg.convert_to_sexpr(transformed_ast, line_offset)
+    prgm = rvsdg.convert_to_sexpr(transformed_ast, source_info.line_offset)
 
     grm = rg.Grammar(prgm._tape)
 
@@ -481,6 +549,8 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                 arg_done.append(x)
                 ctx.add_argument(i, x.name)
             return grm.write(rg.Args(tuple(arg_done)))
+        case ("PyAst_keyword", (str(name), value, interloc)):
+            return grm.write(rg.Keyword(name=name, value=(yield value)))
         case ("PyAst_block", body):
             vars = sorted(ctx.scope.varmap)
             begin = grm.write(
@@ -630,12 +700,30 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             return ctx.insert_io_node(res)
 
         case ("PyAst_Call", (SExpr() as func, SExpr() as posargs, interloc)):
-            proc_args = []
+            pos_args = []
             for arg in posargs._args:
-                proc_args.append((yield arg))
+                pos_args.append((yield arg))
 
             call = rg.PyCall(
-                func=(yield func), io=ctx.load_io(), args=tuple(proc_args)
+                func=(yield func), io=ctx.load_io(), args=tuple(pos_args)
+            )
+            return ctx.insert_io_node(call)
+
+        case (
+            "PyAst_CallKwargs",
+            (SExpr() as func, SExpr() as posargs, SExpr() as kwargs, interloc),
+        ):
+            pos_args = []
+            for arg in posargs._args:
+                pos_args.append((yield arg))
+            kws = []
+            for arg in kwargs._args:
+                kws.append((yield arg))
+            call = rg.PyCallKwargs(
+                func=(yield func),
+                io=ctx.load_io(),
+                args=grm.write(rg.Posargs(tuple(pos_args))),
+                kwargs=grm.write(rg.Kwargs(tuple(kws))),
             )
             return ctx.insert_io_node(call)
 
