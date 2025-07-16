@@ -229,6 +229,9 @@ def test_for_range_lifting():
 
 def test_keyword_argument():
     import numpy as np
+    from egglog import Map, String, function, rewrite, rule, ruleset
+
+    from sealir.eqsat.rvsdg_eqsat import Term, TermDict, termdict, wildcard
 
     def softmax(x, axis):
         """Compute softmax values for each sets of scores in x."""
@@ -247,4 +250,23 @@ def test_keyword_argument():
     root = rvsdg_eqsat.GraphRoot(func)
     egraph.let("root", root)
 
-    # egraph.display()
+    @function
+    def Matched(msg: String, target: TermDict) -> TermDict: ...
+
+    @ruleset
+    def ruleset_detect(term: Term, mapping: Map[String, Term]):
+        # Detect when a TermDict has "axis" mapped to any term and
+        # "keepdims" mapped to True
+        yield rule(
+            TermDict(mapping),
+            mapping[String("axis")] == term,
+            mapping[String("keepdims")] == Term.LiteralBool(True),
+        ).then(
+            # Mark the detection with a Matched
+            Matched("kwargs", TermDict(mapping)),
+        )
+
+    # Run the detection rules
+    egraph.run(ruleset_detect)
+    # Verify that the pattern was detected
+    egraph.check(Matched("kwargs", wildcard(TermDict)))
