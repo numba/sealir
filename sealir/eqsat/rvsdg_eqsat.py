@@ -132,6 +132,15 @@ class TermList(Expr):
 class TermDict(Expr):
     def __init__(self, term_map: Map[String, Term]): ...
 
+    def lookup(self, key: StringLike) -> Unit:
+        """Trigger rule to lookup a value in the dict.
+
+        This is needed for .get() to match
+        """
+        ...
+
+    def get(self, key: StringLike) -> Term: ...
+
 
 @function(cost=MAXCOST)  # max cost to make it unextractable
 def _dyn_index_partial(terms: Vec[Term], target: Term) -> DynInt: ...
@@ -426,6 +435,14 @@ def ruleset_func_outputs(
     ).then(delete(x))
 
 
+@ruleset
+def ruleset_termdict(mapping: Map[String, Term], key: String):
+    yield rule(
+        TermDict(mapping).lookup(key),
+        mapping.contains(key),
+    ).then(set_(TermDict(mapping).get(key)).to(mapping[key]))
+
+
 ruleset_rvsdg_basic = (
     ruleset_simplify_dbgvalue
     | ruleset_portlist_basic
@@ -437,6 +454,7 @@ ruleset_rvsdg_basic = (
     | ruleset_region_dyn_get
     | ruleset_region_propgate_output
     | ruleset_func_outputs
+    | ruleset_termdict
 )
 
 
