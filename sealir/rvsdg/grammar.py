@@ -24,7 +24,26 @@ def unknown_loc() -> Loc:
 
 
 class Args(_Root):
+    """Used for function signature"""
+
     arguments: tuple[SExpr, ...]
+
+
+class Posargs(_Root):
+    """Used for positional arguments"""
+
+    args: tuple[SExpr, ...]
+
+
+class Kwargs(_Root):
+    """Used for keyword arguments"""
+
+    kwargs: tuple[SExpr, ...]  # element type is Keyword
+
+
+class Keyword(_Root):
+    name: str
+    value: SExpr
 
 
 class Port(_Root):
@@ -114,6 +133,13 @@ class PyCall(_Root):
     func: SExpr
     io: SExpr
     args: tuple[SExpr, ...]
+
+
+class PyCallKwargs(_Root):
+    func: SExpr
+    io: SExpr
+    args: Posargs
+    kwargs: Kwargs
 
 
 class PyCallPure(_Root):
