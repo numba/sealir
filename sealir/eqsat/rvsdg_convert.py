@@ -133,6 +133,8 @@ def egraph_conversion(root: SExpr):
                 match op:
                     case "not":
                         res = py_eqsat.Py_NotIO(ioterm, operandterm)
+                    case "-":
+                        res = py_eqsat.Py_NegIO(ioterm, operandterm)
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
 

@@ -6,6 +6,7 @@ from egglog import (
     function,
     i64,
     i64Like,
+    rewrite,
     rule,
     ruleset,
     union,
@@ -29,6 +30,10 @@ from .rvsdg_eqsat import DynInt, PortList, Region, Term, TermList, wildcard
 
 @function
 def Py_NotIO(io: Term, term: Term) -> Term: ...
+
+
+@function
+def Py_NegIO(io: Term, term: Term) -> Term: ...
 
 
 @function
@@ -225,5 +230,13 @@ def loop_rules(
     )
 
 
+@ruleset
+def ruleset_literal_i64_folding(io: Term, ival: i64):
+    # Constant fold negation of integer literals
+    yield rewrite(Py_NegIO(io, Term.LiteralI64(ival)).getPort(1)).to(
+        Term.LiteralI64(0 - ival)
+    )
+
+
 def make_rules():
-    return loop_rules
+    return loop_rules | ruleset_literal_i64_folding
