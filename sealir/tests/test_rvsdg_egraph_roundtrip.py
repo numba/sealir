@@ -16,7 +16,9 @@ def frontend(fn):
     return rvsdg_expr, dbginfo
 
 
-def middle_end(rvsdg_expr, apply_to_egraph, cost_model=None):
+def middle_end(
+    rvsdg_expr, apply_to_egraph, cost_model=None, extract_kwargs=None
+):
     """The middle end encode the RVSDG into a EGraph to apply rewrite rules.
     After that, it is extracted back into RVSDG.
     """
@@ -29,8 +31,9 @@ def middle_end(rvsdg_expr, apply_to_egraph, cost_model=None):
     apply_to_egraph(egraph, func)
 
     # Extraction
+    extract_kwargs = extract_kwargs or {}
     cost, extracted = egraph_extraction(
-        egraph, rvsdg_expr, cost_model=cost_model
+        egraph, rvsdg_expr, cost_model=cost_model, **extract_kwargs
     )
     return cost, extracted
 
@@ -50,10 +53,14 @@ def compiler_pipeline(fn, args, *, verbose=False):
 
         return root
 
-    cost, extracted = middle_end(rvsdg_expr, display_egraph)
+    extract_kwargs = dict(stats={})
+    cost, extracted = middle_end(
+        rvsdg_expr, display_egraph, extract_kwargs=extract_kwargs
+    )
     print("Extracted from EGraph".center(80, "="))
     print("cost =", cost)
     print(rvsdg.format_rvsdg(extracted))
+    print("stats:", extract_kwargs)
 
     jt = llvm_codegen(rvsdg_expr)
     res = jt(*args)

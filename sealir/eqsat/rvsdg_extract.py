@@ -86,6 +86,7 @@ def egraph_extraction(
     *,
     cost_model=None,
     converter_class=EGraphToRVSDG,
+    stats: dict[str, Any] | None = None,
 ):
     gdct: EGraphJsonDict = json.loads(
         egraph._serialize(
@@ -95,9 +96,13 @@ def egraph_extraction(
     [root] = get_graph_root(gdct)
     root_eclass = gdct["nodes"][root]["eclass"]
 
+    if stats is not None:
+        stats["num_enodes"] = len(gdct["nodes"])
+        stats["num_eclasses"] = len(gdct["class_data"])
+
     cost_model = CostModel() if cost_model is None else cost_model
     extraction = Extraction(gdct, root_eclass, cost_model)
-    cost, exgraph = extraction.choose()
+    cost, exgraph = extraction.choose(stats=stats)
 
     expr = convert_to_rvsdg(
         exgraph,
@@ -208,19 +213,23 @@ class Extraction:
         max_iter=1000,
         max_no_progress=100,
         epsilon=1e-6,
-    ) -> dict[str, Bucket]:
+    ) -> tuple[dict[str, Bucket], int]:
         """
         Uses dynamic programming with iterative cost propagation
 
         Args:
-            max_iter (int, optional): Maximum number of iterations to compute
-            costs. Defaults to 10000. max_no_progress (int, optional): Maximum
-            iterations without cost improvement. Defaults to 500.
+            max_iter (int, optional):
+                Maximum number of iterations to compute costs.
+                Defaults to 10000.
+            max_no_progress (int, optional):
+                Maximum iterations without cost improvement.
+                Defaults to 500.
 
         Returns:
-            dict[str, Bucket]: A mapping of equivalence classes to their lowest
-            cost representations.
-
+            tuple[dict[str, Bucket], int]: A tuple containing:
+                - A mapping of equivalence classes to their lowest cost
+                  representations
+                - The number of rounds (iterations) that were performed
 
         Performance notes
 
@@ -338,10 +347,14 @@ class Extraction:
                 else:
                     last_changed_i = round_i
 
-        return selections
+        return selections, round_i
 
-    def choose(self) -> tuple[float, nx.MultiDiGraph]:
-        selections = self._compute_cost()
+    def choose(
+        self, stats: dict[str, Any] | None = None
+    ) -> tuple[float, nx.MultiDiGraph]:
+        selections, round_i = self._compute_cost()
+        if stats is not None:
+            stats["extraction_iteration_count"] = round_i
 
         nodes = self.nodes
         chosen_root, rootcost = selections[self.root_eclass].best()
