@@ -114,9 +114,6 @@ class EGraphToRVSDG:
                     attrs = self.handle_region_attributes(key, grm)
                     return grm.write(rg.RegionBegin(inports=ins, attrs=attrs))
                 case "Term", children:
-                    extended_handle = self.handle_Term(op, children, grm)
-                    if extended_handle is not NotImplemented:
-                        return extended_handle
                     match op, children:
                         case "GraphRoot", {"t": term}:
                             return term
@@ -222,6 +219,9 @@ class EGraphToRVSDG:
                                 rg.Unpack(val=regionbegin, idx=idx)
                             )
                         case _:
+                            extended_handle = self.handle_Term(op, children, grm)
+                            if extended_handle is not NotImplemented:
+                                return extended_handle
                             raise NotImplementedError(
                                 f"invalid Term: {node_type}, {children}"
                             )
