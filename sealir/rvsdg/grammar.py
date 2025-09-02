@@ -11,6 +11,15 @@ class _Root(grammar.Rule):
     pass
 
 
+class Rootset(_Root):
+    roots: tuple[SExpr, ...]
+
+
+class Generic(_Root):
+    name: str
+    children: tuple[SExpr, ...]
+
+
 class Loc(_Root):
     filename: str
     line_first: int

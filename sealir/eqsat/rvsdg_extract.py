@@ -112,6 +112,7 @@ def egraph_extraction(
         egraph,
         converter_class=converter_class,
     )
+
     return cost, expr
 
 
@@ -129,7 +130,9 @@ def convert_to_rvsdg(
     decls = state.__egg_decls__
 
     # Do the conversion back into RVSDG
-    node_iterator = list(nx.dfs_postorder_nodes(exgraph, source=root))
+    common_root = "common_root"
+
+    node_iterator = list(nx.dfs_postorder_nodes(exgraph, source=common_root))
 
     def egg_fn_to_arg_names(egg_fn: str) -> tuple[str, ...]:
         for ref in state.egg_fn_to_callable_refs[egg_fn]:
@@ -149,17 +152,20 @@ def convert_to_rvsdg(
                 children.sort()
                 _, children = zip(*children)
             # extract argument names
-            kind, _, egg_fn = node.split("-")
-            match kind:
-                case "primitive":
-                    pass
-                case "function":
-                    # TODO: put this into the converter_class
-                    arg_names = egg_fn_to_arg_names(egg_fn)
-                    children = dict(zip(arg_names, children, strict=True))
-                case _:
-                    raise NotImplementedError(f"kind is {kind!r}")
-            yield node, children
+            if node == common_root:
+                yield node, children
+            else:
+                kind, _, egg_fn = node.split("-")
+                match kind:
+                    case "primitive":
+                        pass
+                    case "function":
+                        # TODO: put this into the converter_class
+                        arg_names = egg_fn_to_arg_names(egg_fn)
+                        children = dict(zip(arg_names, children, strict=True))
+                    case _:
+                        raise NotImplementedError(f"kind is {kind!r}")
+                yield node, children
 
     conversion = converter_class(gdct, rvsdg_sexpr, egg_fn_to_arg_names)
     return conversion.run(iterator(node_iterator))
@@ -197,7 +203,8 @@ class Extraction:
     _DEBUG = False
 
     def __init__(self, graph_json: EGraphJsonDict, root_eclass, cost_model):
-        self.root_eclass = root_eclass
+        self.graph_json = graph_json
+        self.root_eclass = "common_root"
         self.class_data = defaultdict(set)
         self.nodes = {k: Node(**v) for k, v in graph_json["nodes"].items()}
         self.node_types = {
@@ -267,6 +274,18 @@ class Extraction:
                     for child in enode.children:
                         G.add_edge(k, nodes[child].eclass)
 
+        # Get all nodes with in-degree of 0
+        common_root = "common_root"
+
+        # Do the conversion back into RVSDG
+        root_eclasses =[node for node, in_degree in G.in_degree() if in_degree == 0 and self.graph_json['class_data'][node]['type'] != "Unit"]
+        G.add_node(common_root, shape="rect")
+        for n in root_eclasses:
+            G.add_edge(common_root, n)
+
+        self.nodes[common_root] = Node(children=[next(iter(eclassmap[ec])) for ec in root_eclasses], cost=0.0, eclass="common_root", op="common_root", subsumed=False)
+
+
         # Get per-node cost function
         cm = self.cost_model
         nodecostmap: dict[str, CostFunc] = {}
@@ -274,13 +293,16 @@ class Extraction:
             if k not in eclassmap:
                 node = nodes[k]
                 children_eclasses = [nodes[c].eclass for c in node.children]
-                nodecostmap[k] = cm.get_cost_function(
-                    nodename=k,
-                    op=node.op,
-                    ty=self.node_types[k],
-                    cost=node.cost,
-                    children=children_eclasses,
-                )
+                if k == "common_root":
+                    nodecostmap[k] = cm.get_simple(0)
+                else:
+                    nodecostmap[k] = cm.get_cost_function(
+                        nodename=k,
+                        op=node.op,
+                        ty=self.node_types[k],
+                        cost=node.cost,
+                        children=children_eclasses,
+                    )
         if self._DEBUG:
             render_extraction_graph(G, "eclass")
 
@@ -298,7 +320,7 @@ class Extraction:
 
         # Use BFS layers to estimate topological sort
         topo_ordered = []
-        for layer in nx.bfs_layers(G, self.root_eclass):
+        for layer in nx.bfs_layers(G, [common_root]):
             topo_ordered += layer
 
         def propagate_cost(state_tracker):
@@ -334,7 +356,7 @@ class Extraction:
                 costchanged.update(state_tracker)
                 if costchanged.converged():
                     # root score is computed?
-                    if math.isfinite(state_tracker.current[self.root_eclass]):
+                    if all(math.isfinite(state_tracker.current[root]) for root in [common_root]):
                         break
 
                     # root score is missing?
@@ -357,11 +379,13 @@ class Extraction:
             stats["extraction_iteration_count"] = round_i
 
         nodes = self.nodes
+        assert self.root_eclass == "common_root"
         chosen_root, rootcost = selections[self.root_eclass].best()
 
         # make selected graph
         G = nx.MultiDiGraph()
         todolist = [chosen_root]
+
         visited = set()
         while todolist:
             cur = todolist.pop()

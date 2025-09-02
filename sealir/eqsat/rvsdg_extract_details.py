@@ -70,6 +70,7 @@ class EGraphToRVSDG:
     def dispatch(self, key: str, grm: Grammar):
         if key in self.memo:
             return self.memo[key]
+        assert False, "nothing should use this anymroe"
         node = self.gdct["nodes"][key]
         child_keys = node["children"]
         for k in child_keys:
@@ -88,6 +89,9 @@ class EGraphToRVSDG:
     def handle(
         self, key: str, child_keys: list[str] | dict[str, str], grm: Grammar
     ):
+        if key == "common_root":
+            return grm.write(rg.Rootset(tuple(self.memo[k] for k in child_keys)))
+
         allow_dynamic_op = self.allow_dynamic_op
 
         nodes = self.gdct["nodes"]
@@ -458,3 +462,12 @@ class EGraphToRVSDG:
 
     def handle_region_attributes(self, key: str, grm: Grammar):
         return grm.write(rg.Attrs(()))
+
+    def handle_generic(
+        self, key: str, op: str, children: dict | list, grm: Grammar
+    ):
+        assert isinstance(children, dict)
+        print("---? generic")
+        return grm.write(
+            rg.Generic(name=str(op), children=tuple(children.values()))
+        )
