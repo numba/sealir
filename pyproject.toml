@@ -1,7 +1,6 @@
-
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling", "hatch-conda-build"]
+build-backend = "hatchling.build"
 
 
 [project]
@@ -21,10 +20,9 @@ dependencies = [
     "numpy",
 ]
 
-[tool.setuptools.packages.find]
-include = ["sealir", "sealir.*"]
-
-
 [tool.black]
 line-length = 79
 target-version = ['py312']
+
+[tool.hatch.build.targets.conda]
+channels = ["numba", "defaults"]
