@@ -20,6 +20,11 @@ class Generic(_Root):
     children: tuple[SExpr, ...]
 
 
+class GenericList(_Root):
+    name: str
+    children: tuple[SExpr, ...]
+
+
 class Loc(_Root):
     filename: str
     line_first: int

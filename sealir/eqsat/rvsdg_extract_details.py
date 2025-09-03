@@ -108,7 +108,7 @@ class EGraphToRVSDG:
                 return [memo[v] for v in child_keys]
 
         if key.startswith("primitive-"):
-            return self.handle_primitive(node_type, node, get_children())
+            return self.handle_primitive(node_type, node, get_children(), grm)
         elif key.startswith("function-"):
             op = node["op"]
             children = get_children()
@@ -266,7 +266,7 @@ class EGraphToRVSDG:
         else:
             raise NotImplementedError(key)
 
-    def handle_primitive(self, node_type: str, node, children: tuple):
+    def handle_primitive(self, node_type: str, node, children: tuple, grm: Grammar):
         match node_type:
             case "String":
                 unquoted = node["op"][1:-1]
@@ -290,7 +290,10 @@ class EGraphToRVSDG:
             case "Vec_String":
                 return children
             case _:
-                raise NotImplementedError(f"primitive of: {node_type}")
+                if node_type.startswith("Vec_"):
+                    return grm.write(rg.GenericList(name=node_type, children=tuple(children)))
+                else:
+                    raise NotImplementedError(node_type)
 
     def handle_Value(self, op: str, children: dict | list, grm: Grammar):
         match op, children:
@@ -467,7 +470,6 @@ class EGraphToRVSDG:
         self, key: str, op: str, children: dict | list, grm: Grammar
     ):
         assert isinstance(children, dict)
-        print("---? generic")
         return grm.write(
             rg.Generic(name=str(op), children=tuple(children.values()))
         )
