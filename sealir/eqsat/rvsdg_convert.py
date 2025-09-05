@@ -240,6 +240,21 @@ def egraph_conversion(root: SExpr):
                     py_eqsat.Py_SubscriptIO(ioterm, valterm, idxterm)
                 )
 
+            case rg.PySlice(io=io, lower=lower, upper=upper, step=step):
+                ioterm = yield io
+                lowerterm = yield lower
+                upperterm = yield upper
+                stepterm = yield step
+                return WrapTerm(
+                    py_eqsat.Py_SliceIO(ioterm, lowerterm, upperterm, stepterm)
+                )
+
+            case rg.PyTuple(elems):
+                elemvals = []
+                for el in elems:
+                    elemvals.append((yield el))
+                return py_eqsat.Py_Tuple(eg.termlist(*elemvals))
+
             case rg.PyInt(int(intval)):
                 assert intval.bit_length() < 64
                 return eg.Term.LiteralI64(intval)

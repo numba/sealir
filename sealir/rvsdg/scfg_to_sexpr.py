@@ -176,6 +176,16 @@ class ConvertToSExpr(ast.NodeTransformer):
             self.get_loc(node),
         )
 
+    def visit_Slice(self, node: ast.Slice) -> SExpr:
+        none = self._tape.expr("PyAst_None", self.get_loc(node))
+        return self._tape.expr(
+            "PyAst_Slice",
+            self.visit(node.lower) if node.lower is not None else none,
+            self.visit(node.upper) if node.upper is not None else none,
+            self.visit(node.step) if node.step is not None else none,
+            self.get_loc(node),
+        )
+
     def visit_Call(self, node: ast.Call) -> SExpr:
         posargs = self._tape.expr(
             "PyAst_callargs_pos", *map(self.visit, node.args)

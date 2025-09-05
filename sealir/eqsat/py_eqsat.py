@@ -125,6 +125,14 @@ def Py_SubscriptIO(io: Term, obj: Term, index: Term) -> Term: ...
 
 
 @function
+def Py_SliceIO(io: Term, lower: Term, upper: Term, step: Term) -> Term: ...
+
+
+@function
+def Py_Tuple(elems: TermList) -> Term: ...
+
+
+@function
 def Py_LoadGlobal(io: Term, name: StringLike) -> Term: ...
 
 

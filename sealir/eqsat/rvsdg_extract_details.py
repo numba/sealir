@@ -90,7 +90,9 @@ class EGraphToRVSDG:
         self, key: str, child_keys: list[str] | dict[str, str], grm: Grammar
     ):
         if key == "common_root":
-            return grm.write(rg.Rootset(tuple(self.memo[k] for k in child_keys)))
+            return grm.write(
+                rg.Rootset(tuple(self.memo[k] for k in child_keys))
+            )
 
         allow_dynamic_op = self.allow_dynamic_op
 
@@ -223,7 +225,9 @@ class EGraphToRVSDG:
                                 rg.Unpack(val=regionbegin, idx=idx)
                             )
                         case _:
-                            extended_handle = self.handle_Term(op, children, grm)
+                            extended_handle = self.handle_Term(
+                                op, children, grm
+                            )
                             if extended_handle is not NotImplemented:
                                 return extended_handle
                             raise NotImplementedError(
@@ -260,13 +264,21 @@ class EGraphToRVSDG:
                         res = handler(key, op, children, grm)
                         if res is not NotImplemented:
                             return res
+
+                    def fmt(kv):
+                        k, v = kv
+                        return f"{k}={ase.pretty_str(v)}"
+
+                    fmt_children = "\n".join(map(fmt, children.items()))
                     raise NotImplementedError(
-                        f"function of: {op!r} :: {node_type}, {children}"
+                        f"function of: {op!r} :: {node_type}, {children}\n{fmt_children}"
                     )
         else:
             raise NotImplementedError(key)
 
-    def handle_primitive(self, node_type: str, node, children: tuple, grm: Grammar):
+    def handle_primitive(
+        self, node_type: str, node, children: tuple, grm: Grammar
+    ):
         match node_type:
             case "String":
                 unquoted = node["op"][1:-1]
@@ -291,7 +303,11 @@ class EGraphToRVSDG:
                 return children
             case _:
                 if node_type.startswith("Vec_"):
-                    return grm.write(rg.GenericList(name=node_type, children=tuple(children)))
+                    return grm.write(
+                        rg.GenericList(
+                            name=node_type, children=tuple(children)
+                        )
+                    )
                 else:
                     raise NotImplementedError(node_type)
 
@@ -460,6 +476,23 @@ class EGraphToRVSDG:
                         operands=operands,
                     )
                 )
+            case "Py_Tuple", {"elems": tuple(elems)}:
+                return grm.write(
+                    rg.PyTuple(
+                        elems=elems,
+                    )
+                )
+            case "Py_SliceIO", {
+                "io": io,
+                "lower": lower,
+                "upper": upper,
+                "step": step,
+            }:
+                return grm.write(
+                    rg.PySlice(io=io, lower=lower, upper=upper, step=step)
+                )
+            case "Py_SubscriptIO", {"io": io, "obj": obj, "index": index}:
+                return grm.write(rg.PySubscript(io=io, value=obj, index=index))
             case _:
                 return NotImplemented
 

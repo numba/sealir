@@ -173,6 +173,13 @@ class PySubscript(_Root):
     index: SExpr
 
 
+class PySlice(_Root):
+    io: SExpr
+    lower: SExpr
+    upper: SExpr
+    step: SExpr
+
+
 class PyUnaryOp(_Root):
     op: str
     io: SExpr

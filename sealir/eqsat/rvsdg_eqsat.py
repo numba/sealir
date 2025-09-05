@@ -35,6 +35,8 @@ MAXCOST = sys.maxsize
 
 class DynInt(Expr):
     def __init__(self, num: i64Like): ...
+    def get(self) -> i64: ...
+    def __mul__(self, other: DynInt) -> DynInt: ...
 
 
 converter(i64, DynInt, DynInt)
@@ -443,6 +445,12 @@ def ruleset_termdict(mapping: Map[String, Term], key: String):
     ).then(set_(TermDict(mapping).get(key)).to(mapping[key]))
 
 
+@ruleset
+def ruleset_dynint(n: i64, m: i64):
+    yield rule(DynInt(n)).then(set_(DynInt(n).get()).to(n))
+    yield rewrite(DynInt(n) * DynInt(m)).to(DynInt(n * m))
+
+
 ruleset_rvsdg_basic = (
     ruleset_simplify_dbgvalue
     | ruleset_portlist_basic
@@ -455,6 +463,7 @@ ruleset_rvsdg_basic = (
     | ruleset_region_propgate_output
     | ruleset_func_outputs
     | ruleset_termdict
+    | ruleset_dynint
 )
 
 

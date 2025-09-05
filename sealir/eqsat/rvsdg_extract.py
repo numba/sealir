@@ -278,13 +278,23 @@ class Extraction:
         common_root = "common_root"
 
         # Do the conversion back into RVSDG
-        root_eclasses =[node for node, in_degree in G.in_degree() if in_degree == 0 and self.graph_json['class_data'][node]['type'] != "Unit"]
+        root_eclasses = [
+            node
+            for node, in_degree in G.in_degree()
+            if in_degree == 0
+            and self.graph_json["class_data"][node]["type"] != "Unit"
+        ]
         G.add_node(common_root, shape="rect")
         for n in root_eclasses:
             G.add_edge(common_root, n)
 
-        self.nodes[common_root] = Node(children=[next(iter(eclassmap[ec])) for ec in root_eclasses], cost=0.0, eclass="common_root", op="common_root", subsumed=False)
-
+        self.nodes[common_root] = Node(
+            children=[next(iter(eclassmap[ec])) for ec in root_eclasses],
+            cost=0.0,
+            eclass="common_root",
+            op="common_root",
+            subsumed=False,
+        )
 
         # Get per-node cost function
         cm = self.cost_model
@@ -356,7 +366,10 @@ class Extraction:
                 costchanged.update(state_tracker)
                 if costchanged.converged():
                     # root score is computed?
-                    if all(math.isfinite(state_tracker.current[root]) for root in [common_root]):
+                    if all(
+                        math.isfinite(state_tracker.current[root])
+                        for root in [common_root]
+                    ):
                         break
 
                     # root score is missing?

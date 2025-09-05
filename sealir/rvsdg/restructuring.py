@@ -775,6 +775,19 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
                 rg.PySubscript(io=ctx.load_io(), value=value, index=index)
             )
 
+        case ("PyAst_Slice", (lower, upper, step, interloc)):
+            lower_val = yield lower
+            upper_val = yield upper
+            step_val = yield step
+            return ctx.insert_io_node(
+                rg.PySlice(
+                    io=ctx.load_io(),
+                    lower=lower_val,
+                    upper=upper_val,
+                    step=step_val,
+                )
+            )
+
         case ("PyAst_Pass", (interloc,)):
             return
 
