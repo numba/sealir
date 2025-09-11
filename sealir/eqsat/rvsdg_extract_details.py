@@ -267,7 +267,11 @@ class EGraphToRVSDG:
 
                     def fmt(kv):
                         k, v = kv
-                        return f"{k}={ase.pretty_str(v)}"
+                        if isinstance(v, ase.SExpr):
+                            return f"{k}={ase.pretty_str(v)}"
+                        else:
+                            return f"{k}={v}"
+
 
                     fmt_children = "\n".join(map(fmt, children.items()))
                     raise NotImplementedError(
