@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, MutableMapping
 
 from sealir import ase
 from sealir.rvsdg import Grammar
@@ -14,6 +14,34 @@ from .egraph_utils import EGraphJsonDict, NodeDict
 class Data: ...
 
 
+_memo_elem_type = ase.value_type | tuple
+
+
+class _TypeCheckedDict(MutableMapping):
+    def __init__(self):
+        self._data = {}
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __setitem__(self, key, value):
+        self._check_setitem(key, value)
+        self._data[key] = value
+
+    def __delitem__(self, key):
+        del self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def _check_setitem(self, key, value):
+        if not isinstance(value, _memo_elem_type):
+            raise TypeError(f"{type(value)} :: {value}")
+
+
 class EGraphToRVSDG:
     allow_dynamic_op = False
     grammar = Grammar
@@ -23,7 +51,7 @@ class EGraphToRVSDG:
     ):
         self.rvsdg_sexpr = rvsdg_sexpr
         self.gdct = gdct
-        self.memo = {}
+        self.memo = _TypeCheckedDict()
         self.egg_fn_to_arg_names = egg_fn_to_arg_names
 
     def run(self, node_and_children):
@@ -300,11 +328,11 @@ class EGraphToRVSDG:
             case "f64":
                 return float(node["op"])
             case "Vec_Term":
-                return children
+                return tuple(children)
             case "Vec_Port":
-                return children
+                return tuple(children)
             case "Vec_String":
-                return children
+                return tuple(children)
             case _:
                 if node_type.startswith("Vec_"):
                     return grm.write(
@@ -507,6 +535,13 @@ class EGraphToRVSDG:
         self, key: str, op: str, children: dict | list, grm: Grammar
     ):
         assert isinstance(children, dict)
+        # flatten children.values() into SExpr
+        values = []
+        for k, v in children.items():
+            if isinstance(v, tuple):
+                values.append(grm.write(rg.GenericList(name=k, children=v)))
+            else:
+                values.append(v)
         return grm.write(
-            rg.Generic(name=str(op), children=tuple(children.values()))
+            rg.Generic(name=str(op), children=tuple(values))
         )
