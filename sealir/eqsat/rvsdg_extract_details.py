@@ -118,8 +118,14 @@ class EGraphToRVSDG:
         self, key: str, child_keys: list[str] | dict[str, str], grm: Grammar
     ):
         if key == "common_root":
+            # legalize child
+            values = []
+            for k in child_keys:
+                val = self.memo[k]
+                if isinstance(val, ase.SExpr):
+                    values.append(val)
             return grm.write(
-                rg.Rootset(tuple(self.memo[k] for k in child_keys))
+                rg.Rootset(tuple(values))
             )
 
         allow_dynamic_op = self.allow_dynamic_op
