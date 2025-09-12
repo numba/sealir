@@ -125,6 +125,10 @@ def Py_SubscriptIO(io: Term, obj: Term, index: Term) -> Term: ...
 
 
 @function
+def Py_SetitemIO(io: Term, obj: Term, index: Term, val: Term) -> Term: ...
+
+
+@function
 def Py_SliceIO(io: Term, lower: Term, upper: Term, step: Term) -> Term: ...
 
 

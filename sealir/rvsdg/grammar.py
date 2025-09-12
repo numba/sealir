@@ -173,6 +173,13 @@ class PySubscript(_Root):
     index: SExpr
 
 
+class PySetItem(_Root):
+    io: SExpr
+    obj: SExpr
+    index: SExpr
+    value: SExpr
+
+
 class PySlice(_Root):
     io: SExpr
     lower: SExpr

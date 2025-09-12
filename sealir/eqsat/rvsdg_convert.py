@@ -240,6 +240,15 @@ def egraph_conversion(root: SExpr):
                     py_eqsat.Py_SubscriptIO(ioterm, valterm, idxterm)
                 )
 
+            case rg.PySetItem(io=io, obj=obj, value=value, index=index):
+                ioterm = yield io
+                objterm = yield obj
+                valterm = yield value
+                idxterm = yield index
+                return WrapTerm(
+                    py_eqsat.Py_SetitemIO(ioterm, objterm, idxterm, valterm)
+                )
+
             case rg.PySlice(io=io, lower=lower, upper=upper, step=step):
                 ioterm = yield io
                 lowerterm = yield lower

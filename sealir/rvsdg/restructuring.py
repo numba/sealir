@@ -434,7 +434,7 @@ def unpack_pystr(sexpr: SExpr) -> str | None:
 
 
 def unpack_pyast_name(sexpr: SExpr) -> str:
-    assert sexpr._head == "PyAst_Name"
+    assert sexpr._head == "PyAst_Name", sexpr
     return cast(str, sexpr._args[0])
 
 
@@ -647,6 +647,19 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             res = yield rval
             tar: SExpr
 
+            if (
+                len(targets) == 1
+                and targets[0]._head == "PyAst_Subscript"
+            ):
+                [lhs, indices, loc] = targets[0]._args
+                lhs = (yield lhs)
+                indices = (yield indices)
+                rval = (yield rval)
+                setitem = rg.PySetItem(io=ctx.load_io(),
+                                       obj=lhs,
+                                       index=indices,
+                                       value=rval)
+                return ctx.insert_io_node(setitem)
             if (
                 len(targets) == 1
                 and unpack_pyast_name(targets[0]) == internal_prefix("_")
