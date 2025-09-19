@@ -814,7 +814,8 @@ def copy_tree_into(self: SExpr, tape: Tape) -> SExpr:
     Returns a fresh Expr in the new tape.
     """
     oldtree = self._tape
-    crawler = TapeCrawler(oldtree, self._get_downcast())
+    downcast = self._get_downcast()
+    crawler = TapeCrawler(oldtree, downcast)
     crawler.seek(self._handle)
     liveset = set(_select(crawler.walk_descendants(), 1))
     surviving = sorted(liveset)
@@ -836,7 +837,8 @@ def copy_tree_into(self: SExpr, tape: Tape) -> SExpr:
 
     out = tape.read_value(mapping[self._handle])
     assert isinstance(out, SExpr)
-    return out
+
+    return downcast(out)
 
 
 class BasicSExpr(SExpr):
