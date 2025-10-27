@@ -214,6 +214,40 @@ class Extraction:
             self.class_data[node.eclass].add(k)
         self.cost_model = cost_model
 
+    def _create_common_root(self, G: nx.DiGraph, eclassmap: dict[str, set[str]]) -> str:
+        """Create a common root node and add it to the graph.
+
+        Args:
+            G: The eclass dependency graph
+            eclassmap: Mapping from eclass names to sets of node names
+
+        Returns:
+            The name of the common root node
+        """
+        # Get all nodes with in-degree of 0
+        common_root = "common_root"
+
+        # Do the conversion back into RVSDG
+        root_eclasses = [
+            node
+            for node, in_degree in G.in_degree()
+            if in_degree == 0
+            and self.graph_json["class_data"][node]["type"] != "Unit"
+        ]
+        G.add_node(common_root, shape="rect")
+        for n in root_eclasses:
+            G.add_edge(common_root, n)
+
+        self.nodes[common_root] = Node(
+            children=[next(iter(eclassmap[ec])) for ec in root_eclasses],
+            cost=0.0,
+            eclass="common_root",
+            op="common_root",
+            subsumed=False,
+        )
+
+        return common_root
+
     def _compute_cost(
         self,
         max_iter=1000,
@@ -273,27 +307,8 @@ class Extraction:
                     for child in enode.children:
                         G.add_edge(k, nodes[child].eclass)
 
-        # Get all nodes with in-degree of 0
-        common_root = "common_root"
-
-        # Do the conversion back into RVSDG
-        root_eclasses = [
-            node
-            for node, in_degree in G.in_degree()
-            if in_degree == 0
-            and self.graph_json["class_data"][node]["type"] != "Unit"
-        ]
-        G.add_node(common_root, shape="rect")
-        for n in root_eclasses:
-            G.add_edge(common_root, n)
-
-        self.nodes[common_root] = Node(
-            children=[next(iter(eclassmap[ec])) for ec in root_eclasses],
-            cost=0.0,
-            eclass="common_root",
-            op="common_root",
-            subsumed=False,
-        )
+        # Create common root node
+        common_root = self._create_common_root(G, eclassmap)
 
         # Get per-node cost function
         cm = self.cost_model
