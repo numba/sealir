@@ -112,7 +112,6 @@ def egraph_extraction(
         egraph,
         converter_class=converter_class,
     )
-
     return cost, expr
 
 

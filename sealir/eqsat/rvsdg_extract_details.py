@@ -124,9 +124,7 @@ class EGraphToRVSDG:
                 val = self.memo[k]
                 if isinstance(val, ase.SExpr):
                     values.append(val)
-            return grm.write(
-                rg.Rootset(tuple(values))
-            )
+            return grm.write(rg.Rootset(tuple(values)))
 
         allow_dynamic_op = self.allow_dynamic_op
 
@@ -305,7 +303,6 @@ class EGraphToRVSDG:
                             return f"{k}={ase.pretty_str(v)}"
                         else:
                             return f"{k}={v}"
-
 
                     fmt_children = "\n".join(map(fmt, children.items()))
                     raise NotImplementedError(
@@ -548,6 +545,4 @@ class EGraphToRVSDG:
                 values.append(grm.write(rg.GenericList(name=k, children=v)))
             else:
                 values.append(v)
-        return grm.write(
-            rg.Generic(name=str(op), children=tuple(values))
-        )
+        return grm.write(rg.Generic(name=str(op), children=tuple(values)))

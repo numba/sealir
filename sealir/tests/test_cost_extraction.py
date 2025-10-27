@@ -90,9 +90,8 @@ def _flatten_multidigraph(graph):
             return node
         return tuple([node, *(format_node(child) for child in children)])
 
-    # Get all nodes with no incoming edges (roots)
-    roots = [n for n in graph.nodes if graph.in_degree(n) == 0]
-    return [format_node(root) for root in roots]
+    roots = [k for k in graph.nodes if k.endswith("GraphRoot")]
+    return [format_node(x) for x in roots]
 
 
 def test_cost_duplicated_term():

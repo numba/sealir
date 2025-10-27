@@ -32,9 +32,11 @@ def middle_end(
 
     # Extraction
     extract_kwargs = extract_kwargs or {}
-    cost, extracted = egraph_extraction(
+    cost, rootset = egraph_extraction(
         egraph, rvsdg_expr, cost_model=cost_model, **extract_kwargs
     )
+    [extracted] = [node for node in rootset._args if node._head == "Func"]
+
     return cost, extracted
 
 
@@ -57,6 +59,7 @@ def compiler_pipeline(fn, args, *, verbose=False):
     cost, extracted = middle_end(
         rvsdg_expr, display_egraph, extract_kwargs=extract_kwargs
     )
+
     print("Extracted from EGraph".center(80, "="))
     print("cost =", cost)
     print(rvsdg.format_rvsdg(extracted))

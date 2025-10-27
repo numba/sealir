@@ -25,8 +25,10 @@ def compiler_pipeline(fn, *, ruleset, verbose=False):
 
         if verbose:
             print(egraph.extract(root))
+        return root
 
     cost, extracted = middle_end(rvsdg_expr, define_egraph)
+
     if verbose:
         print("Extracted from EGraph".center(80, "="))
         print("cost =", cost)
