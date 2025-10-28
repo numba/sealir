@@ -359,7 +359,6 @@ class Extraction:
             for k in reversed(topo_ordered):
                 if k not in eclassmap:
                     node = nodes[k]
-
                     cost_dag = dagcost.compute_cost(k)
                     cost = sum(cost_dag.values())
                     selections[node.eclass].put(cost, k)
@@ -477,6 +476,8 @@ class SubgraphCost:
     "Stores computed node costs for reuse."
     _stats: _SubgraphCostStats = field(default_factory=_SubgraphCostStats)
     "Tracks cache hits and misses."
+    _visited_dag_eclass: list[str] = field(default_factory=list)
+    "Tracks Children DAG path to avoid recursion"
 
     def compute_cost(self, nodename: str) -> dict[str, float]:
         if (cc := self._cache.get(nodename)) is None:
@@ -527,15 +528,21 @@ class SubgraphCost:
         return costs
 
     def _compute_choice(self, eclass: str) -> dict[str, float]:
-        selections = self.selections
-
-        choices = selections[eclass]
-        if not choices:
+        if eclass in self._visited_dag_eclass:
+            # Avoid recursion
             return {eclass: MAX_COST}
-        best = choices.best()
+        self._visited_dag_eclass.append(eclass)
+        try:
+            selections = self.selections
 
-        return self.compute_cost(best.name)
+            choices = selections[eclass]
+            if not choices:
+                return {eclass: MAX_COST}
+            best = choices.best()
 
+            return self.compute_cost(best.name)
+        finally:
+            self._visited_dag_eclass.pop()
 
 class ExtractionError(Exception):
     pass
