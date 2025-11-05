@@ -180,8 +180,8 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             return SSAValue(builder.function.args[idx])
 
         case rg.Unpack(val=source, idx=int(idx)):
-            ports: PackedValues = yield source
-            return ports[idx]
+            packedvalues: PackedValues = yield source
+            return packedvalues[idx]
 
         case rg.PyBinOpPure(op=op, lhs=lhs, rhs=rhs):
             lhsval = (yield lhs).value
@@ -376,7 +376,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             # end loop
             builder.position_at_end(bb_endloop)
             # Returns the value from the loop body because this is a tail loop
-            return loopout_values
+            return PackedValues.make(*loopout_values)
 
         case rg.PyForLoop(
             iter_arg_idx=int(iter_arg_idx),

@@ -35,8 +35,7 @@ def middle_end(
     cost, rootset = egraph_extraction(
         egraph, rvsdg_expr, cost_model=cost_model, **extract_kwargs
     )
-    [extracted] = [node for node in rootset._args if node._head == "Func"]
-
+    [extracted] = rootset.filter_children(lambda node: node._head == "Func")
     return cost, extracted
 
 

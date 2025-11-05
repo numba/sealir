@@ -107,7 +107,7 @@ def extract_eclasses(egraph: EGraph) -> EClassData:
 
 
 def reconstruct(
-    nodes: dict[str, dict], class_data: dict[str, str]
+    nodes: dict[str, dict], class_data: dict[str, dict[str, str]]
 ) -> dict[str, Term]:
     done: dict[str, Term] = {}
 

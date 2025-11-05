@@ -12,6 +12,7 @@ from typing import Any, Callable, NamedTuple, Sequence
 import networkx as nx
 from egglog import EGraph
 
+from sealir.ase import SExpr
 from .egraph_utils import EGraphJsonDict
 from .rvsdg_extract_details import EGraphToRVSDG
 
@@ -87,7 +88,7 @@ def egraph_extraction(
     cost_model=None,
     converter_class=EGraphToRVSDG,
     stats: dict[str, Any] | None = None,
-):
+) -> tuple[float, CommonRoot]:
     gdct: EGraphJsonDict = json.loads(
         egraph._serialize(
             n_inline_leaves=0, split_primitive_outputs=False
@@ -123,7 +124,7 @@ def convert_to_rvsdg(
     egraph: EGraph,
     *,
     converter_class,
-):
+) -> CommonRoot:
     # Get declarations so we have named fields
     state = egraph._state
     decls = state.__egg_decls__
@@ -167,7 +168,15 @@ def convert_to_rvsdg(
                 yield node, children
 
     conversion = converter_class(gdct, rvsdg_sexpr, egg_fn_to_arg_names)
-    return conversion.run(iterator(node_iterator))
+    return CommonRoot(conversion.run(iterator(node_iterator)))
+
+
+@dataclass(frozen=True)
+class CommonRoot:
+    root: SExpr
+
+    def filter_children(self, pred) -> list[SExpr]:
+        return list(filter(pred, self.root._args))
 
 
 def get_graph_root(graph_json: EGraphJsonDict) -> set[str]:
@@ -214,7 +223,9 @@ class Extraction:
             self.class_data[node.eclass].add(k)
         self.cost_model = cost_model
 
-    def _create_common_root(self, G: nx.DiGraph, eclassmap: dict[str, set[str]]) -> str:
+    def _create_common_root(
+        self, G: nx.DiGraph, eclassmap: dict[str, set[str]]
+    ) -> str:
         """Create a common root node and add it to the graph.
 
         Args:
@@ -543,6 +554,7 @@ class SubgraphCost:
             return self.compute_cost(best.name)
         finally:
             self._visited_dag_eclass.pop()
+
 
 class ExtractionError(Exception):
     pass

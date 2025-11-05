@@ -438,7 +438,7 @@ def unpack_pyast_name(sexpr: SExpr) -> str:
     return cast(str, sexpr._args[0])
 
 
-def is_directive(text: str) -> str:
+def is_directive(text: str) -> bool:
     return text.startswith("#file:") or text.startswith("#loc:")
 
 
