@@ -159,7 +159,12 @@ class Tape:
 
     @graphviz_function
     def render_dot(
-        self, *, gv, show_metadata: bool = False, only_reachable: bool = False
+        self,
+        *,
+        gv,
+        show_metadata: bool = False,
+        only_reachable: bool = False,
+        source_node: SExpr | None = None,
     ):
         def make_label(i, x):
             if isinstance(x, SExpr):
@@ -172,7 +177,10 @@ class Tape:
         crawler = TapeCrawler(self, self._downcast)
 
         # Records that are children of the last node
-        crawler.seek(self.last())
+        if source_node is None:
+            crawler.seek(self.last())
+        else:
+            crawler.seek(source_node._handle)
 
         # Seek to the first non-metadata in the back
         while crawler.pos > 0:
@@ -232,8 +240,7 @@ class Tape:
             if not head.startswith(metadata_prefix):
                 lastname = nodename
         # emit start
-        if lastname:
-            edges.append((("start", lastname), {}))
+        edges.append((("start", f"node{source_node._handle}"), {}))
         # emit edges
         for args, kwargs in edges:
             g.edge(*args, **kwargs)

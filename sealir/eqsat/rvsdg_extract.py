@@ -7,7 +7,15 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from itertools import starmap
 from pprint import pformat
-from typing import Any, Callable, NamedTuple, Self, Sequence
+from typing import (
+    Any,
+    Callable,
+    Iterator,
+    MutableMapping,
+    NamedTuple,
+    Self,
+    Sequence,
+)
 
 import networkx as nx
 from egglog import EGraph
@@ -89,12 +97,18 @@ class ExtractionResult:
     cost: float
     graph: nx.MultiDiGraph
 
-    def extract_sexpr(self, original_sexpr: SExpr, converter_class) -> SExpr:
+    def extract_sexpr(
+        self,
+        original_sexpr: SExpr,
+        converter_class,
+        memo: MutableMapping | None = None,
+    ) -> SExpr:
         """Extract back to SExpr format using any converter class."""
         expr = _convert_graph_to_sexpr(
             self,
             original_sexpr,
             converter_class=converter_class,
+            memo=memo,
         )
         return expr
 
@@ -121,6 +135,7 @@ def _convert_graph_to_sexpr(
     original_sexpr,
     *,
     converter_class,
+    memo,
 ) -> SExpr:
     # Get declarations so we have named fields
     state = result.extraction.egraph._state
@@ -165,7 +180,10 @@ def _convert_graph_to_sexpr(
                 yield node, children
 
     conversion = converter_class(
-        result.extraction.graph_json, original_sexpr, egg_fn_to_arg_names
+        result.extraction.graph_json,
+        original_sexpr,
+        egg_fn_to_arg_names,
+        memo=memo,
     )
     return conversion.run(iterator(node_iterator))
 
@@ -446,25 +464,31 @@ class Extraction:
 
         return self
 
+    def iter_graph_root(self) -> Iterator[str]:
+        return iter(self.nodes["common_root"].children)
+
     def extract_enode(self, root: str) -> ExtractionResult:
         """Extract starting from an enode (specific node)."""
 
         root_eclass = self.nodes[root].eclass
-        return self._do_extract(root, root_eclass)
+        return self._do_extract(root_eclass)
 
     def extract_eclass(self, root_eclass: str) -> ExtractionResult:
         """Extract starting from an equivalence class."""
 
-        return self._do_extract(root_eclass, root_eclass)
+        return self._do_extract(root_eclass)
 
     def extract_graph_root(self) -> ExtractionResult:
         """Extract using the automatically detected GraphRoot."""
 
         [root] = get_graph_root(self.graph_json)
         root_eclass = self.nodes[root].eclass
-        return self._do_extract(root, root_eclass)
+        return self._do_extract(root_eclass)
 
-    def _do_extract(self, root: str, root_eclass: str) -> ExtractionResult:
+    def extract_common_root(self) -> ExtractionResult:
+        return self._do_extract("common_root")
+
+    def _do_extract(self, root_eclass: str) -> ExtractionResult:
         """Internal method to perform the actual extraction."""
         if not self._computed:
             self.compute()
@@ -484,7 +508,7 @@ class Extraction:
             if cur in visited:
                 continue
             visited.add(cur)
-
+            G.add_node(cur)
             for i, u in enumerate(nodes[cur].children):
                 child_eclass = nodes[u].eclass
                 child_key, cost = selections[child_eclass].best()
@@ -495,7 +519,7 @@ class Extraction:
             render_extraction_graph(G, "chosen")
 
         # Create a new ExtractionResult that holds the extracted data
-        return ExtractionResult(self, root, rootcost, G)
+        return ExtractionResult(self, chosen_root, rootcost, G)
 
 
 @dataclass

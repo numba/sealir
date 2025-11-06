@@ -44,14 +44,19 @@ class _TypeCheckedDict(MutableMapping):
 
 class EGraphToRVSDG:
     allow_dynamic_op = False
+    unknown_use_generic = False
     grammar = Grammar
 
     def __init__(
-        self, gdct: EGraphJsonDict, rvsdg_sexpr: ase.SExpr, egg_fn_to_arg_names
+        self,
+        gdct: EGraphJsonDict,
+        rvsdg_sexpr: ase.SExpr,
+        egg_fn_to_arg_names,
+        memo: MutableMapping | None,
     ):
         self.rvsdg_sexpr = rvsdg_sexpr
         self.gdct = gdct
-        self.memo = _TypeCheckedDict()
+        self.memo = memo if memo is not None else _TypeCheckedDict()
         self.egg_fn_to_arg_names = egg_fn_to_arg_names
 
     def run(self, node_and_children):
@@ -59,12 +64,14 @@ class EGraphToRVSDG:
         with self.rvsdg_sexpr._tape as tape:
             grm = self.grammar(tape)
             for key, child_keys in node_and_children:
-                try:
-                    last = memo[key] = self.handle(key, child_keys, grm)
-                except Exception as e:
-                    e.add_note(f"Extracting: {key}, {child_keys}")
-                    raise
-
+                if key in memo:
+                    last = memo[key]
+                else:
+                    try:
+                        last = memo[key] = self.handle(key, child_keys, grm)
+                    except Exception as e:
+                        e.add_note(f"Extracting: {key}, {child_keys}")
+                        raise
         return last
 
     def lookup_sexpr(self, uid: int) -> ase.SExpr:
@@ -262,9 +269,8 @@ class EGraphToRVSDG:
                             )
                             if extended_handle is not NotImplemented:
                                 return extended_handle
-                            raise NotImplementedError(
-                                f"invalid Term: {node_type}, {children}"
-                            )
+                            return self.handle_unknown(key, op, children, grm)
+
                 case "TermList", {"terms": terms}:
                     return tuple(terms)
                 case "PortList", {"ports": ports}:
@@ -297,17 +303,7 @@ class EGraphToRVSDG:
                         if res is not NotImplemented:
                             return res
 
-                    def fmt(kv):
-                        k, v = kv
-                        if isinstance(v, ase.SExpr):
-                            return f"{k}={ase.pretty_str(v)}"
-                        else:
-                            return f"{k}={v}"
-
-                    fmt_children = "\n".join(map(fmt, children.items()))
-                    raise NotImplementedError(
-                        f"function of: {op!r} :: {node_type}, {children}\n{fmt_children}"
-                    )
+                    return self.handle_unknown(key, op, children, grm)
         else:
             raise NotImplementedError(key)
 
@@ -533,6 +529,18 @@ class EGraphToRVSDG:
 
     def handle_region_attributes(self, key: str, grm: Grammar):
         return grm.write(rg.Attrs(()))
+
+    def handle_unknown(
+        self, key: str, op: str, children: dict | list, grm: Grammar
+    ):
+        if self.unknown_use_generic:
+            return self.handle_generic(key, op, children, grm)
+        else:
+            nodes = self.gdct["nodes"]
+            node = nodes[key]
+            eclass = node["eclass"]
+            node_type = self.gdct["class_data"][eclass]["type"]
+            raise NotImplementedError(f"{node_type}: {key} - {op}, {children}")
 
     def handle_generic(
         self, key: str, op: str, children: dict | list, grm: Grammar
