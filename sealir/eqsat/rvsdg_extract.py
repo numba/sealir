@@ -97,7 +97,7 @@ class ExtractionResult:
     cost: float
     graph: nx.MultiDiGraph
 
-    def extract_sexpr(
+    def convert(
         self,
         original_sexpr: SExpr,
         converter_class,

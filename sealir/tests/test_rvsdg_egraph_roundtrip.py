@@ -35,7 +35,7 @@ def middle_end(rvsdg_expr, apply_to_egraph, cost_model=None, stats=None):
     # Extraction
     extraction = egraph_extraction(egraph, cost_model=cost_model, stats=stats)
     result = extraction.extract_graph_root()
-    expr = result.extract_sexpr(rvsdg_expr, EGraphToRVSDG)
+    expr = result.convert(rvsdg_expr, EGraphToRVSDG)
     return result.cost, expr
 
 
