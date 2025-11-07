@@ -228,8 +228,10 @@ class NamedSExpr(ase.SExpr, Generic[Tgrammar, Trule]):
             return super().__getattribute__(name)
         try:
             idx = self._slots[name]
-        except IndexError:
-            raise AttributeError(name)
+        except KeyError:
+            raise AttributeError(
+                f"{self._head} doesn't have attribute {name!r}"
+            )
 
         if idx + 1 == len(self._rulety._fields):
             last_fd = self._rulety._fields[-1]
