@@ -164,7 +164,7 @@ class PortList(Expr):
 
 
 def termlist(*args: Term) -> TermList:
-    return TermList(Vec(*args))
+    return TermList(Vec[Term](*args))
 
 
 def termdict(**kwargs: Term) -> TermDict:
