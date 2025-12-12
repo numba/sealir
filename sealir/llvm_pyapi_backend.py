@@ -33,7 +33,6 @@ def llvm_codegen(root: ase.SExpr, ns: Mapping[str, Any] = _kwargs_default):
     - Does NOT do proper memory management.
     - Does NOT do proper error handling.
     """
-    llvm.initialize()
     llvm.initialize_native_target()
     llvm.initialize_native_asmprinter()
 
