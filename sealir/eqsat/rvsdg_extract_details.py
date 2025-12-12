@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Iterable, Iterator, MutableMapping
 
+import sealir.eqsat.rvsdg_eqsat as _rvsdg_ns
 from sealir import ase
+from sealir.matcher import Matcher
 from sealir.rvsdg import Grammar
 from sealir.rvsdg import grammar as rg
 
-from .egraph_utils import EGraphJsonDict, NodeDict
+from .egraph_utils import EGraphJsonDict, parse_type
 
 
 @dataclass(frozen=True)
@@ -140,7 +142,7 @@ class EGraphToRVSDG:
 
         node = nodes[key]
         eclass = node["eclass"]
-        node_type = self.gdct["class_data"][eclass]["type"]
+        node_type = self._parse_type(self.gdct["class_data"][eclass]["type"])
 
         def get_children() -> dict | list:
             if isinstance(child_keys, dict):
@@ -154,7 +156,10 @@ class EGraphToRVSDG:
             op = node["op"]
             children = get_children()
 
-            match node_type, children:
+            if node_type.prefix != _rvsdg_ns.__name__:
+                raise AssertionError("rvsdg namespace mismatch")
+
+            match node_type.name, children:
                 case "Region", {"inports": ins}:
                     attrs = self.handle_region_attributes(key, grm)
                     return grm.write(rg.RegionBegin(inports=ins, attrs=attrs))
@@ -308,48 +313,71 @@ class EGraphToRVSDG:
             raise NotImplementedError(key)
 
     def handle_primitive(
-        self, node_type: str, node, children: tuple, grm: Grammar
+        self, node_type: Qualname, node, children: tuple, grm: Grammar
     ):
-        match node_type:
-            case "String":
-                unquoted = node["op"][1:-1]
-                return unquoted
-            case "bool":
-                match node["op"]:
-                    case "true":
-                        return True
-                    case "false":
-                        return False
-                    case _:
-                        raise AssertionError()
-            case "i64":
-                return int(node["op"])
-            case "f64":
-                return float(node["op"])
-            case "Vec_Term":
+        matcher = Matcher()
+
+        Eq = matcher.Eq
+        egglog_ns = Eq("egglog.builtins")
+        sealir_ns = Eq("sealir.eqsat.rvsdg_eqsat")
+
+        @matcher.case(egglog_ns, Eq("String"))
+        def _(modname: str, ty: str):
+            unquoted = node["op"][1:-1]
+            return unquoted
+
+        @matcher.case(egglog_ns, Eq("bool"))
+        def _(modname: str, ty: str):
+            match node["op"]:
+                case "true":
+                    return True
+                case "false":
+                    return False
+                case _:
+                    raise AssertionError()
+
+        @matcher.case(egglog_ns, Eq("i64"))
+        def _(modname: str, ty: str):
+            return int(node["op"])
+
+        @matcher.case(egglog_ns, Eq("f64"))
+        def _(modname: str, ty: str):
+            return float(node["op"])
+
+        @matcher.case(egglog_ns, Eq("Vec"))
+        def _(modname: str, ty: str):
+            param_match = Matcher()
+
+            @param_match.case(sealir_ns, Eq("Term"))
+            @param_match.case(sealir_ns, Eq("Port"))
+            @param_match.case(egglog_ns, Eq("String"))
+            def _(modname: str, ty: str):
                 return tuple(children)
-            case "Vec_Port":
-                return tuple(children)
-            case "Vec_String":
-                return tuple(children)
-            case _:
-                if node_type.startswith("Vec_"):
-                    return grm.write(
-                        rg.GenericList(
-                            name=node_type, children=tuple(children)
-                        )
+
+            @param_match.default
+            def _(*args, **kwargs):
+                return grm.write(
+                    rg.GenericList(
+                        name=node_type.get_fullname(), children=tuple(children)
                     )
-                else:
-                    raise NotImplementedError(node_type)
+                )
+
+            return param_match(node_type.param.prefix, node_type.param.name)
+
+        return matcher(node_type.prefix, node_type.name)
 
     def handle_Value(self, op: str, children: dict | list, grm: Grammar):
-        match op, children:
-            case "Value.ConstI64", {"val": val}:
-                return grm.write(rg.PyInt(val))
-            case "Value.Param", {"i": int(idx)}:
-                return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
-            case _:
-                raise NotImplementedError(f"Value of {op!r}")
+        matcher = Matcher()
+
+        @matcher.case
+        def _(val: int, op="Value.ConstI64"):
+            return grm.write(rg.PyInt(val))
+
+        @matcher.case
+        def _(idx: int, op="Value.Param"):
+            return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
+
+        return matcher(op=op, **children)
 
     def handle_Term(self, op: str, children: dict | list, grm: Grammar):
         return self.handle_Py_Term(op, children, grm)
@@ -539,7 +567,9 @@ class EGraphToRVSDG:
             nodes = self.gdct["nodes"]
             node = nodes[key]
             eclass = node["eclass"]
-            node_type = self.gdct["class_data"][eclass]["type"]
+            node_type = self._parse_type(
+                self.gdct["class_data"][eclass]["type"]
+            )
             raise NotImplementedError(f"{node_type}: {key} - {op}, {children}")
 
     def handle_generic(
@@ -554,3 +584,6 @@ class EGraphToRVSDG:
             else:
                 values.append(v)
         return grm.write(rg.Generic(name=str(op), children=tuple(values)))
+
+    def _parse_type(self, typename: str):
+        return parse_type(typename)
