@@ -27,7 +27,7 @@ jobs:
         with:
           auto-activate-base: false
           activate-environment: sealir_tester_py312
-          environment-file: conda_environment.yml
+          environment-file: conda-lock.dev.yml
 
       - name: Run tests
         run: |

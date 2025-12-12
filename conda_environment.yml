@@ -1,14 +1,18 @@
-name: sealir_tester_py312
 channels:
   - main
 dependencies:
   - python=3.12
-  - llvmlite=0.44.*
-  - mlir=17.0.*
+  - numba::llvmlite=0.46.*
+  - sklam::mlir-python-bindings=21.*
   - pytest
   - networkx
   - numpy
+  # egglog doesn't install this
+  - cloudpickle 
   - pip
   - pip:
-    - egglog ==10
+    - egglog ==12
     - numba_rvsdg
+platforms:
+  - osx-arm64
+  - linux-64
