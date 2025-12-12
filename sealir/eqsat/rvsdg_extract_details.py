@@ -157,7 +157,13 @@ class EGraphToRVSDG:
             children = get_children()
 
             if node_type.prefix != _rvsdg_ns.__name__:
-                raise AssertionError("rvsdg namespace mismatch")
+                handler = getattr(self, f"handle_{node_type.name}", None)
+                if handler is not None:
+                    res = handler(key, op, children, grm)
+                    if res is not NotImplemented:
+                        return res
+
+                return self.handle_unknown(key, op, children, grm)
 
             match node_type.name, children:
                 case "Region", {"inports": ins}:
