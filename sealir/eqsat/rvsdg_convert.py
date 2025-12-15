@@ -133,6 +133,8 @@ def egraph_conversion(root: SExpr):
                 match op:
                     case "not":
                         res = py_eqsat.Py_NotIO(ioterm, operandterm)
+                    case "-":
+                        res = py_eqsat.Py_NegIO(ioterm, operandterm)
                     case _:
                         raise NotImplementedError(f"unsupported op: {op!r}")
 
@@ -160,6 +162,9 @@ def egraph_conversion(root: SExpr):
 
                     case "/":
                         res = py_eqsat.Py_DivIO(ioterm, lhsterm, rhsterm)
+
+                    case "//":
+                        res = py_eqsat.Py_FloorDivIO(ioterm, lhsterm, rhsterm)
 
                     case "@":
                         res = py_eqsat.Py_MatMultIO(ioterm, lhsterm, rhsterm)
@@ -237,6 +242,30 @@ def egraph_conversion(root: SExpr):
                 return WrapTerm(
                     py_eqsat.Py_SubscriptIO(ioterm, valterm, idxterm)
                 )
+
+            case rg.PySetItem(io=io, obj=obj, value=value, index=index):
+                ioterm = yield io
+                objterm = yield obj
+                valterm = yield value
+                idxterm = yield index
+                return WrapTerm(
+                    py_eqsat.Py_SetitemIO(ioterm, objterm, idxterm, valterm)
+                )
+
+            case rg.PySlice(io=io, lower=lower, upper=upper, step=step):
+                ioterm = yield io
+                lowerterm = yield lower
+                upperterm = yield upper
+                stepterm = yield step
+                return WrapTerm(
+                    py_eqsat.Py_SliceIO(ioterm, lowerterm, upperterm, stepterm)
+                )
+
+            case rg.PyTuple(elems):
+                elemvals = []
+                for el in elems:
+                    elemvals.append((yield el))
+                return py_eqsat.Py_Tuple(eg.termlist(*elemvals))
 
             case rg.PyInt(int(intval)):
                 assert intval.bit_length() < 64

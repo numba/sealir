@@ -434,11 +434,11 @@ def unpack_pystr(sexpr: SExpr) -> str | None:
 
 
 def unpack_pyast_name(sexpr: SExpr) -> str:
-    assert sexpr._head == "PyAst_Name"
+    assert sexpr._head == "PyAst_Name", sexpr
     return cast(str, sexpr._args[0])
 
 
-def is_directive(text: str) -> str:
+def is_directive(text: str) -> bool:
     return text.startswith("#file:") or text.startswith("#loc:")
 
 
@@ -647,6 +647,15 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             res = yield rval
             tar: SExpr
 
+            if len(targets) == 1 and targets[0]._head == "PyAst_Subscript":
+                [lhs, indices, loc] = targets[0]._args
+                lhs = yield lhs
+                indices = yield indices
+                rval = yield rval
+                setitem = rg.PySetItem(
+                    io=ctx.load_io(), obj=lhs, index=indices, value=rval
+                )
+                return ctx.insert_io_node(setitem)
             if (
                 len(targets) == 1
                 and unpack_pyast_name(targets[0]) == internal_prefix("_")
@@ -773,6 +782,19 @@ def rvsdgization(expr: ase.BasicSExpr, state: RvsdgizeState):
             index = yield indexexpr
             return ctx.insert_io_node(
                 rg.PySubscript(io=ctx.load_io(), value=value, index=index)
+            )
+
+        case ("PyAst_Slice", (lower, upper, step, interloc)):
+            lower_val = yield lower
+            upper_val = yield upper
+            step_val = yield step
+            return ctx.insert_io_node(
+                rg.PySlice(
+                    io=ctx.load_io(),
+                    lower=lower_val,
+                    upper=upper_val,
+                    step=step_val,
+                )
             )
 
         case ("PyAst_Pass", (interloc,)):
@@ -1041,6 +1063,7 @@ def format_rvsdg(prgm: SExpr, *, format_attrs=ase.pretty_str) -> str:
                 for arg in expr._args:
                     if isinstance(arg, SExpr):
                         text = yield arg
+                        assert text is not None, arg
                     else:
                         text = repr(arg)
                     argrefs.append(text)

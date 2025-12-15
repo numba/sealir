@@ -11,6 +11,20 @@ class _Root(grammar.Rule):
     pass
 
 
+class Rootset(_Root):
+    roots: tuple[SExpr, ...]
+
+
+class Generic(_Root):
+    name: str
+    children: tuple[SExpr, ...]
+
+
+class GenericList(_Root):
+    name: str
+    children: tuple[SExpr, ...]
+
+
 class Loc(_Root):
     filename: str
     line_first: int
@@ -157,6 +171,20 @@ class PySubscript(_Root):
     io: SExpr
     value: SExpr
     index: SExpr
+
+
+class PySetItem(_Root):
+    io: SExpr
+    obj: SExpr
+    index: SExpr
+    value: SExpr
+
+
+class PySlice(_Root):
+    io: SExpr
+    lower: SExpr
+    upper: SExpr
+    step: SExpr
 
 
 class PyUnaryOp(_Root):

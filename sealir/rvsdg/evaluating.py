@@ -7,7 +7,7 @@ from collections import ChainMap
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pprint import pprint
-from typing import Any, Sequence, Type, TypeAlias
+from typing import Any, Mapping, Sequence, Type, TypeAlias
 
 from sealir import ase, rvsdg
 from sealir.rvsdg import grammar as rg
@@ -57,10 +57,10 @@ def evaluate(
     callargs: tuple,
     callkwargs: dict,
     *,
-    init_scope: dict | None = None,
+    init_scope: Mapping | None = None,
     init_state: ase.TraverseState | None = None,
     init_memo: dict | None = None,
-    global_ns: dict | None = None,
+    global_ns: Mapping | None = None,
     dbginfo: rvsdg.SourceDebugInfo,
 ):
     stack: list[dict[str, Any]] = [{}]
@@ -81,7 +81,7 @@ def evaluate(
         finally:
             stack.pop()
 
-    def scope() -> dict[str, Any]:
+    def scope() -> Mapping[str, Any]:
         return stack[-1]
 
     def get_region_args() -> list[Any]:

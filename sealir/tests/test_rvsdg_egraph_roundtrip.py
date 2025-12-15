@@ -3,7 +3,11 @@ from egglog import EGraph
 from sealir import rvsdg
 from sealir.eqsat.rvsdg_convert import egraph_conversion
 from sealir.eqsat.rvsdg_eqsat import GraphRoot
-from sealir.eqsat.rvsdg_extract import egraph_extraction
+from sealir.eqsat.rvsdg_extract import (
+    EGraphToRVSDG,
+    egraph_extraction,
+    get_graph_root,
+)
 from sealir.llvm_pyapi_backend import llvm_codegen
 
 
@@ -16,7 +20,7 @@ def frontend(fn):
     return rvsdg_expr, dbginfo
 
 
-def middle_end(rvsdg_expr, apply_to_egraph, cost_model=None):
+def middle_end(rvsdg_expr, apply_to_egraph, cost_model=None, stats=None):
     """The middle end encode the RVSDG into a EGraph to apply rewrite rules.
     After that, it is extracted back into RVSDG.
     """
@@ -29,10 +33,10 @@ def middle_end(rvsdg_expr, apply_to_egraph, cost_model=None):
     apply_to_egraph(egraph, func)
 
     # Extraction
-    cost, extracted = egraph_extraction(
-        egraph, rvsdg_expr, cost_model=cost_model
-    )
-    return cost, extracted
+    extraction = egraph_extraction(egraph, cost_model=cost_model, stats=stats)
+    result = extraction.extract_graph_root()
+    expr = result.convert(rvsdg_expr, EGraphToRVSDG)
+    return result.cost, expr
 
 
 def compiler_pipeline(fn, args, *, verbose=False):
@@ -50,10 +54,13 @@ def compiler_pipeline(fn, args, *, verbose=False):
 
         return root
 
-    cost, extracted = middle_end(rvsdg_expr, display_egraph)
+    stats = {}
+    cost, extracted = middle_end(rvsdg_expr, display_egraph, stats=stats)
+
     print("Extracted from EGraph".center(80, "="))
     print("cost =", cost)
     print(rvsdg.format_rvsdg(extracted))
+    print("stats:", stats)
 
     jt = llvm_codegen(rvsdg_expr)
     res = jt(*args)

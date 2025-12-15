@@ -1,5 +1,3 @@
-import json
-
 from egglog import (
     EGraph,
     Expr,
@@ -12,12 +10,7 @@ from egglog import (
 )
 
 from sealir.eqsat.rvsdg_eqsat import GraphRoot
-from sealir.eqsat.rvsdg_extract import (
-    CostModel,
-    EGraphJsonDict,
-    Extraction,
-    get_graph_root,
-)
+from sealir.eqsat.rvsdg_extract import CostModel, egraph_extraction
 
 
 class Term(Expr):
@@ -66,22 +59,6 @@ def simplify_pow(x: Term, i: i64):
     yield rewrite(Pow(x, 1)).to(x)
 
 
-def _extraction(egraph, cost_model=None):
-    # TODO move this into rvsdg_extract
-    gdct: EGraphJsonDict = json.loads(
-        egraph._serialize(
-            n_inline_leaves=0, split_primitive_outputs=False
-        ).to_json()
-    )
-    [root] = get_graph_root(gdct)
-    root_eclass = gdct["nodes"][root]["eclass"]
-
-    cost_model = cost_model or CostModel()
-    _extraction = Extraction(gdct, root_eclass, cost_model)
-    cost, exgraph = _extraction.choose()
-    return cost, exgraph
-
-
 def _flatten_multidigraph(graph):
     def format_node(node):
         # Get all successors (children) of the node
@@ -90,9 +67,17 @@ def _flatten_multidigraph(graph):
             return node
         return tuple([node, *(format_node(child) for child in children)])
 
-    # Get all nodes with no incoming edges (roots)
-    roots = [n for n in graph.nodes if graph.in_degree(n) == 0]
-    return [format_node(root) for root in roots]
+    roots = [k for k in graph.nodes if k.endswith("GraphRoot")]
+    return [format_node(x) for x in roots]
+
+
+def _extraction(egraph):
+    extraction = egraph_extraction(egraph, cost_model=MyCostModel())
+    # Use the new explicit method for extracting with auto-detected root
+    result = extraction.extract_graph_root()
+    exgraph = result.graph
+    [extracted] = _flatten_multidigraph(exgraph)
+    return result.cost, extracted
 
 
 def test_cost_duplicated_term():
@@ -102,8 +87,7 @@ def test_cost_duplicated_term():
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
 
-    cost, exgraph = _extraction(egraph, cost_model=MyCostModel())
-    [extracted] = _flatten_multidigraph(exgraph)
+    cost, extracted = _extraction(egraph)
     print("extracted:", extracted)
     # t1 = function-0-Term___init__(primitive-String-2684354568)
     #  1 ------------^
@@ -142,12 +126,18 @@ def test_simplify_pow_2():
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
 
-    cost, exgraph = _extraction(egraph, cost_model=MyCostModel())
-    assert cost == 14
+    extraction = egraph_extraction(egraph, cost_model=MyCostModel())
+    # Use the new explicit method for extracting from default root
+    result = extraction.extract_graph_root()
+    assert result.cost == 14
 
     egraph.run(simplify_pow.saturate())
-    cost, exgraph = _extraction(egraph, cost_model=MyCostModel())
-    [extracted] = _flatten_multidigraph(exgraph)
+
+    extraction = egraph_extraction(egraph, cost_model=MyCostModel())
+    result = extraction.extract_graph_root()
+    cost = result.cost
+
+    [extracted] = _flatten_multidigraph(result.graph)
 
     print("extracted:", extracted)
     # t1 = function-1-Term___init__(primitive-String-2684354568)
@@ -176,11 +166,16 @@ def test_simplify_pow_3():
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
 
-    cost, exgraph = _extraction(egraph, cost_model=MyCostModel())
-    assert cost == 14
+    extraction = egraph_extraction(egraph, cost_model=MyCostModel())
+    result = extraction.extract_graph_root()
+    exgraph = result.graph
+    assert result.cost == 14
 
     egraph.run(simplify_pow.saturate())
-    cost, exgraph = _extraction(egraph, cost_model=MyCostModel())
+    extraction = egraph_extraction(egraph, cost_model=MyCostModel())
+    result = extraction.extract_graph_root()
+    exgraph = result.graph
+    cost = result.cost
     [extracted] = _flatten_multidigraph(exgraph)
 
     print("extracted:", extracted)
@@ -225,8 +220,7 @@ def test_loop_multiplier():
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
     egraph.run(simplify_pow.saturate())
-    cost, exgraph = _extraction(egraph, cost_model=MyCostModel())
-    [extracted] = _flatten_multidigraph(exgraph)
+    cost, extracted = _extraction(egraph)
     print("extracted", extracted)
     # Pow(A, 3) = 4 (see test_simplify_pow_3)
     # Loop(A, 3) = (4 * 23 + 13) + 4
@@ -254,8 +248,7 @@ def test_const_factor():
     expr = Repeat(A, 13)
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
-    cost, exgraph = _extraction(egraph, cost_model=MyCostModel())
-    [extracted] = _flatten_multidigraph(exgraph)
+    cost, extracted = _extraction(egraph)
     dagcost = 2 + 1 + 1
     #         ^ Term("A")
     #             ^ literal 13

@@ -159,7 +159,12 @@ class Tape:
 
     @graphviz_function
     def render_dot(
-        self, *, gv, show_metadata: bool = False, only_reachable: bool = False
+        self,
+        *,
+        gv,
+        show_metadata: bool = False,
+        only_reachable: bool = False,
+        source_node: SExpr | None = None,
     ):
         def make_label(i, x):
             if isinstance(x, SExpr):
@@ -172,7 +177,10 @@ class Tape:
         crawler = TapeCrawler(self, self._downcast)
 
         # Records that are children of the last node
-        crawler.seek(self.last())
+        if source_node is None:
+            crawler.seek(self.last())
+        else:
+            crawler.seek(source_node._handle)
 
         # Seek to the first non-metadata in the back
         while crawler.pos > 0:
@@ -232,8 +240,7 @@ class Tape:
             if not head.startswith(metadata_prefix):
                 lastname = nodename
         # emit start
-        if lastname:
-            edges.append((("start", lastname), {}))
+        edges.append((("start", f"node{source_node._handle}"), {}))
         # emit edges
         for args, kwargs in edges:
             g.edge(*args, **kwargs)
@@ -814,7 +821,8 @@ def copy_tree_into(self: SExpr, tape: Tape) -> SExpr:
     Returns a fresh Expr in the new tape.
     """
     oldtree = self._tape
-    crawler = TapeCrawler(oldtree, self._get_downcast())
+    downcast = self._get_downcast()
+    crawler = TapeCrawler(oldtree, downcast)
     crawler.seek(self._handle)
     liveset = set(_select(crawler.walk_descendants(), 1))
     surviving = sorted(liveset)
@@ -836,7 +844,8 @@ def copy_tree_into(self: SExpr, tape: Tape) -> SExpr:
 
     out = tape.read_value(mapping[self._handle])
     assert isinstance(out, SExpr)
-    return out
+
+    return downcast(out)
 
 
 class BasicSExpr(SExpr):

@@ -35,6 +35,8 @@ MAXCOST = sys.maxsize
 
 class DynInt(Expr):
     def __init__(self, num: i64Like): ...
+    def get(self) -> i64: ...
+    def __mul__(self, other: DynInt) -> DynInt: ...
 
 
 converter(i64, DynInt, DynInt)
@@ -132,6 +134,15 @@ class TermList(Expr):
 class TermDict(Expr):
     def __init__(self, term_map: Map[String, Term]): ...
 
+    def lookup(self, key: StringLike) -> Unit:
+        """Trigger rule to lookup a value in the dict.
+
+        This is needed for .get() to match
+        """
+        ...
+
+    def get(self, key: StringLike) -> Term: ...
+
 
 @function(cost=MAXCOST)  # max cost to make it unextractable
 def _dyn_index_partial(terms: Vec[Term], target: Term) -> DynInt: ...
@@ -153,7 +164,7 @@ class PortList(Expr):
 
 
 def termlist(*args: Term) -> TermList:
-    return TermList(Vec(*args))
+    return TermList(Vec[Term](*args))
 
 
 def termdict(**kwargs: Term) -> TermDict:
@@ -426,6 +437,20 @@ def ruleset_func_outputs(
     ).then(delete(x))
 
 
+@ruleset
+def ruleset_termdict(mapping: Map[String, Term], key: String):
+    yield rule(
+        TermDict(mapping).lookup(key),
+        mapping.contains(key),
+    ).then(set_(TermDict(mapping).get(key)).to(mapping[key]))
+
+
+@ruleset
+def ruleset_dynint(n: i64, m: i64):
+    yield rule(DynInt(n)).then(set_(DynInt(n).get()).to(n))
+    yield rewrite(DynInt(n) * DynInt(m)).to(DynInt(n * m))
+
+
 ruleset_rvsdg_basic = (
     ruleset_simplify_dbgvalue
     | ruleset_portlist_basic
@@ -437,6 +462,8 @@ ruleset_rvsdg_basic = (
     | ruleset_region_dyn_get
     | ruleset_region_propgate_output
     | ruleset_func_outputs
+    | ruleset_termdict
+    | ruleset_dynint
 )
 
 

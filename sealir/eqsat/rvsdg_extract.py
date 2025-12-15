@@ -7,10 +7,20 @@ from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from itertools import starmap
 from pprint import pformat
-from typing import Any, Callable, NamedTuple, Sequence
+from typing import (
+    Any,
+    Callable,
+    Iterator,
+    MutableMapping,
+    NamedTuple,
+    Self,
+    Sequence,
+)
 
 import networkx as nx
 from egglog import EGraph
+
+from sealir.ase import SExpr
 
 from .egraph_utils import EGraphJsonDict
 from .rvsdg_extract_details import EGraphToRVSDG
@@ -80,51 +90,61 @@ class CostModel:
         return None
 
 
+@dataclass(frozen=True)
+class ExtractionResult:
+    extraction: Extraction
+    root: str
+    cost: float
+    graph: nx.MultiDiGraph
+
+    def convert(
+        self,
+        original_sexpr: SExpr,
+        converter_class,
+        memo: MutableMapping | None = None,
+    ) -> SExpr:
+        """Extract back to SExpr format using any converter class."""
+        expr = _convert_graph_to_sexpr(
+            self,
+            original_sexpr,
+            converter_class=converter_class,
+            memo=memo,
+        )
+        return expr
+
+
 def egraph_extraction(
     egraph: EGraph,
-    rvsdg_sexpr,
+    cost_model: CostModel | None = None,
     *,
-    cost_model=None,
-    converter_class=EGraphToRVSDG,
-):
-    gdct: EGraphJsonDict = json.loads(
-        egraph._serialize(
-            n_inline_leaves=0, split_primitive_outputs=False
-        ).to_json()
-    )
-    [root] = get_graph_root(gdct)
-    root_eclass = gdct["nodes"][root]["eclass"]
+    stats: dict[str, object] | None = None,
+) -> Extraction:
+    """Extract from an egraph and return an Extraction object.
 
-    cost_model = CostModel() if cost_model is None else cost_model
-    extraction = Extraction(gdct, root_eclass, cost_model)
-    cost, exgraph = extraction.choose()
-
-    expr = convert_to_rvsdg(
-        exgraph,
-        gdct,
-        rvsdg_sexpr,
-        root,
-        egraph,
-        converter_class=converter_class,
-    )
-    return cost, expr
+    The returned Extraction can be used to:
+    - .compute() to compute costs and return ExtractionResult
+    - .extract_graph_root() to extract using auto-detected GraphRoot
+    - .extract_enode(root) to extract from a specific enode
+    - .extract_eclass(eclass) to extract from an equivalence class
+    """
+    return Extraction.from_egraph(egraph, cost_model, stats=stats)
 
 
-def convert_to_rvsdg(
-    exgraph: nx.MultiDiGraph,
-    gdct: EGraphJsonDict,
-    rvsdg_sexpr,
-    root: str,
-    egraph: EGraph,
+def _convert_graph_to_sexpr(
+    result: ExtractionResult,
+    original_sexpr,
     *,
     converter_class,
-):
+    memo,
+) -> SExpr:
     # Get declarations so we have named fields
-    state = egraph._state
+    state = result.extraction.egraph._state
     decls = state.__egg_decls__
 
     # Do the conversion back into RVSDG
-    node_iterator = list(nx.dfs_postorder_nodes(exgraph, source=root))
+    node_iterator = list(
+        nx.dfs_postorder_nodes(result.graph, source=result.root)
+    )
 
     def egg_fn_to_arg_names(egg_fn: str) -> tuple[str, ...]:
         for ref in state.egg_fn_to_callable_refs[egg_fn]:
@@ -138,25 +158,33 @@ def convert_to_rvsdg(
             # Get children nodes in order
             children = [
                 (data["label"], child)
-                for _, child, data in exgraph.out_edges(node, data=True)
+                for _, child, data in result.graph.out_edges(node, data=True)
             ]
             if children:
                 children.sort()
                 _, children = zip(*children)
             # extract argument names
-            kind, _, egg_fn = node.split("-")
-            match kind:
-                case "primitive":
-                    pass
-                case "function":
-                    # TODO: put this into the converter_class
-                    arg_names = egg_fn_to_arg_names(egg_fn)
-                    children = dict(zip(arg_names, children, strict=True))
-                case _:
-                    raise NotImplementedError(f"kind is {kind!r}")
-            yield node, children
+            if node == "common_root":
+                yield node, children
+            else:
+                kind, _, egg_fn = node.split("-")
+                match kind:
+                    case "primitive":
+                        pass
+                    case "function":
+                        # TODO: put this into the converter_class
+                        arg_names = egg_fn_to_arg_names(egg_fn)
+                        children = dict(zip(arg_names, children, strict=True))
+                    case _:
+                        raise NotImplementedError(f"kind is {kind!r}")
+                yield node, children
 
-    conversion = converter_class(gdct, rvsdg_sexpr, egg_fn_to_arg_names)
+    conversion = converter_class(
+        result.extraction.graph_json,
+        original_sexpr,
+        egg_fn_to_arg_names,
+        memo=memo,
+    )
     return conversion.run(iterator(node_iterator))
 
 
@@ -184,15 +212,26 @@ def render_extraction_graph(G: nx.MultiDiGraph, filename: str):
 
 
 class Extraction:
+    graph_json: EGraphJsonDict
     nodes: dict[str, Node]
     node_types: dict[str, str]
     root_eclass: str
     cost_model: CostModel
+    egraph: EGraph
+    _selections: dict[str, Bucket] | None
+    _computed: bool
 
     _DEBUG = False
 
-    def __init__(self, graph_json: EGraphJsonDict, root_eclass, cost_model):
-        self.root_eclass = root_eclass
+    def __init__(
+        self,
+        graph_json: EGraphJsonDict,
+        cost_model,
+        egraph: EGraph,
+        stats: dict[str, Any] | None = None,
+    ):
+        self.graph_json = graph_json
+        self.root_eclass = "common_root"
         self.class_data = defaultdict(set)
         self.nodes = {k: Node(**v) for k, v in graph_json["nodes"].items()}
         self.node_types = {
@@ -202,25 +241,93 @@ class Extraction:
         for k, node in self.nodes.items():
             self.class_data[node.eclass].add(k)
         self.cost_model = cost_model
+        self.egraph = egraph
+        self._selections = None
+        self._computed = False
+        self.stats = stats or {}
+
+    @classmethod
+    def from_egraph(
+        cls,
+        egraph: EGraph,
+        cost_model: CostModel | None = None,
+        *,
+        stats: dict[str, object] | None = None,
+    ) -> "Extraction":
+        """Create an Extraction object from an egraph.
+
+        This replaces the standalone egraph_extraction function.
+        """
+        gdct: EGraphJsonDict = json.loads(
+            egraph._serialize(
+                n_inline_leaves=0, split_primitive_outputs=False
+            ).to_json()
+        )
+        if stats is not None:
+            stats["num_enodes"] = len(gdct["nodes"])
+            stats["num_eclasses"] = len(gdct["class_data"])
+
+        cost_model = CostModel() if cost_model is None else cost_model
+        return cls(gdct, cost_model, egraph, stats)
+
+    def _create_common_root(
+        self, G: nx.DiGraph, eclassmap: dict[str, set[str]]
+    ) -> str:
+        """Create a common root node and add it to the graph.
+
+        Args:
+            G: The eclass dependency graph
+            eclassmap: Mapping from eclass names to sets of node names
+
+        Returns:
+            The name of the common root node
+        """
+        # Get all nodes with in-degree of 0
+        common_root = "common_root"
+
+        # Do the conversion back into RVSDG
+        root_eclasses = [
+            node
+            for node, in_degree in G.in_degree()
+            if in_degree == 0
+            and self.graph_json["class_data"][node]["type"] != "Unit"
+        ]
+        G.add_node(common_root, shape="rect")
+        for n in root_eclasses:
+            G.add_edge(common_root, n)
+
+        self.nodes[common_root] = Node(
+            children=[next(iter(eclassmap[ec])) for ec in root_eclasses],
+            cost=0.0,
+            eclass="common_root",
+            op="common_root",
+            subsumed=False,
+        )
+
+        return common_root
 
     def _compute_cost(
         self,
         max_iter=1000,
         max_no_progress=100,
         epsilon=1e-6,
-    ) -> dict[str, Bucket]:
+    ) -> tuple[dict[str, Bucket], int]:
         """
         Uses dynamic programming with iterative cost propagation
 
         Args:
-            max_iter (int, optional): Maximum number of iterations to compute
-            costs. Defaults to 10000. max_no_progress (int, optional): Maximum
-            iterations without cost improvement. Defaults to 500.
+            max_iter (int, optional):
+                Maximum number of iterations to compute costs.
+                Defaults to 10000.
+            max_no_progress (int, optional):
+                Maximum iterations without cost improvement.
+                Defaults to 500.
 
         Returns:
-            dict[str, Bucket]: A mapping of equivalence classes to their lowest
-            cost representations.
-
+            tuple[dict[str, Bucket], int]: A tuple containing:
+                - A mapping of equivalence classes to their lowest cost
+                  representations
+                - The number of rounds (iterations) that were performed
 
         Performance notes
 
@@ -258,6 +365,9 @@ class Extraction:
                     for child in enode.children:
                         G.add_edge(k, nodes[child].eclass)
 
+        # Create common root node
+        common_root = self._create_common_root(G, eclassmap)
+
         # Get per-node cost function
         cm = self.cost_model
         nodecostmap: dict[str, CostFunc] = {}
@@ -265,13 +375,16 @@ class Extraction:
             if k not in eclassmap:
                 node = nodes[k]
                 children_eclasses = [nodes[c].eclass for c in node.children]
-                nodecostmap[k] = cm.get_cost_function(
-                    nodename=k,
-                    op=node.op,
-                    ty=self.node_types[k],
-                    cost=node.cost,
-                    children=children_eclasses,
-                )
+                if k == "common_root":
+                    nodecostmap[k] = cm.get_simple(1)
+                else:
+                    nodecostmap[k] = cm.get_cost_function(
+                        nodename=k,
+                        op=node.op,
+                        ty=self.node_types[k],
+                        cost=node.cost,
+                        children=children_eclasses,
+                    )
         if self._DEBUG:
             render_extraction_graph(G, "eclass")
 
@@ -289,7 +402,7 @@ class Extraction:
 
         # Use BFS layers to estimate topological sort
         topo_ordered = []
-        for layer in nx.bfs_layers(G, self.root_eclass):
+        for layer in nx.bfs_layers(G, [common_root]):
             topo_ordered += layer
 
         def propagate_cost(state_tracker):
@@ -304,7 +417,6 @@ class Extraction:
             for k in reversed(topo_ordered):
                 if k not in eclassmap:
                     node = nodes[k]
-
                     cost_dag = dagcost.compute_cost(k)
                     cost = sum(cost_dag.values())
                     selections[node.eclass].put(cost, k)
@@ -325,7 +437,10 @@ class Extraction:
                 costchanged.update(state_tracker)
                 if costchanged.converged():
                     # root score is computed?
-                    if math.isfinite(state_tracker.current[self.root_eclass]):
+                    if all(
+                        math.isfinite(state_tracker.current[root])
+                        for root in [common_root]
+                    ):
                         break
 
                     # root score is missing?
@@ -338,24 +453,62 @@ class Extraction:
                 else:
                     last_changed_i = round_i
 
-        return selections
+        return dict(**selections), round_i
 
-    def choose(self) -> tuple[float, nx.MultiDiGraph]:
-        selections = self._compute_cost()
+    def compute(self) -> Self:
+        """Compute extraction costs (idempotent)."""
+        if not self._computed:
+            self._selections, round_i = self._compute_cost()
+            self.stats["extraction_iteration_count"] = round_i
+            self._computed = True
 
+        return self
+
+    def iter_graph_root(self) -> Iterator[str]:
+        return iter(self.nodes["common_root"].children)
+
+    def extract_enode(self, root: str) -> ExtractionResult:
+        """Extract starting from an enode (specific node)."""
+
+        root_eclass = self.nodes[root].eclass
+        return self._do_extract(root_eclass)
+
+    def extract_eclass(self, root_eclass: str) -> ExtractionResult:
+        """Extract starting from an equivalence class."""
+
+        return self._do_extract(root_eclass)
+
+    def extract_graph_root(self) -> ExtractionResult:
+        """Extract using the automatically detected GraphRoot."""
+
+        [root] = get_graph_root(self.graph_json)
+        root_eclass = self.nodes[root].eclass
+        return self._do_extract(root_eclass)
+
+    def extract_common_root(self) -> ExtractionResult:
+        return self._do_extract("common_root")
+
+    def _do_extract(self, root_eclass: str) -> ExtractionResult:
+        """Internal method to perform the actual extraction."""
+        if not self._computed:
+            self.compute()
+
+        selections = self._selections
+        assert selections is not None
         nodes = self.nodes
-        chosen_root, rootcost = selections[self.root_eclass].best()
+        chosen_root, rootcost = selections[root_eclass].best()
 
         # make selected graph
         G = nx.MultiDiGraph()
         todolist = [chosen_root]
+
         visited = set()
         while todolist:
             cur = todolist.pop()
             if cur in visited:
                 continue
             visited.add(cur)
-
+            G.add_node(cur)
             for i, u in enumerate(nodes[cur].children):
                 child_eclass = nodes[u].eclass
                 child_key, cost = selections[child_eclass].best()
@@ -364,7 +517,9 @@ class Extraction:
 
         if self._DEBUG:
             render_extraction_graph(G, "chosen")
-        return rootcost, G
+
+        # Create a new ExtractionResult that holds the extracted data
+        return ExtractionResult(self, chosen_root, rootcost, G)
 
 
 @dataclass
@@ -413,6 +568,8 @@ class SubgraphCost:
     "Stores computed node costs for reuse."
     _stats: _SubgraphCostStats = field(default_factory=_SubgraphCostStats)
     "Tracks cache hits and misses."
+    _visited_dag_eclass: list[str] = field(default_factory=list)
+    "Tracks Children DAG path to avoid recursion"
 
     def compute_cost(self, nodename: str) -> dict[str, float]:
         if (cc := self._cache.get(nodename)) is None:
@@ -463,14 +620,21 @@ class SubgraphCost:
         return costs
 
     def _compute_choice(self, eclass: str) -> dict[str, float]:
-        selections = self.selections
-
-        choices = selections[eclass]
-        if not choices:
+        if eclass in self._visited_dag_eclass:
+            # Avoid recursion
             return {eclass: MAX_COST}
-        best = choices.best()
+        self._visited_dag_eclass.append(eclass)
+        try:
+            selections = self.selections
 
-        return self.compute_cost(best.name)
+            choices = selections[eclass]
+            if not choices:
+                return {eclass: MAX_COST}
+            best = choices.best()
+
+            return self.compute_cost(best.name)
+        finally:
+            self._visited_dag_eclass.pop()
 
 
 class ExtractionError(Exception):

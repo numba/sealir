@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, MutableMapping
 
 from sealir import ase
 from sealir.rvsdg import Grammar
@@ -14,16 +14,49 @@ from .egraph_utils import EGraphJsonDict, NodeDict
 class Data: ...
 
 
+_memo_elem_type = ase.value_type | tuple
+
+
+class _TypeCheckedDict(MutableMapping):
+    def __init__(self):
+        self._data = {}
+
+    def __getitem__(self, key):
+        return self._data[key]
+
+    def __setitem__(self, key, value):
+        self._check_setitem(key, value)
+        self._data[key] = value
+
+    def __delitem__(self, key):
+        del self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self):
+        return len(self._data)
+
+    def _check_setitem(self, key, value):
+        if not isinstance(value, _memo_elem_type):
+            raise TypeError(f"{type(value)} :: {value}")
+
+
 class EGraphToRVSDG:
     allow_dynamic_op = False
+    unknown_use_generic = False
     grammar = Grammar
 
     def __init__(
-        self, gdct: EGraphJsonDict, rvsdg_sexpr: ase.SExpr, egg_fn_to_arg_names
+        self,
+        gdct: EGraphJsonDict,
+        rvsdg_sexpr: ase.SExpr,
+        egg_fn_to_arg_names,
+        memo: MutableMapping | None,
     ):
         self.rvsdg_sexpr = rvsdg_sexpr
         self.gdct = gdct
-        self.memo = {}
+        self.memo = memo if memo is not None else _TypeCheckedDict()
         self.egg_fn_to_arg_names = egg_fn_to_arg_names
 
     def run(self, node_and_children):
@@ -31,12 +64,14 @@ class EGraphToRVSDG:
         with self.rvsdg_sexpr._tape as tape:
             grm = self.grammar(tape)
             for key, child_keys in node_and_children:
-                try:
-                    last = memo[key] = self.handle(key, child_keys, grm)
-                except Exception as e:
-                    e.add_note(f"Extracting: {key}, {child_keys}")
-                    raise
-
+                if key in memo:
+                    last = memo[key]
+                else:
+                    try:
+                        last = memo[key] = self.handle(key, child_keys, grm)
+                    except Exception as e:
+                        e.add_note(f"Extracting: {key}, {child_keys}")
+                        raise
         return last
 
     def lookup_sexpr(self, uid: int) -> ase.SExpr:
@@ -70,6 +105,7 @@ class EGraphToRVSDG:
     def dispatch(self, key: str, grm: Grammar):
         if key in self.memo:
             return self.memo[key]
+        assert False, "nothing should use this anymroe"
         node = self.gdct["nodes"][key]
         child_keys = node["children"]
         for k in child_keys:
@@ -88,6 +124,15 @@ class EGraphToRVSDG:
     def handle(
         self, key: str, child_keys: list[str] | dict[str, str], grm: Grammar
     ):
+        if key == "common_root":
+            # legalize child
+            values = []
+            for k in child_keys:
+                val = self.memo[k]
+                if isinstance(val, ase.SExpr):
+                    values.append(val)
+            return grm.write(rg.Rootset(tuple(values)))
+
         allow_dynamic_op = self.allow_dynamic_op
 
         nodes = self.gdct["nodes"]
@@ -104,7 +149,7 @@ class EGraphToRVSDG:
                 return [memo[v] for v in child_keys]
 
         if key.startswith("primitive-"):
-            return self.handle_primitive(node_type, node, get_children())
+            return self.handle_primitive(node_type, node, get_children(), grm)
         elif key.startswith("function-"):
             op = node["op"]
             children = get_children()
@@ -114,9 +159,6 @@ class EGraphToRVSDG:
                     attrs = self.handle_region_attributes(key, grm)
                     return grm.write(rg.RegionBegin(inports=ins, attrs=attrs))
                 case "Term", children:
-                    extended_handle = self.handle_Term(op, children, grm)
-                    if extended_handle is not NotImplemented:
-                        return extended_handle
                     match op, children:
                         case "GraphRoot", {"t": term}:
                             return term
@@ -222,9 +264,13 @@ class EGraphToRVSDG:
                                 rg.Unpack(val=regionbegin, idx=idx)
                             )
                         case _:
-                            raise NotImplementedError(
-                                f"invalid Term: {node_type}, {children}"
+                            extended_handle = self.handle_Term(
+                                op, children, grm
                             )
+                            if extended_handle is not NotImplemented:
+                                return extended_handle
+                            return self.handle_unknown(key, op, children, grm)
+
                 case "TermList", {"terms": terms}:
                     return tuple(terms)
                 case "PortList", {"ports": ports}:
@@ -256,13 +302,14 @@ class EGraphToRVSDG:
                         res = handler(key, op, children, grm)
                         if res is not NotImplemented:
                             return res
-                    raise NotImplementedError(
-                        f"function of: {op!r} :: {node_type}, {children}"
-                    )
+
+                    return self.handle_unknown(key, op, children, grm)
         else:
             raise NotImplementedError(key)
 
-    def handle_primitive(self, node_type: str, node, children: tuple):
+    def handle_primitive(
+        self, node_type: str, node, children: tuple, grm: Grammar
+    ):
         match node_type:
             case "String":
                 unquoted = node["op"][1:-1]
@@ -280,13 +327,20 @@ class EGraphToRVSDG:
             case "f64":
                 return float(node["op"])
             case "Vec_Term":
-                return children
+                return tuple(children)
             case "Vec_Port":
-                return children
+                return tuple(children)
             case "Vec_String":
-                return children
+                return tuple(children)
             case _:
-                raise NotImplementedError(f"primitive of: {node_type}")
+                if node_type.startswith("Vec_"):
+                    return grm.write(
+                        rg.GenericList(
+                            name=node_type, children=tuple(children)
+                        )
+                    )
+                else:
+                    raise NotImplementedError(node_type)
 
     def handle_Value(self, op: str, children: dict | list, grm: Grammar):
         match op, children:
@@ -453,8 +507,50 @@ class EGraphToRVSDG:
                         operands=operands,
                     )
                 )
+            case "Py_Tuple", {"elems": tuple(elems)}:
+                return grm.write(
+                    rg.PyTuple(
+                        elems=elems,
+                    )
+                )
+            case "Py_SliceIO", {
+                "io": io,
+                "lower": lower,
+                "upper": upper,
+                "step": step,
+            }:
+                return grm.write(
+                    rg.PySlice(io=io, lower=lower, upper=upper, step=step)
+                )
+            case "Py_SubscriptIO", {"io": io, "obj": obj, "index": index}:
+                return grm.write(rg.PySubscript(io=io, value=obj, index=index))
             case _:
                 return NotImplemented
 
     def handle_region_attributes(self, key: str, grm: Grammar):
         return grm.write(rg.Attrs(()))
+
+    def handle_unknown(
+        self, key: str, op: str, children: dict | list, grm: Grammar
+    ):
+        if self.unknown_use_generic:
+            return self.handle_generic(key, op, children, grm)
+        else:
+            nodes = self.gdct["nodes"]
+            node = nodes[key]
+            eclass = node["eclass"]
+            node_type = self.gdct["class_data"][eclass]["type"]
+            raise NotImplementedError(f"{node_type}: {key} - {op}, {children}")
+
+    def handle_generic(
+        self, key: str, op: str, children: dict | list, grm: Grammar
+    ):
+        assert isinstance(children, dict)
+        # flatten children.values() into SExpr
+        values = []
+        for k, v in children.items():
+            if isinstance(v, tuple):
+                values.append(grm.write(rg.GenericList(name=k, children=v)))
+            else:
+                values.append(v)
+        return grm.write(rg.Generic(name=str(op), children=tuple(values)))
