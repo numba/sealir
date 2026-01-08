@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+
 from dataclasses import dataclass
 from typing import Iterable, Iterator, MutableMapping
 
 import sealir.eqsat.rvsdg_eqsat as _rvsdg_ns
 from sealir import ase
-from sealir.matcher import Matcher
+from sealir.dispatchtable import DispatchTable
 from sealir.rvsdg import Grammar
 from sealir.rvsdg import grammar as rg
 
@@ -44,10 +45,117 @@ class _TypeCheckedDict(MutableMapping):
             raise TypeError(f"{type(value)} :: {value}")
 
 
+def _init_primitive_dispatch() -> DispatchTable:
+    dispatch = DispatchTable()
+
+    def condition(ns, tyname):
+        def f(*args, node_type: Qualname, **kwargs):
+            return node_type.prefix == ns and node_type.name == tyname
+
+        return f
+
+    egglog_ns = "egglog.builtins"
+
+    @dispatch.case(condition(egglog_ns, "String"))
+    def _(
+        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
+    ):
+        unquoted = node["op"][1:-1]
+        return unquoted
+
+    @dispatch.case(condition(egglog_ns, "bool"))
+    def _(
+        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
+    ):
+        match node["op"]:
+            case "true":
+                return True
+            case "false":
+                return False
+            case _:
+                raise AssertionError()
+
+    @dispatch.case(condition(egglog_ns, "i64"))
+    def _(
+        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
+    ):
+        return int(node["op"])
+
+    @dispatch.case(condition(egglog_ns, "f64"))
+    def _(
+        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
+    ):
+        return float(node["op"])
+
+    @dispatch.case(condition(egglog_ns, "Vec"))
+    def _(self, *args, **kwargs):
+        return self._dispatch_Vec(self, *args, **kwargs)
+
+    return dispatch
+
+
+def _init_Vec_dispatch() -> DispatchTable:
+    dispatch = DispatchTable()
+    egglog_ns = "egglog.builtins"
+    sealir_ns = "sealir.eqsat.rvsdg_eqsat"
+
+    def condition(ns, tyname):
+        def f(*args, node_type, **kwargs):
+            prefix = node_type.param.prefix
+            name = node_type.param.name
+            return prefix == ns and name == tyname
+
+        return f
+
+    @dispatch.case(condition(sealir_ns, "Term"))
+    @dispatch.case(condition(sealir_ns, "Port"))
+    @dispatch.case(condition(egglog_ns, "String"))
+    def _(
+        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
+    ):
+        return tuple(children)
+
+    @dispatch.default
+    def _(
+        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
+    ):
+        return grm.write(
+            rg.GenericList(
+                name=node_type.get_fullname(), children=tuple(children)
+            )
+        )
+
+    return dispatch
+
+
+def _init_Value_dispatch() -> DispatchTable:
+    dispatch = DispatchTable()
+
+    def condition(op_pattern):
+        def f(*args, op, **kwargs):
+            return op == op_pattern
+
+    @dispatch.case(condition("Value.ConstI64"))
+    def _(op: str, children: dict, grm: Grammar):
+        val = children["val"]
+        return grm.write(rg.PyInt(val))
+
+    @dispatch.case(condition("Value.Param"))
+    def _(op: str, children: dict, grm: Grammar):
+        key, idx = children["key"], children["idx"]
+        return grm.write(rg.ArgRef(name=key, idx=str(idx)))
+
+    return dispatch
+
+
 class EGraphToRVSDG:
     allow_dynamic_op = False
     unknown_use_generic = False
     grammar = Grammar
+
+    _dispatch_primitive = _init_primitive_dispatch()
+    _dispatch_Vec = _init_Vec_dispatch()
+    _dispatch_Value = _init_Value_dispatch()
 
     def __init__(
         self,
@@ -299,7 +407,9 @@ class EGraphToRVSDG:
                 case "DynInt", {
                     "self": termlist,
                     "target": target,
-                } if op == "·.dyn_index" and allow_dynamic_op:
+                } if (
+                    op == "·.dyn_index" and allow_dynamic_op
+                ):
                     for i, term in enumerate(termlist):
                         if ase.matches(term, target):
                             return i
@@ -321,69 +431,12 @@ class EGraphToRVSDG:
     def handle_primitive(
         self, node_type: Qualname, node, children: tuple, grm: Grammar
     ):
-        matcher = Matcher()
+        return self._dispatch_primitive(
+            self, node_type=node_type, node=node, children=children, grm=grm
+        )
 
-        Eq = matcher.Eq
-        egglog_ns = Eq("egglog.builtins")
-        sealir_ns = Eq("sealir.eqsat.rvsdg_eqsat")
-
-        @matcher.case(egglog_ns, Eq("String"))
-        def _(modname: str, ty: str):
-            unquoted = node["op"][1:-1]
-            return unquoted
-
-        @matcher.case(egglog_ns, Eq("bool"))
-        def _(modname: str, ty: str):
-            match node["op"]:
-                case "true":
-                    return True
-                case "false":
-                    return False
-                case _:
-                    raise AssertionError()
-
-        @matcher.case(egglog_ns, Eq("i64"))
-        def _(modname: str, ty: str):
-            return int(node["op"])
-
-        @matcher.case(egglog_ns, Eq("f64"))
-        def _(modname: str, ty: str):
-            return float(node["op"])
-
-        @matcher.case(egglog_ns, Eq("Vec"))
-        def _(modname: str, ty: str):
-            param_match = Matcher()
-
-            @param_match.case(sealir_ns, Eq("Term"))
-            @param_match.case(sealir_ns, Eq("Port"))
-            @param_match.case(egglog_ns, Eq("String"))
-            def _(modname: str, ty: str):
-                return tuple(children)
-
-            @param_match.default
-            def _(*args, **kwargs):
-                return grm.write(
-                    rg.GenericList(
-                        name=node_type.get_fullname(), children=tuple(children)
-                    )
-                )
-
-            return param_match(node_type.param.prefix, node_type.param.name)
-
-        return matcher(node_type.prefix, node_type.name)
-
-    def handle_Value(self, op: str, children: dict | list, grm: Grammar):
-        matcher = Matcher()
-
-        @matcher.case
-        def _(val: int, op="Value.ConstI64"):
-            return grm.write(rg.PyInt(val))
-
-        @matcher.case
-        def _(idx: int, op="Value.Param"):
-            return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
-
-        return matcher(op=op, **children)
+    def handle_Value(self, op: str, children: dict, grm: Grammar):
+        return self._dispatch_Value(op=op, children=children, grm=grm)
 
     def handle_Term(self, op: str, children: dict | list, grm: Grammar):
         return self.handle_Py_Term(op, children, grm)
