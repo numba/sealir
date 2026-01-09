@@ -6,11 +6,11 @@ from typing import Iterable, Iterator, MutableMapping
 
 import sealir.eqsat.rvsdg_eqsat as _rvsdg_ns
 from sealir import ase
-from sealir.dispatchtable import DispatchTable
+from sealir.dispatchtable import DispatchTable, dispatchtable
 from sealir.rvsdg import Grammar
 from sealir.rvsdg import grammar as rg
 
-from .egraph_utils import EGraphJsonDict, parse_type
+from .egraph_utils import EGraphJsonDict, parse_type, Qualname
 
 
 @dataclass(frozen=True)
@@ -45,25 +45,36 @@ class _TypeCheckedDict(MutableMapping):
             raise TypeError(f"{type(value)} :: {value}")
 
 
-def _init_primitive_dispatch() -> DispatchTable:
-    dispatch = DispatchTable()
+def _Primitive_condition(ns, tyname):
+    def f(*args, node_type: Qualname, **kwargs):
+        return node_type.prefix == ns and node_type.name == tyname
 
-    def condition(ns, tyname):
-        def f(*args, node_type: Qualname, **kwargs):
-            return node_type.prefix == ns and node_type.name == tyname
+    return f
 
-        return f
+
+class DispatchPrimitive:
 
     egglog_ns = "egglog.builtins"
 
-    @dispatch.case(condition(egglog_ns, "String"))
+    def __init_subclass__(cls):
+        super().__init_subclass__()
+        # Make sure each subclass has unique dispatch tables.
+        cls._dispatch_primitive = cls._dispatch_primitive.copy()
+
+    @dispatchtable
+    def _dispatch_primitive(
+        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
+    ):
+        raise NotImplementedError
+
+    @_dispatch_primitive.case(_Primitive_condition(egglog_ns, "String"))
     def _(
         self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
     ):
         unquoted = node["op"][1:-1]
         return unquoted
 
-    @dispatch.case(condition(egglog_ns, "bool"))
+    @_dispatch_primitive.case(_Primitive_condition(egglog_ns, "bool"))
     def _(
         self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
     ):
@@ -75,48 +86,38 @@ def _init_primitive_dispatch() -> DispatchTable:
             case _:
                 raise AssertionError()
 
-    @dispatch.case(condition(egglog_ns, "i64"))
+    @_dispatch_primitive.case(_Primitive_condition(egglog_ns, "i64"))
     def _(
         self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
     ):
         return int(node["op"])
 
-    @dispatch.case(condition(egglog_ns, "f64"))
+    @_dispatch_primitive.case(_Primitive_condition(egglog_ns, "f64"))
     def _(
         self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
     ):
         return float(node["op"])
 
-    @dispatch.case(condition(egglog_ns, "Vec"))
+    @_dispatch_primitive.case(_Primitive_condition(egglog_ns, "Vec"))
     def _(self, *args, **kwargs):
         return self._dispatch_Vec(self, *args, **kwargs)
 
-    return dispatch
+
+def _Vec_condition(ns, tyname):
+    def f(*args, node_type, **kwargs):
+        prefix = node_type.param.prefix
+        name = node_type.param.name
+        return prefix == ns and name == tyname
+
+    return f
 
 
-def _init_Vec_dispatch() -> DispatchTable:
-    dispatch = DispatchTable()
+class DispatchVec:
     egglog_ns = "egglog.builtins"
     sealir_ns = "sealir.eqsat.rvsdg_eqsat"
 
-    def condition(ns, tyname):
-        def f(*args, node_type, **kwargs):
-            prefix = node_type.param.prefix
-            name = node_type.param.name
-            return prefix == ns and name == tyname
-
-        return f
-
-    @dispatch.case(condition(sealir_ns, "Term"))
-    @dispatch.case(condition(sealir_ns, "Port"))
-    @dispatch.case(condition(egglog_ns, "String"))
-    def _(
-        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
-    ):
-        return tuple(children)
-
-    @dispatch.default
-    def _(
+    @dispatchtable
+    def _dispatch_Vec(
         self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
     ):
         return grm.write(
@@ -125,37 +126,371 @@ def _init_Vec_dispatch() -> DispatchTable:
             )
         )
 
-    return dispatch
+    @_dispatch_Vec.case(_Vec_condition(sealir_ns, "Term"))
+    @_dispatch_Vec.case(_Vec_condition(sealir_ns, "Port"))
+    @_dispatch_Vec.case(_Vec_condition(egglog_ns, "String"))
+    def _(
+        self, node_type: Qualname, node: dict, children: tuple, grm: Grammar
+    ):
+        return tuple(children)
 
 
-def _init_Value_dispatch() -> DispatchTable:
-    dispatch = DispatchTable()
+def condition(op_pattern):
+    def f(*args, op, **kwargs):
+        return op == op_pattern
 
-    def condition(op_pattern):
-        def f(*args, op, **kwargs):
-            return op == op_pattern
+    return f
 
-    @dispatch.case(condition("Value.ConstI64"))
+
+class DispatchValue:
+    @dispatchtable
+    def _dispatch_Value(self, op: str, children: dict, grm: Grammar):
+        raise NotImplementedError
+
+    @_dispatch_Value.case(condition("Value.ConstI64"))
     def _(op: str, children: dict, grm: Grammar):
         val = children["val"]
         return grm.write(rg.PyInt(val))
 
-    @dispatch.case(condition("Value.Param"))
+    @_dispatch_Value.case(condition("Value.Param"))
     def _(op: str, children: dict, grm: Grammar):
         key, idx = children["key"], children["idx"]
         return grm.write(rg.ArgRef(name=key, idx=str(idx)))
 
-    return dispatch
+
+def op_matches(op_pattern):
+    def condition(self, key, children, grm, op, **kwargs):
+        return op == op_pattern
+
+    return condition
 
 
-class EGraphToRVSDG:
+def emit_node(fn):
+    def wrapper(self, key: str, op: str, children: dict, grm: Grammar):
+        return grm.write(fn(self, **children))
+
+    return wrapper
+
+
+class DispatchTerm:
+    @dispatchtable
+    def _dispatch_term(self, key, children, grm, op):
+        # Fallback to existing handle_Term method for extensions
+        extended_handle = self.handle_Term(op, children, grm)
+        if extended_handle is not NotImplemented:
+            return extended_handle
+        return self.handle_unknown(key, op, children, grm)
+
+    # Term operation handlers
+    @_dispatch_term.case(op_matches("GraphRoot"))
+    def handle_term_graphroot(self, key, children, grm, op):
+        term = children["t"]
+        return term
+
+    @_dispatch_term.case(op_matches("Term.Func"))
+    @emit_node
+    def handle_term_func(self, uid, fname, body):
+        orig_func: rg.Func = self.lookup_sexpr(int(uid))
+        return rg.Func(
+            fname=fname,
+            args=orig_func.args,
+            body=body,
+        )
+
+    @_dispatch_term.case(op_matches("Term.RegionEnd"))
+    @emit_node
+    def handle_term_regionend(self, region, ports):
+        return rg.RegionEnd(
+            begin=region,
+            ports=tuple(ports),
+        )
+
+    @_dispatch_term.case(op_matches("Term.IfElse"))
+    @emit_node
+    def handle_term_ifelse(self, cond, then, orelse, operands):
+        return rg.IfElse(
+            cond=cond,
+            body=then,
+            orelse=orelse,
+            operands=operands,
+        )
+
+    @_dispatch_term.case(op_matches("Term.IO"))
+    @emit_node
+    def handle_term_io(self):
+        return rg.IO()
+
+    @_dispatch_term.case(op_matches("Term.LiteralF64"))
+    @emit_node
+    def handle_term_literal_f64(self, val):
+        return rg.PyFloat(float(val))
+
+    @_dispatch_term.case(op_matches("Term.LiteralI64"))
+    @emit_node
+    def handle_term_literal_i64(self, val):
+        return rg.PyInt(int(val))
+
+    @_dispatch_term.case(op_matches("Term.Param"))
+    @emit_node
+    def handle_term_param(self, idx):
+        return rg.ArgRef(idx=idx, name=str(idx))
+
+    @_dispatch_term.case(op_matches("·.get"))
+    @emit_node
+    def handle_term_get(self_, **children):
+        term, idx = children["self"], children["idx"]
+        return rg.Unpack(val=term, idx=idx)
+
+    @_dispatch_term.case(op_matches("·.getPort"))
+    @emit_node
+    def handle_term_getport(self_, **children):
+        term, idx = children["self"], children["idx"]
+        return rg.Unpack(val=term, idx=idx)
+
+    @_dispatch_term.case(op_matches("PartialEvaluated"))
+    def handle_term_partial_evaluated(self, key, children, grm, op):
+        value = children["value"]
+        return value
+
+    @_dispatch_term.case(op_matches("Term.Undef"))
+    @emit_node
+    def handle_term_undef(self, name):
+        return rg.Undef(name=name)
+
+    @_dispatch_term.case(op_matches("Term.LiteralBool"))
+    @emit_node
+    def handle_term_literal_bool(self, val):
+        return rg.PyBool(value=bool(val))
+
+    @_dispatch_term.case(op_matches("Term.LiteralStr"))
+    @emit_node
+    def handle_term_literal_str(self, val):
+        return rg.PyStr(value=str(val))
+
+    @_dispatch_term.case(op_matches("Term.LiteralNone"))
+    @emit_node
+    def handle_term_literal_none(self):
+        return rg.PyNone()
+
+    @_dispatch_term.case(op_matches("Term.Loop"))
+    @emit_node
+    def handle_term_loop(self, body, operands):
+        return rg.Loop(
+            body=body,
+            operands=operands,
+        )
+
+    @_dispatch_term.case(op_matches("Term.DbgValue"))
+    def handle_term_dbgvalue(self, key, children, grm, op):
+        varname = str(children["varname"])
+        value = children["value"]
+        return grm.write(
+            rg.DbgValue(
+                name=varname,
+                value=value,
+                srcloc=grm.write(rg.unknown_loc()),
+                interloc=grm.write(rg.unknown_loc()),
+            )
+        )
+
+    # Dynamic operations (require allow_dynamic_op)
+    def dyn_get_condition(self, key, children, grm, op, **kwargs):
+        return op == "·.dyn_get" and self.allow_dynamic_op
+
+    @_dispatch_term.case(dyn_get_condition)
+    def handle_term_dyn_get(self, key, children, grm, op):
+        regionbegin = children["self"]
+        idx = int(children["idx"])
+        if isinstance(regionbegin, rg.RegionBegin):
+            return grm.write(rg.Unpack(val=regionbegin, idx=idx))
+        else:
+            return NotImplemented
+
+
+def op_matches(op_pattern):
+    def condition(self, key, children, grm, op, **kwargs):
+        return op == op_pattern
+
+    return condition
+
+
+# Dynamic index operation (requires allow_dynamic_op)
+def dyn_index_condition(self, key, children, grm, op, **kwargs):
+    return op == "·.dyn_index" and self.allow_dynamic_op
+
+
+class DispatchDynIndex:
+    """Initialize dispatch table for RVSDG DynInt operations."""
+
+    def __init_subclass__(cls):
+        super().__init_subclass__()
+        # Make sure each subclass has unique dispatch tables.
+        cls._dispatch_function = cls._dispatch_function.copy()
+
+    @dispatchtable
+    def _dispatch_dynint(self, key, children, grm, op):
+        raise NotImplementedError(key, children, grm, op)
+
+    @_dispatch_dynint.case(dyn_index_condition)
+    def handle_dynint_dyn_index(self, key, children, grm, op):
+        termlist = children["self"]
+        target = children["target"]
+        for i, term in enumerate(termlist):
+            if ase.matches(term, target):
+                return i
+        raise ValueError("cannot find target")
+
+    @_dispatch_dynint.case(op_matches("DynInt"))
+    def handle_dynint(self, key, children, grm, op):
+        ival = int(children["num"])
+        return ival
+
+
+def node_type_matches(type_name):
+    def condition(self, key, children, grm, node_type, **kwargs):
+        return node_type.name == type_name
+
+    return condition
+
+
+class DispatchRVSDG:
+    """Initialize dispatch table for RVSDG namespace node types."""
+
+    def __init_subclass__(cls):
+        super().__init_subclass__()
+        # Make sure each subclass has unique dispatch tables.
+        cls._dispatch_rvsdg = cls._dispatch_rvsdg.copy()
+
+    @dispatchtable
+    def _dispatch_rvsdg(self, key, children, grm, node_type):
+        # Fallback for other RVSDG node types
+        nodes = self.gdct["nodes"]
+        node = nodes[key]
+        op = node["op"]
+
+        return self.handle_unknown(key, op, children, grm)
+
+    # Region handler
+    @_dispatch_rvsdg.case(node_type_matches("Region"))
+    def handle_region(self, key, children, grm, node_type):
+        ins = children["inports"]
+        attrs = self.handle_region_attributes(key, grm)
+        return grm.write(rg.RegionBegin(inports=ins, attrs=attrs))
+
+    # Term handler - delegate to Term dispatch table
+    @_dispatch_rvsdg.case(node_type_matches("Term"))
+    def handle_term_dispatch(self, key, children, grm, node_type):
+        nodes = self.gdct["nodes"]
+        node = nodes[key]
+        op = node["op"]
+        return self._dispatch_term(
+            self, key=key, children=children, grm=grm, op=op
+        )
+
+    # TermList handler
+    @_dispatch_rvsdg.case(node_type_matches("TermList"))
+    def handle_termlist(self, key, children, grm, node_type):
+        terms = children["terms"]
+        return tuple(terms)
+
+    # PortList handler
+    @_dispatch_rvsdg.case(node_type_matches("PortList"))
+    def handle_portlist(self, key, children, grm, node_type):
+        ports = children["ports"]
+        return tuple(ports)
+
+    # Value handler - delegate to existing Value dispatch table
+    @_dispatch_rvsdg.case(node_type_matches("Value"))
+    def handle_value_dispatch(self, key, children, grm, node_type):
+        nodes = self.gdct["nodes"]
+        node = nodes[key]
+        op = node["op"]
+        return self.handle_Value(op, children, grm)
+
+    # InPorts handler
+    @_dispatch_rvsdg.case(node_type_matches("InPorts"))
+    def handle_inports(self, key, children, grm, node_type):
+        names = children["names"]
+        return tuple(names)
+
+    # Port handler
+    @_dispatch_rvsdg.case(node_type_matches("Port"))
+    def handle_port(self, key, children, grm, node_type):
+        name = str(children["name"])
+        value = children["term"]
+        return grm.write(rg.Port(name=name, value=value))
+
+    # DynInt handler - delegate to DynInt dispatch table
+    @_dispatch_rvsdg.case(node_type_matches("DynInt"))
+    def handle_dynint_dispatch(self, key, children, grm, node_type):
+        nodes = self.gdct["nodes"]
+        node = nodes[key]
+        op = node["op"]
+        return self._dispatch_dynint(
+            self, key=key, children=children, grm=grm, op=op
+        )
+
+
+def namespace_matches(ns_name):
+    def condition(self, key, children, grm, **kwargs):
+        nodes = self.gdct["nodes"]
+        node = nodes[key]
+        eclass = node["eclass"]
+        node_type = self._parse_type(self.gdct["class_data"][eclass]["type"])
+        return node_type.prefix == ns_name
+
+    return condition
+
+
+class DispatchFunction:
+    """Dispatch table for function-level routing by namespace."""
+
+    def __init_subclass__(cls):
+        super().__init_subclass__()
+        # Make sure each subclass has unique dispatch tables.
+        cls._dispatch_function = cls._dispatch_function.copy()
+
+    @dispatchtable
+    def _dispatch_function(self, key, children, grm):
+        # Non-RVSDG namespaces - handle with existing logic
+        nodes = self.gdct["nodes"]
+        node = nodes[key]
+        op = node["op"]
+
+        return self.handle_unknown(key, op, children, grm)
+
+    # RVSDG namespace - delegate to RVSDG dispatch table
+    @_dispatch_function.case(namespace_matches(_rvsdg_ns.__name__))
+    def handle_rvsdg_namespace(self, key, children, grm):
+        nodes = self.gdct["nodes"]
+        node = nodes[key]
+        eclass = node["eclass"]
+        node_type = self._parse_type(self.gdct["class_data"][eclass]["type"])
+        return self._dispatch_rvsdg(
+            self, key=key, children=children, grm=grm, node_type=node_type
+        )
+
+
+def op_matches(op_pattern):
+    def condition(self, op, children, grm, **kwargs):
+        return op == op_pattern
+
+    return condition
+
+
+class _EGraphToRVSDG:
     allow_dynamic_op = False
     unknown_use_generic = False
     grammar = Grammar
 
-    _dispatch_primitive = _init_primitive_dispatch()
-    _dispatch_Vec = _init_Vec_dispatch()
-    _dispatch_Value = _init_Value_dispatch()
+    _dispatch_primitive: DispatchTable
+    _dispatch_Vec: DispatchTable
+    _dispatch_Value: DispatchTable
+    _dispatch_term: DispatchTable
+    _dispatch_py_term: DispatchTable
+    _dispatch_handle: DispatchTable
+    _dispatch_function: DispatchTable
+    _dispatch_rvsdg: DispatchTable
 
     def __init__(
         self,
@@ -234,199 +569,10 @@ class EGraphToRVSDG:
     def handle(
         self, key: str, child_keys: list[str] | dict[str, str], grm: Grammar
     ):
-        if key == "common_root":
-            # legalize child
-            values = []
-            for k in child_keys:
-                val = self.memo[k]
-                if isinstance(val, ase.SExpr):
-                    values.append(val)
-            return grm.write(rg.Rootset(tuple(values)))
-
-        allow_dynamic_op = self.allow_dynamic_op
-
-        nodes = self.gdct["nodes"]
-        memo = self.memo
-
-        node = nodes[key]
-        eclass = node["eclass"]
-        node_type = self._parse_type(self.gdct["class_data"][eclass]["type"])
-
-        def get_children() -> dict | list:
-            if isinstance(child_keys, dict):
-                return {k: memo[v] for k, v in child_keys.items()}
-            else:
-                return [memo[v] for v in child_keys]
-
-        if key.startswith("primitive-"):
-            return self.handle_primitive(node_type, node, get_children(), grm)
-        elif key.startswith("function-"):
-            op = node["op"]
-            children = get_children()
-
-            if node_type.prefix != _rvsdg_ns.__name__:
-                handler = getattr(self, f"handle_{node_type.name}", None)
-                if handler is not None:
-                    res = handler(key, op, children, grm)
-                    if res is not NotImplemented:
-                        return res
-
-                return self.handle_unknown(key, op, children, grm)
-
-            match node_type.name, children:
-                case "Region", {"inports": ins}:
-                    attrs = self.handle_region_attributes(key, grm)
-                    return grm.write(rg.RegionBegin(inports=ins, attrs=attrs))
-                case "Term", children:
-                    match op, children:
-                        case "GraphRoot", {"t": term}:
-                            return term
-                        case "Term.Func", {
-                            "uid": uid,
-                            "fname": fname,
-                            "body": body,
-                        }:
-                            [uid, fname, body] = (
-                                uid,
-                                fname,
-                                body,
-                            )
-                            orig_func: rg.Func = self.lookup_sexpr(int(uid))
-                            return grm.write(
-                                rg.Func(
-                                    fname=fname,
-                                    args=orig_func.args,
-                                    body=body,
-                                )
-                            )
-                        case "Term.RegionEnd", {
-                            "region": region,
-                            "ports": ports,
-                        }:
-                            return grm.write(
-                                rg.RegionEnd(
-                                    begin=region,
-                                    ports=tuple(ports),
-                                )
-                            )
-                        case "Term.IfElse", {
-                            "cond": cond,
-                            "then": then,
-                            "orelse": orelse,
-                            "operands": operands,
-                        }:
-                            [cond, then, orelse] = (
-                                cond,
-                                then,
-                                orelse,
-                            )
-                            return grm.write(
-                                rg.IfElse(
-                                    cond=cond,
-                                    body=then,
-                                    orelse=orelse,
-                                    operands=operands,
-                                )
-                            )
-                        case "Term.IO", {}:
-                            return grm.write(rg.IO())
-                        case "Term.LiteralF64", {"val": float(val)}:
-                            return grm.write(rg.PyFloat(val))
-                        case "Term.LiteralI64", {"val": int(val)}:
-                            return grm.write(rg.PyInt(val))
-                        case "Term.Param", {"idx": idx}:
-                            # TODO: get actual param name
-                            return grm.write(rg.ArgRef(idx=idx, name=str(idx)))
-
-                        case "·.get", {"self": term, "idx": idx}:
-                            return grm.write(rg.Unpack(val=term, idx=idx))
-                        case "·.getPort", {"self": term, "idx": idx}:
-                            return grm.write(rg.Unpack(val=term, idx=idx))
-                        case "PartialEvaluated", {"value": value}:
-                            return value
-                        case "Term.Undef", {"name": name}:
-                            return grm.write(rg.Undef(name=name))
-                        case "Term.LiteralBool", {"val": bool(val)}:
-                            return grm.write(rg.PyBool(value=val))
-                        case "Term.LiteralStr", {"val": str(val)}:
-                            return grm.write(rg.PyStr(value=val))
-                        case "Term.LiteralNone", {}:
-                            return grm.write(rg.PyNone())
-                        case "Term.Loop", {
-                            "body": body_regionend,
-                            "operands": operands,
-                        }:
-                            return grm.write(
-                                rg.Loop(
-                                    body=body_regionend,
-                                    operands=operands,
-                                )
-                            )
-                        case "Term.DbgValue", {
-                            "varname": str(varname),
-                            "value": value,
-                        }:
-                            # TODO: Loc
-                            return grm.write(
-                                rg.DbgValue(
-                                    name=varname,
-                                    value=value,
-                                    srcloc=grm.write(rg.unknown_loc()),
-                                    interloc=grm.write(rg.unknown_loc()),
-                                )
-                            )
-                        case "·.dyn_get", {
-                            "self": rg.RegionBegin() as regionbegin,
-                            "idx": int(idx),
-                        } if allow_dynamic_op:
-                            return grm.write(
-                                rg.Unpack(val=regionbegin, idx=idx)
-                            )
-                        case _:
-                            extended_handle = self.handle_Term(
-                                op, children, grm
-                            )
-                            if extended_handle is not NotImplemented:
-                                return extended_handle
-                            return self.handle_unknown(key, op, children, grm)
-
-                case "TermList", {"terms": terms}:
-                    return tuple(terms)
-                case "PortList", {"ports": ports}:
-                    return tuple(ports)
-
-                case "Value", children:
-                    return self.handle_Value(op, children, grm)
-
-                case "InPorts", {"names": names}:
-                    return tuple(names)
-
-                case "Port", {"name": str(name), "term": value}:
-                    return grm.write(rg.Port(name=name, value=value))
-
-                case "DynInt", {
-                    "self": termlist,
-                    "target": target,
-                } if (
-                    op == "·.dyn_index" and allow_dynamic_op
-                ):
-                    for i, term in enumerate(termlist):
-                        if ase.matches(term, target):
-                            return i
-                    raise ValueError("cannot find target")
-
-                case "DynInt", {"num": int(ival)} if op == "DynInt":
-                    return ival
-                case _:
-                    handler = getattr(self, f"handle_{node_type}", None)
-                    if handler is not None:
-                        res = handler(key, op, children, grm)
-                        if res is not NotImplemented:
-                            return res
-
-                    return self.handle_unknown(key, op, children, grm)
-        else:
-            raise NotImplementedError(key)
+        """Handle node conversion using dispatch table pattern."""
+        return self._dispatch_handle(
+            self, key=key, child_keys=child_keys, grm=grm
+        )
 
     def handle_primitive(
         self, node_type: Qualname, node, children: tuple, grm: Grammar
@@ -442,177 +588,8 @@ class EGraphToRVSDG:
         return self.handle_Py_Term(op, children, grm)
 
     def handle_Py_Term(self, op: str, children: dict | list, grm: Grammar):
-        match op, children:
-            case "Py_Add", {"a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOpPure(
-                        op="+",
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_AddIO", {"io": io, "a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOp(
-                        op="+",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_InplaceAddIO", {
-                "io": io,
-                "a": lhs,
-                "b": rhs,
-            }:
-                return grm.write(
-                    rg.PyInplaceBinOp(
-                        op="+",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_SubIO", {"io": io, "a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOp(
-                        op="-",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_Mul", {"a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOpPure(
-                        op="*",
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_MulIO", {"io": io, "a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOp(
-                        op="*",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_Div", {"a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOpPure(
-                        op="/",
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_DivIO", {"io": io, "a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOp(
-                        op="/",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_Pow", {"a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOpPure(
-                        op="**",
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_PowIO", {"io": io, "a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOp(
-                        op="**",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_LtIO", {"io": io, "a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOp(
-                        op="<",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_GtIO", {"io": io, "a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOp(
-                        op=">",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_NeIO", {"io": io, "a": lhs, "b": rhs}:
-                return grm.write(
-                    rg.PyBinOp(
-                        op="!=",
-                        io=io,
-                        lhs=lhs,
-                        rhs=rhs,
-                    )
-                )
-            case "Py_NotIO", {"io": io, "term": term}:
-                return grm.write(rg.PyUnaryOp(op="not", io=io, operand=term))
-            case "Py_AttrIO", {
-                "io": io,
-                "obj": obj,
-                "attrname": str(attrname),
-            }:
-                return grm.write(
-                    rg.PyAttr(io=io, value=obj, attrname=attrname)
-                )
-            case "Py_LoadGlobal", {"io": io, "name": str(name)}:
-                return grm.write(rg.PyLoadGlobal(io=io, name=name))
-            case "Py_Call", {
-                "func": func,
-                "io": io,
-                "args": args,
-            }:
-                return grm.write(rg.PyCall(func=func, io=io, args=tuple(args)))
-            case "Py_ForLoop", {
-                "iter_arg_idx": int(iter_arg_idx),
-                "indvar_arg_idx": int(indvar_arg_idx),
-                "iterlast_arg_idx": int(iterlast_arg_idx),
-                "body": body,
-                "operands": operands,
-            }:
-                return grm.write(
-                    rg.PyForLoop(
-                        iter_arg_idx=iter_arg_idx,
-                        indvar_arg_idx=indvar_arg_idx,
-                        iterlast_arg_idx=iterlast_arg_idx,
-                        body=body,
-                        operands=operands,
-                    )
-                )
-            case "Py_Tuple", {"elems": tuple(elems)}:
-                return grm.write(
-                    rg.PyTuple(
-                        elems=elems,
-                    )
-                )
-            case "Py_SliceIO", {
-                "io": io,
-                "lower": lower,
-                "upper": upper,
-                "step": step,
-            }:
-                return grm.write(
-                    rg.PySlice(io=io, lower=lower, upper=upper, step=step)
-                )
-            case "Py_SubscriptIO", {"io": io, "obj": obj, "index": index}:
-                return grm.write(rg.PySubscript(io=io, value=obj, index=index))
-            case _:
-                return NotImplemented
+        """Handle Python Term operations using dispatch table pattern."""
+        return self._dispatch_py_term(self, op=op, children=children, grm=grm)
 
     def handle_region_attributes(self, key: str, grm: Grammar):
         return grm.write(rg.Attrs(()))
@@ -646,3 +623,330 @@ class EGraphToRVSDG:
 
     def _parse_type(self, typename: str):
         return parse_type(typename)
+
+
+def key_equals(target_key):
+    def condition(self, key, **kwargs):
+        return key == target_key
+
+    return condition
+
+
+def key_startswith(prefix):
+    def condition(self, key, **kwargs):
+        return key.startswith(prefix)
+
+    return condition
+
+
+class DispatchHandle:
+
+    def __init_subclass__(cls):
+        super().__init_subclass__()
+        # Make sure each subclass has unique dispatch tables.
+        cls._dispatch_handle = cls._dispatch_handle.copy()
+
+    @dispatchtable
+    def _dispatch_handle(self, key, child_keys, grm):
+        # Default fallback for unsupported keys
+        raise NotImplementedError(key)
+
+    # Special case: common_root
+    @_dispatch_handle.case(key_equals("common_root"))
+    def handle_common_root(self, key, child_keys, grm):
+        values = []
+        for k in child_keys:
+            val = self.memo[k]
+            if isinstance(val, ase.SExpr):
+                values.append(val)
+        return grm.write(rg.Rootset(tuple(values)))
+
+    # Primitive cases - delegate to existing primitive dispatch table
+    @_dispatch_handle.case(key_startswith("primitive-"))
+    def handle_primitive_dispatch(self, key, child_keys, grm):
+        nodes = self.gdct["nodes"]
+        node = nodes[key]
+        eclass = node["eclass"]
+        node_type = self._parse_type(self.gdct["class_data"][eclass]["type"])
+
+        def get_children():
+            memo = self.memo
+            if isinstance(child_keys, dict):
+                return {k: memo[v] for k, v in child_keys.items()}
+            else:
+                return [memo[v] for v in child_keys]
+
+        children = get_children()
+        return self.handle_primitive(node_type, node, children, grm)
+
+    # Function cases - delegate to function dispatch table
+    @_dispatch_handle.case(key_startswith("function-"))
+    def handle_function_dispatch(self, key, child_keys, grm):
+        memo = self.memo
+        if isinstance(child_keys, dict):
+            children = {k: memo[v] for k, v in child_keys.items()}
+        else:
+            children = [memo[v] for v in child_keys]
+
+        return self._dispatch_function(
+            self, key=key, children=children, grm=grm
+        )
+
+
+class DispatchPyTerm:
+
+    def __init_subclass__(cls):
+        super().__init_subclass__()
+        # Make sure each subclass has unique dispatch tables.
+        cls._dispatch_py_term = cls._dispatch_py_term.copy()
+
+    @dispatchtable
+    def _dispatch_py_term(self, op, children, grm):
+        # default fallback
+        return NotImplemented
+
+    # Pure Binary Operations
+
+    @_dispatch_py_term.case(op_matches("Py_Add"))
+    def handle_py_add(self, op, children, grm):
+        lhs, rhs = children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOpPure(
+                op="+",
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_Mul"))
+    def handle_py_mul(self, op, children, grm):
+        lhs, rhs = children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOpPure(
+                op="*",
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_Div"))
+    def handle_py_div(self, op, children, grm):
+        lhs, rhs = children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOpPure(
+                op="/",
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_Pow"))
+    def handle_py_pow(self, op, children, grm):
+        lhs, rhs = children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOpPure(
+                op="**",
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    # Binary operations with IO
+    @_dispatch_py_term.case(op_matches("Py_AddIO"))
+    def handle_py_add_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOp(
+                op="+",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_SubIO"))
+    def handle_py_sub_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOp(
+                op="-",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_MulIO"))
+    def handle_py_mul_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOp(
+                op="*",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_DivIO"))
+    def handle_py_div_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOp(
+                op="/",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_PowIO"))
+    def handle_py_pow_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOp(
+                op="**",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    # Inplace operations
+    @_dispatch_py_term.case(op_matches("Py_InplaceAddIO"))
+    def handle_py_inplace_add_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyInplaceBinOp(
+                op="+",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    # Comparison operations
+    @_dispatch_py_term.case(op_matches("Py_LtIO"))
+    def handle_py_lt_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOp(
+                op="<",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_GtIO"))
+    def handle_py_gt_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOp(
+                op=">",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_NeIO"))
+    def handle_py_ne_io(self, op, children, grm):
+        io, lhs, rhs = children["io"], children["a"], children["b"]
+        return grm.write(
+            rg.PyBinOp(
+                op="!=",
+                io=io,
+                lhs=lhs,
+                rhs=rhs,
+            )
+        )
+
+    # Unary operations
+    @_dispatch_py_term.case(op_matches("Py_NotIO"))
+    def handle_py_not_io(self, op, children, grm):
+        io, term = children["io"], children["term"]
+        return grm.write(rg.PyUnaryOp(op="not", io=io, operand=term))
+
+    # Attribute and global operations
+    @_dispatch_py_term.case(op_matches("Py_AttrIO"))
+    def handle_py_attr_io(self, op, children, grm):
+        io, obj, attrname = (
+            children["io"],
+            children["obj"],
+            str(children["attrname"]),
+        )
+        return grm.write(rg.PyAttr(io=io, value=obj, attrname=attrname))
+
+    @_dispatch_py_term.case(op_matches("Py_LoadGlobal"))
+    def handle_py_load_global(self, op, children, grm):
+        io, name = children["io"], str(children["name"])
+        return grm.write(rg.PyLoadGlobal(io=io, name=name))
+
+    # Function call
+    @_dispatch_py_term.case(op_matches("Py_Call"))
+    def handle_py_call(self, op, children, grm):
+        func, io, args = children["func"], children["io"], children["args"]
+        return grm.write(rg.PyCall(func=func, io=io, args=tuple(args)))
+
+    # Control flow
+    @_dispatch_py_term.case(op_matches("Py_ForLoop"))
+    def handle_py_for_loop(self, op, children, grm):
+        iter_arg_idx = int(children["iter_arg_idx"])
+        indvar_arg_idx = int(children["indvar_arg_idx"])
+        iterlast_arg_idx = int(children["iterlast_arg_idx"])
+        body, operands = children["body"], children["operands"]
+        return grm.write(
+            rg.PyForLoop(
+                iter_arg_idx=iter_arg_idx,
+                indvar_arg_idx=indvar_arg_idx,
+                iterlast_arg_idx=iterlast_arg_idx,
+                body=body,
+                operands=operands,
+            )
+        )
+
+    # Data structures
+    @_dispatch_py_term.case(op_matches("Py_Tuple"))
+    def handle_py_tuple(self, op, children, grm):
+        elems = tuple(children["elems"])
+        return grm.write(
+            rg.PyTuple(
+                elems=elems,
+            )
+        )
+
+    # Indexing operations
+    @_dispatch_py_term.case(op_matches("Py_SliceIO"))
+    def handle_py_slice_io(self, op, children, grm):
+        io, lower, upper, step = (
+            children["io"],
+            children["lower"],
+            children["upper"],
+            children["step"],
+        )
+        return grm.write(
+            rg.PySlice(io=io, lower=lower, upper=upper, step=step)
+        )
+
+    @_dispatch_py_term.case(op_matches("Py_SubscriptIO"))
+    def handle_py_subscript_io(self, op, children, grm):
+        io, obj, index = children["io"], children["obj"], children["index"]
+        return grm.write(rg.PySubscript(io=io, value=obj, index=index))
+
+
+_dispatches = [
+    DispatchPrimitive,
+    DispatchVec,
+    DispatchValue,
+    DispatchTerm,
+    DispatchRVSDG,
+    DispatchFunction,
+    DispatchHandle,
+    DispatchPyTerm,
+    DispatchDynIndex,
+]
+
+
+class EGraphToRVSDG(*_dispatches, _EGraphToRVSDG):
+    pass
