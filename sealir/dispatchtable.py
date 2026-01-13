@@ -16,7 +16,7 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable, Self, Sequence
+from typing import Callable, Sequence
 
 TCond = Callable[..., bool]
 """Type alias for condition functions that return boolean values."""
@@ -70,10 +70,9 @@ class DispatchTableBuilder:
             return fn
         return wrap
 
-    def default(self, fn) -> Self:
+    def default(self, fn):
         """Set default handler for unmatched cases."""
         self._default = fn
-        return self
 
     def build(self) -> "DispatchTable":
         """Build immutable DispatchTable from current configuration."""

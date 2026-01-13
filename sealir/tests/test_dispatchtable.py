@@ -154,14 +154,6 @@ def test_builder_get_classmethod():
     assert original(2) == "original default"
 
 
-def test_method_chaining():
-    """Test that builder methods support chaining."""
-    table = (DispatchTableBuilder()
-             .default(lambda x: f"default: {x}")
-             .build())
-
-    assert table("test") == "default: test"
-
 
 def test_case_order_matters():
     """Test that cases are evaluated in order and first match wins."""
