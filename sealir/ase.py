@@ -35,6 +35,7 @@ from typing import (
     TypeAlias,
     TypeVar,
     Union,
+    TYPE_CHECKING
 )
 
 from .graphviz_support import graphviz_function
@@ -369,6 +370,12 @@ class TraverseState:
 class SExpr(abc.ABC):
     _tape: Tape
     _handle: handle_type
+
+    if TYPE_CHECKING:
+        # These rae for duck-typing for SExprProto for MyPy to be happy.
+        def __getattr__(self, name: str) -> Any:
+            ...
+        def _castable_to_SExprProto(self) -> None: ...
 
     @property
     @abc.abstractmethod

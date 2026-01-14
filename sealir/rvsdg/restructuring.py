@@ -1063,7 +1063,8 @@ def format_rvsdg(prgm: SExpr, *, format_attrs=ase.pretty_str) -> str:
                 for arg in expr._args:
                     if isinstance(arg, SExpr):
                         text = yield arg
-                        assert text is not None, arg
+                        if text is None:
+                            raise ValueError("malformed for formatting")
                     else:
                         text = repr(arg)
                     argrefs.append(text)

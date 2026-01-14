@@ -6,16 +6,20 @@ from functools import cached_property, lru_cache
 from itertools import chain, cycle
 from types import UnionType
 from typing import (
+    TYPE_CHECKING,
     Any,
     Callable,
     Generic,
     NamedTuple,
+    Protocol,
     Self,
     Sequence,
     Type,
     TypeVar,
+    cast,
     dataclass_transform,
     get_type_hints,
+    runtime_checkable,
 )
 
 from sealir import ase, rewriter
@@ -23,6 +27,8 @@ from sealir import ase, rewriter
 Trule = TypeVar("Trule", bound="Rule")
 Tgrammar = TypeVar("Tgrammar", bound="Grammar")
 T = TypeVar("T")
+# Covariant type variable for protocols
+Trule_co = TypeVar("Trule_co", bound="Rule", covariant=True)
 
 
 class Grammar:
@@ -58,11 +64,11 @@ class Grammar:
     ) -> NamedSExpr[Tgrammar, Trule]:
         head = expr._head
         try:
-            rulety = cls.start._rules[head]
+            rulety = cls.start._rules[head]     # type: ignore[union-attr]
         except KeyError:
             raise ValueError(f"{head!r} is not valid in the grammar")
         else:
-            return NamedSExpr._subclass(cls, rulety)(expr)
+            return cast(NamedSExpr[Tgrammar, Trule], NamedSExpr._subclass(cls, rulety)(expr))
 
     def __enter__(self) -> Self:
         self._tape.__enter__()
@@ -80,10 +86,25 @@ class _Field(NamedTuple):
         return isinstance(self.annotation, type(tuple[Any]))
 
 
+# Protocol definitions for mypy compatibility
+
+
+@runtime_checkable
+class SExprProto(Protocol, Generic[Trule_co]):
+    """Generic protocol for SExpr and NamedSExpr to duck-type as Rule.
+    """
+
+    def _castable_to_SExprProto(self) -> None: ...
+
+    def __getattr__(self, name: str) -> Any:
+        """Provides dynamic field access (works for both Rule and NamedSExpr)"""
+        ...
+
+
 @dataclass_transform()
 class _MetaRule(type):
     _fields: tuple[_Field, ...]
-    __match_args__: tuple[str]
+    __match_args__: tuple[str, ...]
     _is_root: bool
     _sexpr_head: str
     _rules: MutableMapping[str, Type[Rule]]
@@ -92,12 +113,23 @@ class _MetaRule(type):
         if issubclass(cls, _CombinedRule):
             return any(isinstance(instance, t) for t in cls._combined)
         if isinstance(instance, ase.SExpr):
-            return instance._head == cls._sexpr_head
+            return instance._head == cls._sexpr_head  # type: ignore[attr-defined]
         else:
             return type.__instancecheck__(cls, instance)
 
 
 class Rule(metaclass=_MetaRule):
+    """Base class for all grammar rules.
+
+    Implements SExprProto protocol through metaclass and duck typing.
+    """
+
+    # Explicit protocol satisfaction for mypy
+    if TYPE_CHECKING:
+        def __getattr__(self, name: str) -> Any:
+            """Protocol method - satisfied by actual field access"""
+            ...
+        def _castable_to_SExprProto(self) -> None: ...
 
     def __init__(self, *args, **kwargs):
         if args:
@@ -142,7 +174,7 @@ class Rule(metaclass=_MetaRule):
                 fields[k] = v
 
         cls._fields = tuple(_Field(k, v) for k, v in fields.items())
-        cls.__match_args__ = tuple(fields.keys())
+        cls.__match_args__ = tuple(fields.keys())  # type: ignore[misc]
         cls._sexpr_head = cls.__name__
         cls._is_root = not root_bases
         if cls._is_root:
@@ -195,7 +227,7 @@ class _CombinedRule(Rule):
 
 class NamedSExpr(ase.SExpr, Generic[Tgrammar, Trule]):
     _grammar: type[Grammar]
-    _rulety: type[Rule]
+    _rulety: type[Trule]
 
     @classmethod
     def _subclass(
@@ -219,7 +251,7 @@ class NamedSExpr(ase.SExpr, Generic[Tgrammar, Trule]):
         rulety = self._rulety
         self._slots = {k: i for i, k in enumerate(rulety.__match_args__)}
         self._expr = expr
-        self.__match_args__ = rulety.__match_args__
+        self.__match_args__ = rulety.__match_args__  # type: ignore[misc]
 
     def __getattr__(
         self, name: str
