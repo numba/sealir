@@ -41,6 +41,7 @@ from typing import (
 from .graphviz_support import graphviz_function
 
 T = TypeVar("T")
+TraverseStateT = TypeVar("TraverseStateT", bound="TraverseState")
 
 
 class MalformedContextError(RuntimeError):
@@ -241,6 +242,7 @@ class Tape:
             if not head.startswith(metadata_prefix):
                 lastname = nodename
         # emit start
+        assert source_node is not None
         edges.append((("start", f"node{source_node._handle}"), {}))
         # emit edges
         for args, kwargs in edges:
@@ -399,7 +401,7 @@ class SExpr(abc.ABC):
     @classmethod
     def _write(
         cls, tape: Tape, head: str, args: tuple[value_type, ...]
-    ) -> SExpr:
+    ) -> Self:
         handle = tape.write(head, args)
         return cls._wrap(tape, handle)
 
@@ -524,7 +526,7 @@ def walk_descendants_depth_first_no_repeat(
     """Walk descendants of this Expr node.
     Depth-first order. Left to right. Avoid duplication.
     """
-    stack = [(self, ())]
+    stack: list[tuple[SExpr, tuple[SExpr, ...]]] = [(self, ())]
     visited = set()
     while stack:
         node, parents = stack.pop()
@@ -542,7 +544,7 @@ def walk_descendants_depth_first(
     """Walk descendants of this Expr node.
     Depth-first order. Left to right.
     """
-    stack = [(self, ())]
+    stack: list[tuple[SExpr, tuple[SExpr, ...]]] = [(self, ())]
     while stack:
         node, parents = stack.pop()
         yield parents, node
@@ -561,8 +563,8 @@ def search_descendants(
 
 def traverse(
     self: SExpr,
-    corofunc: Callable[[SExpr, TraverseState], Coroutine[SExpr, T, T]],
-    state: TraverseState | None = None,
+    corofunc: Callable[[SExpr, TraverseStateT], Coroutine[SExpr, T, T]],
+    state: TraverseStateT | None = None,
     init_memo: dict | None = None,
 ) -> dict[SExpr, T]:
     """Traverses the expression tree rooted at the current node, applying
@@ -578,7 +580,8 @@ def traverse(
     if init_memo is not None:
         memo.update(init_memo)
     cur_node = self
-    state = state or TraverseState()
+    state = state or TraverseState()  # type: ignore[assignment]
+    assert state is not None  # Help mypy understand state is not None
     coro = corofunc(cur_node, state)
 
     def handle_coro(to_send):
@@ -759,16 +762,20 @@ def as_tuple(self: SExpr, depth: int = 1, dedup=False) -> tuple[Any, ...]:
         else:
             return True
 
-    memo: dict[SExpr, tuple] = {}
+    memo: dict[value_type, tuple] = {}
 
     for cur in reversed(pending):
-        args = []
+        args: list[Any] = []
         for arg in cur._args:
-            if dedup and arg in dupset and occurrences[arg] > 1:
-                val = f"${arg._handle}"
+            val: Any  # Can be str, tuple, SExpr, or primitive value
+            if isinstance(arg, SExpr):
+                if dedup and arg in dupset and occurrences[arg] > 1:
+                    val = f"${arg._handle}"
+                else:
+                    val = memo.get(arg, arg)
+                occurrences[arg] -= 1
             else:
                 val = memo.get(arg, arg)
-            occurrences[arg] -= 1
             args.append(val)
         if dedup and cur in dupset and multi_parents(cur):
             out = (f"[${cur._handle}]", cur._head, *args)
@@ -899,7 +906,7 @@ class BasicSExpr(SExpr):
 
 
 class TreeVisitor:
-    def visit(self, expr: SExpr):
+    def visit(self, _expr: SExpr):
         pass
 
 

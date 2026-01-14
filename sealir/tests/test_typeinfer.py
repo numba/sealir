@@ -153,7 +153,7 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.SExpr]):
         if not isinstance(orig_idx, int):
             match orig_idx._args:
                 case ("num", constant):
-                    if idx._head == "typevar":
+                    if hasattr(idx, '_head') and idx._head == "typevar":
                         orig_idx = constant
                         self.new_equiv(idx, self.new_type("Int"))
                 case _:
@@ -167,7 +167,7 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.SExpr]):
         [orig_body, _] = orig._args
         tv = self.new_typevar(orig)
         self.new_equiv(tv, self.new_type("App", loop_body, loop_arg))
-        self.apply_arg_rules(orig_body, loop_arg)
+        self.apply_arg_rules(orig_body, loop_arg)  # type: ignore[arg-type]
         return tv
 
     def rewrite_IfElse(self, orig: ase.SExpr, cond, arg, then, orelse):
@@ -223,7 +223,7 @@ def replace_equivalent(equiv_list: list[ase.SExpr]):
     from collections import defaultdict
     from pprint import pprint
 
-    equiv_map = defaultdict(set)
+    equiv_map: dict[Any, set[Any]] = defaultdict(set)
 
     def match(tv, others):
         equiv_map[tv] |= set(others)
@@ -241,7 +241,7 @@ def replace_equivalent(equiv_list: list[ase.SExpr]):
 
     # propagate equivalent
     while True:
-        redir_map = {}
+        redir_map: dict[Any, Any] = {}
         for lhs, eqset in list(equiv_map.items()):
             for rhs in list(eqset):
                 rhs = redir_map.get(rhs, rhs)
@@ -646,20 +646,20 @@ class TypeInferData:
             case "TypeInfo.merge":
                 [cond, args] = [ecd.terms[x] for x in ty.children]
                 # args must be a Vec
-                eclasses = [x.eclass for x in ecd.terms[args.key].children]
+                eclasses = [x.eclass for x in ecd.terms[args.key].children]  # type: ignore[attr-defined]
                 parts = ", ".join(pp(x) for x in eclasses)
                 return f"Merge({pp(cond)}, {parts})"
             case "TypeProof.trait":
                 [op, args] = [ecd.terms[x] for x in ty.children]
                 # args must be a Vec
-                eclasses = [ecd.terms[x].eclass for x in args.children]
+                eclasses = [ecd.terms[x].eclass for x in args.children]  # type: ignore[attr-defined]
                 return f"(!{op.op} {' '.join(map(pp, eclasses))})"
             case "TypeProof.isa":
                 [lhs, rhs] = [ecd.terms[x] for x in ty.children]
                 return f"(isa {namer.get(lhs.eclass)} {pp(rhs.eclass)})"
             case "TypeProof.arrow":
                 [arg, res] = [ecd.terms[x] for x in ty.children]
-                return f"{pp(arg.eclass)}->{pp(res.eclass)}"
+                return f"{pp(arg.eclass)}->{pp(res.eclass)}"  # type: ignore[attr-defined]
             case "TypeProof.or_":
                 [lhs, rhs] = [ecd.terms[x] for x in ty.children]
                 return f"{pp(lhs.eclass)}+{pp(rhs.eclass)}"
@@ -667,7 +667,7 @@ class TypeInferData:
                 assert False, x
 
 
-stack = []
+stack: list[Any] = []
 
 
 @dataclass(frozen=True)

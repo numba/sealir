@@ -17,7 +17,7 @@ from typing import (
     Sequence,
 )
 
-import networkx as nx
+import networkx as nx  # type: ignore[import-untyped]
 from egglog import EGraph
 
 from sealir.ase import SExpr
@@ -149,6 +149,7 @@ def _convert_graph_to_sexpr(
     def egg_fn_to_arg_names(egg_fn: str) -> tuple[str, ...]:
         for ref in state.egg_fn_to_callable_refs[egg_fn]:
             decl = decls.get_callable_decl(ref)
+            assert not isinstance(decl.signature, str)
             return tuple(decl.signature.arg_names)
         else:
             raise ValueError(f"missing decl for {egg_fn!r}")

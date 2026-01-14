@@ -1,7 +1,7 @@
 from functools import wraps
 
 try:
-    import graphviz as gv
+    import graphviz as gv  # type: ignore[import-untyped]
 except ImportError:
     gv_available = False
 else:

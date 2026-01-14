@@ -1,3 +1,4 @@
+# mypy: disable-error-code="empty-body"
 from egglog import EGraph, StringLike, function, i64, i64Like, rewrite, ruleset
 
 from sealir.eqsat.rvsdg_eqsat import GraphRoot, Term

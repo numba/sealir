@@ -71,7 +71,7 @@ class EClassData:
                 yield term
 
     def to_networkx(self, root_term: Term, ignore_types=frozenset()):
-        import networkx as nx
+        import networkx as nx  # type: ignore[import-untyped]
 
         G = nx.DiGraph()
         seen = set()

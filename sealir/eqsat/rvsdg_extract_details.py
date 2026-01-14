@@ -67,7 +67,7 @@ def condition(op_pattern):
     return f
 
 
-def op_matches(op_pattern):
+def op_matches(op_pattern):  # type: ignore[no-redef]
     def condition(self, key, children, grm, op, **kwargs):
         return op == op_pattern
 
@@ -81,7 +81,7 @@ def emit_node(fn):
     return wrapper
 
 
-def op_matches(op_pattern):
+def op_matches(op_pattern):  # type: ignore[no-redef]
     def condition(self, key, children, grm, op, **kwargs):
         return op == op_pattern
 
@@ -111,7 +111,7 @@ def namespace_matches(ns_name):
     return condition
 
 
-def op_matches(op_pattern):
+def op_matches(op_pattern):  # type: ignore[no-redef]
     def condition(self, op, children, grm, **kwargs):
         return op == op_pattern
 
@@ -442,7 +442,7 @@ class EGraphToRVSDG:
         @disp.case(condition("Value.Param"))
         def handle_param_value(op: str, children: dict, grm: Grammar):
             key, idx = children["key"], children["idx"]
-            return grm.write(rg.ArgRef(name=key, idx=str(idx)))
+            return grm.write(rg.ArgRef(name=key, idx=idx))
 
     @dispatchtable
     @staticmethod

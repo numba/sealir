@@ -6,7 +6,7 @@ import os
 
 from egglog import EGraph, eq
 
-from sealir.eqsat.rvsdg_eqsat import (
+from sealir.eqsat.rvsdg_eqsat import (  # type: ignore[attr-defined]
     Debug,
     Env,
     Eval,

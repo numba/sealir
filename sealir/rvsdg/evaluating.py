@@ -7,7 +7,7 @@ from collections import ChainMap
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pprint import pprint
-from typing import Any, Mapping, Sequence, Type, TypeAlias
+from typing import Any, Mapping, MutableMapping, Sequence, Type, TypeAlias, cast
 
 from sealir import ase, rvsdg
 from sealir.rvsdg import grammar as rg
@@ -68,7 +68,7 @@ def evaluate(
     if global_ns is None:
         global_ns = {}
 
-    glbs = ChainMap(global_ns, builtins.__dict__)
+    glbs = ChainMap(global_ns, builtins.__dict__)  # type: ignore
 
     if init_scope is not None:
         stack[-1].update(init_scope)
@@ -81,7 +81,7 @@ def evaluate(
         finally:
             stack.pop()
 
-    def scope() -> Mapping[str, Any]:
+    def scope() -> MutableMapping[str, Any]:
         return stack[-1]
 
     def get_region_args() -> list[Any]:
@@ -133,7 +133,8 @@ def evaluate(
                 inports = yield begin
                 inports.update_scope(scope())
                 portvals = []
-                for port in ports:
+                ports_list: tuple[Any, ...] = ports
+                for port in ports_list:
                     portvals.append((yield port.value))
                 dbginfo.print("In region", dict(scope()))
                 return EvalPorts(expr, tuple(portvals))
@@ -149,12 +150,12 @@ def evaluate(
                     ops.append((yield op))
                 with push(ops):
                     if condval:
-                        ports = yield body
+                        if_ports: EvalPorts = yield body
                     else:
-                        ports = yield orelse
-                ports.update_scope(scope())
+                        if_ports = yield orelse
+                if_ports.update_scope(cast(dict[str, Any], scope()))
                 dbginfo.print("end if", dict(scope()))
-                return EvalPorts(expr, ports.values)
+                return EvalPorts(expr, if_ports.values)
 
             case rg.Loop(body=body, operands=operands):
                 # handle region args
@@ -162,16 +163,16 @@ def evaluate(
                 for op in operands:
                     ops.append((yield op))
                 # loop logic
-                cond = True
+                loop_cond: Any = True
                 assert isinstance(body, rg.RegionEnd)
                 begin = body.begin
                 with push(ops):
                     memo = {}
                     memo[begin] = yield begin
 
-                    while cond:
-                        ports = evaluate(
-                            body,
+                    while loop_cond:
+                        loop_ports: EvalPorts = evaluate(
+                            cast(SExpr, body),
                             (),
                             {},
                             init_scope=scope(),
@@ -179,14 +180,14 @@ def evaluate(
                             global_ns=global_ns,
                             dbginfo=dbginfo,
                         )
-                        ports.update_scope(scope())
+                        loop_ports.update_scope(cast(dict[str, Any], scope()))
                         # First port is expected to be the loop condition
-                        cond = ports[0]
+                        loop_cond = loop_ports[0]
                         dbginfo.print("after loop iterator", dict(scope()))
-                        memo[begin] = memo[begin].replace(ports)
+                        memo[begin] = memo[begin].replace(loop_ports)
 
                 # The loop output will drop the internal loop condition
-                return ports.drop_first()
+                return loop_ports.drop_first()
 
             case rg.Unpack(val=source, idx=int(idx)):
                 ports = yield source

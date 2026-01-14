@@ -47,7 +47,7 @@ class InPorts(Expr):
 
 
 def inports(*names: str):
-    return InPorts(names=Vec[String](*names))
+    return InPorts(names=Vec[String](*[String(name) for name in names]))
 
 
 class Region(Expr):
@@ -170,7 +170,7 @@ def termlist(*args: Term) -> TermList:
 def termdict(**kwargs: Term) -> TermDict:
     mapping = Map[String, Term].empty()
     for k, v in kwargs.items():
-        mapping = mapping.insert(k, v)
+        mapping = mapping.insert(String(k), v)
     return TermDict(mapping)
 
 
@@ -202,11 +202,11 @@ def Select(cond: Term, then: Term, orelse: Term) -> Term: ...
 
 
 def wildcard(ty):
-    wildcard._count += 1
+    wildcard._count += 1  # type: ignore[attr-defined]
     return var(f"_{wildcard._count}", ty)
 
 
-wildcard._count = 0
+wildcard._count = 0  # type: ignore[attr-defined]
 
 
 @ruleset

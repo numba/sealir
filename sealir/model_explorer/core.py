@@ -62,7 +62,7 @@ def visualize_egraph(egraph: EGraph, *, filepath: str) -> None:
         filepath (str): The base filepath where the JSON representation will be
                         saved. File extensions is always appended.
     """
-    import model_explorer
+    import model_explorer  # type: ignore[import-not-found]
 
     model_explorer.visualize(
         prepare_egraph(egraph, filepath), extensions=_extensions

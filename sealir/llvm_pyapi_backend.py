@@ -7,10 +7,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from functools import wraps
 from types import MappingProxyType
-from typing import Any, Callable, Mapping, Self
+from typing import Any, Callable, Mapping, MutableMapping, Self
 
-from llvmlite import binding as llvm
-from llvmlite import ir
+from llvmlite import binding as llvm  # type: ignore[import-untyped]
+from llvmlite import ir  # type: ignore[import-untyped]
 
 from sealir import ase, lam, rvsdg
 from sealir.rvsdg import grammar as rg
@@ -55,9 +55,9 @@ def llvm_codegen(root: ase.SExpr, ns: Mapping[str, Any] = _kwargs_default):
         llvm_func=fn,
         builder=builder,
         pyapi=PythonAPI(builder),
-        global_ns=ChainMap(ns, __builtins__),
+        global_ns=ChainMap(ns, __builtins__),  # type: ignore[arg-type]
     )
-    ase.traverse(root, _codegen_loop, CodegenState(context=ctx))
+    ase.traverse(root, _codegen_loop, CodegenState(context=ctx))  # type: ignore[arg-type]
 
     llvm_ir = str(mod)
     # print(llvm_ir)
@@ -142,7 +142,7 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             argvalues = []
             for k in body.begin.inports:
                 if k == internal_prefix("io"):
-                    v = IOState()
+                    v: LLVMValue = IOState()
                 else:
                     v = SSAValue(names[k])
                 argvalues.append(v)
@@ -267,8 +267,8 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
 
             # process operands
             ops = []
-            for op in operands:
-                ops.append((yield op))
+            for operand in operands:
+                ops.append((yield operand))
 
             # unpack pybool
             condbit = builder.icmp_unsigned(
@@ -317,8 +317,8 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
         case rg.Loop(body=rg.RegionEnd() as body, operands=operands):
             # process operands
             ops = []
-            for op in operands:
-                ops.append((yield op))
+            for operand in operands:
+                ops.append((yield operand))
 
             # Note this is a tail loop.
             begin = body.begin
@@ -352,14 +352,14 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             # generate body
             loopctx = replace(ctx, region_args=[])
             loop_memo = {begin: packed_phis}
-            memo = ase.traverse(
-                body,
-                _codegen_loop,
+            memo = ase.traverse(  # type: ignore[arg-type]
+                body,  # type: ignore[arg-type]
+                _codegen_loop,  # type: ignore[arg-type]
                 CodegenState(context=loopctx),
                 init_memo=loop_memo,
             )
 
-            loopout_values = list(memo[body])
+            loopout_values = list(memo[body])  # type: ignore[index]
             portnames = [p.name for p in body.ports]
             cond_obj = loopout_values.pop(0).value
 
@@ -386,8 +386,8 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
         ):
             # process operands
             ops = []
-            for op in operands:
-                ops.append((yield op))
+            for operand in operands:
+                ops.append((yield operand))
 
             begin = body.begin
 
@@ -403,20 +403,22 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             builder.branch(bb_loopheader)
             builder.position_at_end(bb_loopheader)
 
-            phis: list[SSAValue] = []
+            loop_phis: list[LLVMValue] = []
             fixups = {}
             for i, var in enumerate(loopentry_values):
                 if isinstance(var, IOState):
                     # iostate
-                    phis.append(var)
+                    loop_phis.append(var)
                 else:
                     phi = builder.phi(var.value.type)
                     phi.add_incoming(var.value, bb_before)
                     fixups[i] = phi
-                    phis.append(SSAValue(phi))
+                    loop_phis.append(SSAValue(phi))
 
             # Do indvar = next(iterator)
-            iterator = phis[iter_arg_idx].value
+            iterator_phi = loop_phis[iter_arg_idx]
+            assert isinstance(iterator_phi, SSAValue), f"Expected SSAValue, got {type(iterator_phi)}"
+            iterator = iterator_phi.value
 
             nextobj = ctx.global_ns["next"]
             ptr = pyapi.py_ssize_t(id(nextobj))
@@ -427,7 +429,9 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 nextptr, [iterator, sentinel]
             )
 
-            oldindvar = phis[indvar_arg_idx].value
+            oldindvar_phi = loop_phis[indvar_arg_idx]
+            assert isinstance(oldindvar_phi, SSAValue), f"Expected SSAValue, got {type(oldindvar_phi)}"
+            oldindvar = oldindvar_phi.value
             is_valid = builder.icmp_unsigned("!=", nextres, sentinel)
             indvar = builder.select(
                 is_valid,
@@ -435,24 +439,24 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 oldindvar,
                 name="forloop.indvar",
             )
-            phis[indvar_arg_idx] = SSAValue(indvar)
-            phis[iterlast_arg_idx] = SSAValue(oldindvar)
+            loop_phis[indvar_arg_idx] = SSAValue(indvar)
+            loop_phis[iterlast_arg_idx] = SSAValue(oldindvar)
             builder.cbranch(is_valid, bb_loopbody, bb_endloop)
 
             # Generate loop body
             builder.position_at_end(bb_loopbody)
-            packed_phis = PackedValues.make(*phis)
+            packed_phis = PackedValues.make(*loop_phis)
 
             loopctx = replace(ctx, region_args=[])
             loop_memo = {begin: packed_phis}
-            memo = ase.traverse(
-                body,
-                _codegen_loop,
+            memo = ase.traverse(  # type: ignore[arg-type]
+                body,  # type: ignore[arg-type]
+                _codegen_loop,  # type: ignore[arg-type]
                 CodegenState(context=loopctx),
                 init_memo=loop_memo,
             )
 
-            loopout_values = list(memo[body])
+            loopout_values = list(memo[body])  # type: ignore[index]
 
             for i, phi in fixups.items():
                 phi.add_incoming(loopout_values[i].value, builder.basic_block)
@@ -494,10 +498,11 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
 
         case _:
             if ctx.codegen_extension is not None:
-                args = []
-                for arg in expr._args:
-                    args.append((yield arg))
-                res = ctx.codegen_extension(expr, tuple(args), builder, pyapi)
+                arg_values = []
+                for arg in expr._args:  # type: ignore[assignment]
+                    assert isinstance(arg, ase.SExpr)
+                    arg_values.append((yield arg))  # type: ignore[misc]
+                res = ctx.codegen_extension(expr, tuple(arg_values), builder, pyapi)
             else:
                 res = NotImplemented
             if res is NotImplemented:

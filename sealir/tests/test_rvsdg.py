@@ -85,7 +85,7 @@ def test_if_else_1():
 
 
 def test_if_else_2():
-    def udt(n: int, m: int) -> int:
+    def udt(n: int, m: int) -> tuple[int, int]:
         if n < m:
             x = n
             y = m
@@ -102,7 +102,7 @@ def test_if_else_2():
 
 
 def test_if_else_3():
-    def udt(n: int, m: int) -> int:
+    def udt(n: int, m: int) -> tuple[int, int]:
         if m > n:
             a = b = m
         else:
