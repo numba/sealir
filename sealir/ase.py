@@ -35,7 +35,7 @@ from typing import (
     TypeAlias,
     TypeVar,
     Union,
-    TYPE_CHECKING
+    TYPE_CHECKING,
 )
 
 from .graphviz_support import graphviz_function
@@ -375,8 +375,7 @@ class SExpr(abc.ABC):
 
     if TYPE_CHECKING:
         # These rae for duck-typing for SExprProto for MyPy to be happy.
-        def __getattr__(self, name: str) -> Any:
-            ...
+        def __getattr__(self, name: str) -> Any: ...
         def _castable_to_SExprProto(self) -> None: ...
 
     @property
@@ -652,9 +651,8 @@ def matches(self: SExpr, test: SExpr) -> bool:
             return True
         (_, left), (_, right) = out
         match (left, right):
-            case (SExpr(), SExpr()) if (
-                left._head == right._head
-                and all(map(arg_eq, zip(left._args, right._args)))
+            case (SExpr(), SExpr()) if left._head == right._head and all(
+                map(arg_eq, zip(left._args, right._args))
             ):
                 continue
             case _:

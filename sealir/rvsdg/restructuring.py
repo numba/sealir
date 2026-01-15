@@ -10,7 +10,16 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from itertools import starmap
 from types import FunctionType, coroutine
-from typing import Any, NamedTuple, Sequence, TypeAlias, TypedDict, cast, Coroutine, Generator
+from typing import (
+    Any,
+    NamedTuple,
+    Sequence,
+    TypeAlias,
+    TypedDict,
+    cast,
+    Coroutine,
+    Generator,
+)
 
 from numba_rvsdg.core.datastructures.ast_transforms import (  # type: ignore[import-untyped]
     AST2SCFGTransformer,
@@ -473,7 +482,9 @@ def get_vars_defined(body: ase.SExpr) -> set[str]:
     return names
 
 
-def rvsdgization(expr: SExpr, state: RvsdgizeState) -> Generator[Any, Any, Any]:
+def rvsdgization(
+    expr: SExpr, state: RvsdgizeState
+) -> Generator[Any, Any, Any]:
     ctx = state.context
     grm = ctx.grm
 
@@ -569,9 +580,16 @@ def rvsdgization(expr: SExpr, state: RvsdgizeState) -> Generator[Any, Any, Any]:
                 grm.write(rg.Port(name=k, value=v))
                 for k, v in zip(vars, port_values, strict=True)
             ]
-            return grm.write(rg.RegionEnd(begin=cast(rg.RegionBegin, begin), ports=tuple(ports)))
+            return grm.write(
+                rg.RegionEnd(
+                    begin=cast(rg.RegionBegin, begin), ports=tuple(ports)
+                )
+            )
 
-        case ("PyAst_If", (test, SExpr() as body, SExpr() as orelse, interloc)):
+        case (
+            "PyAst_If",
+            (test, SExpr() as body, SExpr() as orelse, interloc),
+        ):
             vars = sorted(ctx.scope.varmap)
             operands = ctx.load_vars(vars)
             cond = yield test
@@ -596,7 +614,10 @@ def rvsdgization(expr: SExpr, state: RvsdgizeState) -> Generator[Any, Any, Any]:
             for i, k in enumerate(updated_vars):
                 ctx.store_var(k, grm.write(rg.Unpack(val=swt, idx=i)))
 
-        case ("PyAst_While", (SExpr() as loopcondvar, SExpr() as body, interloc)):
+        case (
+            "PyAst_While",
+            (SExpr() as loopcondvar, SExpr() as body, interloc),
+        ):
             # Populate variables that are not yet defined but will be defined in
             # the loop.
             names = get_vars_defined(body)
@@ -633,7 +654,9 @@ def rvsdgization(expr: SExpr, state: RvsdgizeState) -> Generator[Any, Any, Any]:
 
             # wrap up the Loop
             updated_vars = ctx.updated_vars([ctx.scope_map[body]])
-            operands = ctx.load_vars(cast(rg.RegionBegin, loopbody.begin).inports)
+            operands = ctx.load_vars(
+                cast(rg.RegionBegin, loopbody.begin).inports
+            )
             dow = grm.write(rg.Loop(body=loopbody, operands=operands))
             # update scope
             for i, k in enumerate(updated_vars):
@@ -646,18 +669,26 @@ def rvsdgization(expr: SExpr, state: RvsdgizeState) -> Generator[Any, Any, Any]:
         case ("PyAst_Assign", (rval, *targets, interloc)):
             res = yield rval
 
-            if len(targets) == 1 and isinstance(targets[0], SExpr) and targets[0]._head == "PyAst_Subscript":
+            if (
+                len(targets) == 1
+                and isinstance(targets[0], SExpr)
+                and targets[0]._head == "PyAst_Subscript"
+            ):
                 [lhs, indices, loc] = targets[0]._args
                 lhs = yield lhs
                 indices = yield indices
                 rval = yield rval
                 setitem = rg.PySetItem(
-                    io=ctx.load_io(), obj=cast(SExpr, lhs), index=cast(SExpr, indices), value=cast(SExpr, rval)
+                    io=ctx.load_io(),
+                    obj=cast(SExpr, lhs),
+                    index=cast(SExpr, indices),
+                    value=cast(SExpr, rval),
                 )
                 return ctx.insert_io_node(setitem)
             if (
                 len(targets) == 1
-                and unpack_pyast_name(cast(SExpr, targets[0])) == internal_prefix("_")
+                and unpack_pyast_name(cast(SExpr, targets[0]))
+                == internal_prefix("_")
                 and (pystr := unpack_pystr(res))
                 and (directive := parse_directive(pystr))
             ):
@@ -688,7 +719,9 @@ def rvsdgization(expr: SExpr, state: RvsdgizeState) -> Generator[Any, Any, Any]:
                     raise AssertionError(target)
             lhs = ctx.load_var(varname)
             rhs = yield rhs
-            res = rg.PyInplaceBinOp(op=op, io=ctx.load_io(), lhs=lhs, rhs=cast(SExpr, rhs))
+            res = rg.PyInplaceBinOp(
+                op=op, io=ctx.load_io(), lhs=lhs, rhs=cast(SExpr, rhs)
+            )
             ctx.store_var(varname, ctx.insert_io_node(res))
             return
         case ("PyAst_UnaryOp", (str(op), operand, interloc)):
@@ -774,14 +807,20 @@ def rvsdgization(expr: SExpr, state: RvsdgizeState) -> Generator[Any, Any, Any]:
         case ("PyAst_Attribute", (valuexpr, str(attr), interloc)):
             value = yield valuexpr
             return ctx.insert_io_node(
-                rg.PyAttr(io=ctx.load_io(), value=cast(SExpr, value), attrname=attr)
+                rg.PyAttr(
+                    io=ctx.load_io(), value=cast(SExpr, value), attrname=attr
+                )
             )
 
         case ("PyAst_Subscript", (valuexpr, indexexpr, interloc)):
             value = yield valuexpr
             index = yield indexexpr
             return ctx.insert_io_node(
-                rg.PySubscript(io=ctx.load_io(), value=cast(SExpr, value), index=cast(SExpr, index))
+                rg.PySubscript(
+                    io=ctx.load_io(),
+                    value=cast(SExpr, value),
+                    index=cast(SExpr, index),
+                )
             )
 
         case ("PyAst_Slice", (lower, upper, step, interloc)):
@@ -1081,7 +1120,7 @@ def convert_to_rvsdg(grm: rg.Grammar, prgm: SExpr):
     # pp(prgm)
 
     state = RvsdgizeState(RvsdgizeCtx(grm=grm))
-    memo: dict[SExpr, SExpr] = ase.traverse(prgm, rvsdgization, state) # type: ignore[arg-type]
+    memo: dict[SExpr, SExpr] = ase.traverse(prgm, rvsdgization, state)  # type: ignore[arg-type]
     insert_metadata_map(memo, "rvsdgization")
     out = memo[prgm]
 

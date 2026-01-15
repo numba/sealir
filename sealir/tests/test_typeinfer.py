@@ -153,7 +153,7 @@ class MakeTypeInferRules(grammar.TreeRewriter[ase.SExpr]):
         if not isinstance(orig_idx, int):
             match orig_idx._args:
                 case ("num", constant):
-                    if hasattr(idx, '_head') and idx._head == "typevar":
+                    if hasattr(idx, "_head") and idx._head == "typevar":
                         orig_idx = constant
                         self.new_equiv(idx, self.new_type("Int"))
                 case _:

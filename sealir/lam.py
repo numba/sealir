@@ -189,7 +189,7 @@ def run_abstraction_pass(grm: grammar.Grammar, root_expr: ase.SExpr):
                             arg
                         ):
                             # Type-ignore neded due to bug in Counter
-                            ctr.update([arg])       # type: ignore[list-item]
+                            ctr.update([arg])  # type: ignore[list-item]
 
         ase.apply_topdown(root_expr, Occurrences())
 

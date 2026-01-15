@@ -13,6 +13,7 @@ Example:
         @builder.default
         def default(x): return f"default: {x}"
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -31,6 +32,7 @@ class Case:
         fn: Handler function executed when all conditions are True
         conditions: Condition predicates that must all return True
     """
+
     fn: Callable
     conditions: tuple[TCond, ...]
 
@@ -51,6 +53,7 @@ class DispatchTableBuilder:
         _cases: List of Case objects
         _default: Default handler function
     """
+
     _cases: list[Case] = field(default_factory=list)
     _default: Callable = _default_function
 
@@ -65,9 +68,11 @@ class DispatchTableBuilder:
 
         All conditions must return True for handler selection.
         """
+
         def wrap(fn: Callable) -> Callable:
             self._cases.append(Case(fn=fn, conditions=conditions))
             return fn
+
         return wrap
 
     def default(self, fn):
@@ -91,6 +96,7 @@ class DispatchTable:
         cases: Tuple of Case objects
         default: Default handler function
     """
+
     cases: tuple[Case, ...]
     default: Callable
 

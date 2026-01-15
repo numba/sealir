@@ -7,7 +7,15 @@ from collections import ChainMap
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pprint import pprint
-from typing import Any, Mapping, MutableMapping, Sequence, Type, TypeAlias, cast
+from typing import (
+    Any,
+    Mapping,
+    MutableMapping,
+    Sequence,
+    Type,
+    TypeAlias,
+    cast,
+)
 
 from sealir import ase, rvsdg
 from sealir.rvsdg import grammar as rg

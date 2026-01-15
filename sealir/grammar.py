@@ -64,11 +64,14 @@ class Grammar:
     ) -> NamedSExpr[Tgrammar, Trule]:
         head = expr._head
         try:
-            rulety = cls.start._rules[head]     # type: ignore[union-attr]
+            rulety = cls.start._rules[head]  # type: ignore[union-attr]
         except KeyError:
             raise ValueError(f"{head!r} is not valid in the grammar")
         else:
-            return cast(NamedSExpr[Tgrammar, Trule], NamedSExpr._subclass(cls, rulety)(expr))
+            return cast(
+                NamedSExpr[Tgrammar, Trule],
+                NamedSExpr._subclass(cls, rulety)(expr),
+            )
 
     def __enter__(self) -> Self:
         self._tape.__enter__()
@@ -91,8 +94,7 @@ class _Field(NamedTuple):
 
 @runtime_checkable
 class SExprProto(Protocol, Generic[Trule_co]):
-    """Generic protocol for SExpr and NamedSExpr to duck-type as Rule.
-    """
+    """Generic protocol for SExpr and NamedSExpr to duck-type as Rule."""
 
     def _castable_to_SExprProto(self) -> None: ...
 
@@ -126,9 +128,11 @@ class Rule(metaclass=_MetaRule):
 
     # Explicit protocol satisfaction for mypy
     if TYPE_CHECKING:
+
         def __getattr__(self, name: str) -> Any:
             """Protocol method - satisfied by actual field access"""
             ...
+
         def _castable_to_SExprProto(self) -> None: ...
 
     def __init__(self, *args, **kwargs):

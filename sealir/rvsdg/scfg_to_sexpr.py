@@ -125,7 +125,7 @@ class ConvertToSExpr(ast.NodeTransformer):
     def visit_UnaryOp(self, node: ast.UnaryOp) -> SExpr:
         return self._tape.expr(
             "PyAst_UnaryOp",
-            self.map_op(node.op),   # type: ignore[arg-type]
+            self.map_op(node.op),  # type: ignore[arg-type]
             self.visit(node.operand),
             self.get_loc(node),
         )
@@ -334,10 +334,10 @@ class ConvertToSExpr(ast.NodeTransformer):
     def get_loc(self, node: ast.AST) -> SExpr:
         return self._tape.expr(
             "PyAst_loc",
-            node.lineno,            # type: ignore[attr-defined]
-            node.col_offset,        # type: ignore[attr-defined]
-            node.end_lineno,        # type: ignore[attr-defined]
-            node.end_col_offset,    # type: ignore[attr-defined]
+            node.lineno,  # type: ignore[attr-defined]
+            node.col_offset,  # type: ignore[attr-defined]
+            node.end_lineno,  # type: ignore[attr-defined]
+            node.end_col_offset,  # type: ignore[attr-defined]
         )
 
 

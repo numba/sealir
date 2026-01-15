@@ -955,7 +955,6 @@ class EGraphToRVSDG:
                 self, key=key, children=children, grm=grm
             )
 
-
     @dispatchtable
     @staticmethod
     def _dispatch_dynint(disp):

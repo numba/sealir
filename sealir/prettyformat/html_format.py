@@ -75,7 +75,7 @@ def to_html(root: SExpr) -> str:
                 out = f"<div class='sexpr'>{handle}{source}{' '.join(parts)}</div>"
                 return out
             else:
-                raise AssertionError('unreachable')
+                raise AssertionError("unreachable")
 
     cvt = ToHtml()
     ase.apply_bottomup(root, cvt)

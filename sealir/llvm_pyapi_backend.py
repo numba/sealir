@@ -417,7 +417,9 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
 
             # Do indvar = next(iterator)
             iterator_phi = loop_phis[iter_arg_idx]
-            assert isinstance(iterator_phi, SSAValue), f"Expected SSAValue, got {type(iterator_phi)}"
+            assert isinstance(
+                iterator_phi, SSAValue
+            ), f"Expected SSAValue, got {type(iterator_phi)}"
             iterator = iterator_phi.value
 
             nextobj = ctx.global_ns["next"]
@@ -430,7 +432,9 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
             )
 
             oldindvar_phi = loop_phis[indvar_arg_idx]
-            assert isinstance(oldindvar_phi, SSAValue), f"Expected SSAValue, got {type(oldindvar_phi)}"
+            assert isinstance(
+                oldindvar_phi, SSAValue
+            ), f"Expected SSAValue, got {type(oldindvar_phi)}"
             oldindvar = oldindvar_phi.value
             is_valid = builder.icmp_unsigned("!=", nextres, sentinel)
             indvar = builder.select(
@@ -502,7 +506,9 @@ def _codegen_loop(expr: ase.BasicSExpr, state: CodegenState):
                 for arg in expr._args:  # type: ignore[assignment]
                     assert isinstance(arg, ase.SExpr)
                     arg_values.append((yield arg))  # type: ignore[misc]
-                res = ctx.codegen_extension(expr, tuple(arg_values), builder, pyapi)
+                res = ctx.codegen_extension(
+                    expr, tuple(arg_values), builder, pyapi
+                )
             else:
                 res = NotImplemented
             if res is NotImplemented:

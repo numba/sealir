@@ -61,7 +61,6 @@ class Kwargs(_Root):
     kwargs: tuple[SExprProto[Keyword], ...]
 
 
-
 class Port(_Root):
     name: str
     value: SExpr

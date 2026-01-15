@@ -7,11 +7,18 @@ This module tests the complete dispatch table system including:
 - Extension mechanism
 - Edge cases and error handling
 """
-from sealir.dispatchtable import dispatchtable, DispatchTableBuilder, DispatchTable, Case
+
+from sealir.dispatchtable import (
+    dispatchtable,
+    DispatchTableBuilder,
+    DispatchTable,
+    Case,
+)
 
 
 def test_dispatchtable_decorator():
     """Test the @dispatchtable decorator functionality."""
+
     @dispatchtable
     def disp(builder):
         @builder.default
@@ -25,13 +32,14 @@ def test_dispatchtable_decorator():
             return "case 1", value
 
     # Test basic dispatch behavior
-    assert disp(1) == ("case 1", 1)      # Should hit the case for x == 1
+    assert disp(1) == ("case 1", 1)  # Should hit the case for x == 1
     assert disp(None) == ("default", None)  # Should hit the default case
-    assert disp(42) == ("default", 42)   # Should hit the default case
+    assert disp(42) == ("default", 42)  # Should hit the default case
 
 
 def test_dispatch_table_extension():
     """Test the extension mechanism for dispatch tables."""
+
     @dispatchtable
     def base_disp(builder):
         @builder.default
@@ -50,12 +58,15 @@ def test_dispatch_table_extension():
             return "extended", value
 
     # Test extended dispatch behavior
-    assert extended_disp(1) == ("case 1", 1)         # Should inherit case for x == 1
-    assert extended_disp(None) == ("extended", None)  # Should use new case for x == None
-    assert extended_disp(42) == ("default", 42)      # Should use inherited default
+    assert extended_disp(1) == ("case 1", 1)  # Should inherit case for x == 1
+    assert extended_disp(None) == (
+        "extended",
+        None,
+    )  # Should use new case for x == None
+    assert extended_disp(42) == ("default", 42)  # Should use inherited default
 
     # IMPORTANT: Verify that the parent table is unaffected by extension
-    assert base_disp(None) == ("default", None)      # Original should be unchanged
+    assert base_disp(None) == ("default", None)  # Original should be unchanged
 
 
 def test_builder_pattern():
@@ -78,14 +89,17 @@ def test_builder_pattern():
     table = builder.build()
 
     # Test dispatch behavior
-    assert table(5) == "positive int: 5"      # matches both int and > 0 conditions
-    assert table(-3) == "other: -3"           # matches int but not > 0, so default
+    assert table(5) == "positive int: 5"  # matches both int and > 0 conditions
+    assert table(-3) == "other: -3"  # matches int but not > 0, so default
     assert table("hello") == "string: hello"  # matches string condition
-    assert table([1, 2]) == "other: [1, 2]"  # matches no conditions, so default
+    assert (
+        table([1, 2]) == "other: [1, 2]"
+    )  # matches no conditions, so default
 
 
 def test_multiple_conditions():
     """Test cases with multiple conditions (all must be True)."""
+
     @dispatchtable
     def multi_cond_disp(builder):
         @builder.case(lambda x: x > 0, lambda x: x % 2 == 0)
@@ -100,14 +114,15 @@ def test_multiple_conditions():
         def handle_other(x):
             return f"other: {x}"
 
-    assert multi_cond_disp(4) == "positive even: 4"    # > 0 and even
-    assert multi_cond_disp(3) == "positive odd: 3"     # > 0 and odd
-    assert multi_cond_disp(-2) == "other: -2"          # even but not > 0
-    assert multi_cond_disp(0) == "other: 0"            # even but not > 0
+    assert multi_cond_disp(4) == "positive even: 4"  # > 0 and even
+    assert multi_cond_disp(3) == "positive odd: 3"  # > 0 and odd
+    assert multi_cond_disp(-2) == "other: -2"  # even but not > 0
+    assert multi_cond_disp(0) == "other: 0"  # even but not > 0
 
 
 def test_dispatch_table_get_classmethod():
     """Test DispatchTable.get class method."""
+
     def handler(x):
         return f"handled: {x}"
 
@@ -123,6 +138,7 @@ def test_dispatch_table_get_classmethod():
 
 def test_builder_get_classmethod():
     """Test DispatchTableBuilder.get class method for copying existing tables."""
+
     # Create original table
     @dispatchtable
     def original(builder):
@@ -146,17 +162,17 @@ def test_builder_get_classmethod():
     new_table = builder.build()
 
     # Test that new table has both original and new functionality
-    assert new_table(1) == "original one"     # from original
-    assert new_table(2) == "new two"          # newly added
-    assert new_table(3) == "original default" # from original
+    assert new_table(1) == "original one"  # from original
+    assert new_table(2) == "new two"  # newly added
+    assert new_table(3) == "original default"  # from original
 
     # Test that original table is unchanged
     assert original(2) == "original default"
 
 
-
 def test_case_order_matters():
     """Test that cases are evaluated in order and first match wins."""
+
     @dispatchtable
     def ordered_disp(builder):
         @builder.case(lambda x: x > 0)
@@ -178,9 +194,10 @@ def test_case_order_matters():
 
 def test_kwargs_support():
     """Test that dispatch works with keyword arguments."""
+
     @dispatchtable
     def kwargs_disp(builder):
-        @builder.case(lambda *args, **kwargs: kwargs.get('special', False))
+        @builder.case(lambda *args, **kwargs: kwargs.get("special", False))
         def handle_special(*args, **kwargs):
             return f"special: {args}, {kwargs}"
 
@@ -188,6 +205,11 @@ def test_kwargs_support():
         def handle_default(*args, **kwargs):
             return f"default: {args}, {kwargs}"
 
-    assert kwargs_disp(1, 2, special=True) == "special: (1, 2), {'special': True}"
-    assert kwargs_disp(1, 2, special=False) == "default: (1, 2), {'special': False}"
+    assert (
+        kwargs_disp(1, 2, special=True) == "special: (1, 2), {'special': True}"
+    )
+    assert (
+        kwargs_disp(1, 2, special=False)
+        == "default: (1, 2), {'special': False}"
+    )
     assert kwargs_disp(1, 2) == "default: (1, 2), {}"
