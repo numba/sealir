@@ -55,7 +55,8 @@ def test_calculator() -> None:
         d = grm.write(Sub(lhs=c, rhs=b))
         e = grm.write(Mul(lhs=b, rhs=d))
 
-    assert c.lhs.value == a.value
+    assert hasattr(c.lhs, "value") and hasattr(a, "value")
+    assert c.lhs.value == a.value  # type: ignore
 
     class Calc(grammar.TreeRewriter[int]):
         def rewrite_Num(self, orig: grammar.NamedSExpr, value: int) -> int:

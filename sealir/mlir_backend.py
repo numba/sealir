@@ -6,11 +6,12 @@ import sys
 from functools import cache
 from tempfile import NamedTemporaryFile
 from types import MappingProxyType
+from typing import Any
 
 import numpy as np
-from llvmlite import binding as llvm
+from llvmlite import binding as llvm  # type: ignore[import-untyped]
 
-_empty_dict = MappingProxyType({})
+_empty_dict: MappingProxyType[str, Any] = MappingProxyType({})
 
 
 @cache

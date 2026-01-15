@@ -38,7 +38,12 @@ def metadata_find_original(node: ase.SExpr, loc_test) -> ase.SExpr | None:
             node = stack.pop()
             for parent in ase.walk_parents(node):
                 if parent._head == ".md.rewrite":
-                    md = MdRewriteLayout(*parent._args)
+                    # Validate that args match expected MdRewriteLayout structure
+                    (rewriter, repl, orig) = parent._args
+                    assert isinstance(rewriter, str)
+                    assert isinstance(repl, ase.SExpr)
+                    assert isinstance(orig, ase.SExpr)
+                    md = MdRewriteLayout(rewriter, repl, orig)
                     if md.orig != node:
                         if loc_test(md.orig):
                             yield md.orig
@@ -102,7 +107,7 @@ class TreeRewriter(Generic[T], ase.TreeVisitor):
         else:
             self._passthru_state = lambda: orig
 
-        res = self._default_rewrite_dispatcher(orig, updated, args)
+        res = self._default_rewrite_dispatcher(orig, updated, args)  # type: ignore[arg-type]
 
         return res
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import ast
 import warnings
 from pprint import pprint
-from typing import TypeAlias
+from typing import TypeAlias, cast
 
 from sealir import ase
 from sealir.rvsdg import _DEBUG, internal_prefix
@@ -40,13 +40,13 @@ class ConvertToSExpr(ast.NodeTransformer):
             self.get_loc(node),
         )
 
-    def visit_Pass(self, node: ast.Return) -> SExpr:
+    def visit_Pass(self, node: ast.Pass) -> SExpr:
         return self._tape.expr("PyAst_Pass", self.get_loc(node))
 
     def visit_Return(self, node: ast.Return) -> SExpr:
         return self._tape.expr(
             "PyAst_Return",
-            self.visit(node.value),
+            self.visit(cast(ast.AST, node.value)),
             self.get_loc(node),
         )
 
@@ -125,7 +125,7 @@ class ConvertToSExpr(ast.NodeTransformer):
     def visit_UnaryOp(self, node: ast.UnaryOp) -> SExpr:
         return self._tape.expr(
             "PyAst_UnaryOp",
-            self.map_op(node.op),
+            self.map_op(node.op),  # type: ignore[arg-type]
             self.visit(node.operand),
             self.get_loc(node),
         )
@@ -334,10 +334,10 @@ class ConvertToSExpr(ast.NodeTransformer):
     def get_loc(self, node: ast.AST) -> SExpr:
         return self._tape.expr(
             "PyAst_loc",
-            node.lineno,
-            node.col_offset,
-            node.end_lineno,
-            node.end_col_offset,
+            node.lineno,  # type: ignore[attr-defined]
+            node.col_offset,  # type: ignore[attr-defined]
+            node.end_lineno,  # type: ignore[attr-defined]
+            node.end_col_offset,  # type: ignore[attr-defined]
         )
 
 

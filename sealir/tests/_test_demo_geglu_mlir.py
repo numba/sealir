@@ -1,4 +1,4 @@
-# mypy: disable-error-code="empty-body"
+# mypy: disable-error-code="empty-body,attr-defined,call-arg,arg-type"
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from egglog import EGraph, String, eq
 
 from sealir import ase, rvsdg
 from sealir.eqsat.rvsdg_convert import egraph_conversion
-from sealir.eqsat.rvsdg_eqsat import (
+from sealir.eqsat.rvsdg_eqsat import (  # type: ignore[attr-defined]
     DoPartialEval,
     Env,
     Eval,
@@ -79,7 +79,7 @@ def run(
     print("saturation time", te - ts)
 
     ts = time.time()
-    out = egraph.simplify(root, 1)
+    out = egraph.simplify(root, 1)  # type: ignore[attr-defined]
     te = time.time()
     print("extraction time", te - ts)
     # print(egraph.as_egglog_string)

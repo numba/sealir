@@ -1,20 +1,12 @@
-from egglog import (
-    EGraph,
-    Expr,
-    StringLike,
-    function,
-    i64,
-    i64Like,
-    rewrite,
-    ruleset,
-)
+# mypy: disable-error-code="empty-body"
+from egglog import EGraph, StringLike, function, i64, i64Like, rewrite, ruleset
 
-from sealir.eqsat.rvsdg_eqsat import GraphRoot
+from sealir.eqsat.rvsdg_eqsat import GraphRoot, Term
 from sealir.eqsat.rvsdg_extract import CostModel, egraph_extraction
 
 
-class Term(Expr):
-    def __init__(self, name: StringLike): ...
+@function
+def named_term(name: StringLike) -> Term: ...
 
 
 @function
@@ -81,8 +73,8 @@ def _extraction(egraph):
 
 
 def test_cost_duplicated_term():
-    A = Term("A")
-    B = Term("B")
+    A = named_term("A")
+    B = named_term("B")
     expr = Add(A, Add(B, A))
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
@@ -107,9 +99,9 @@ def test_cost_duplicated_term():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert term1[0].endswith("Term___init__")
-    assert term2[0].endswith("Term___init__")
-    assert term3[0].endswith("Term___init__")
+    assert term1[0].endswith("named_term")
+    assert term2[0].endswith("named_term")
+    assert term3[0].endswith("named_term")
     assert term1 == term3
     assert term2 != term3
     assert add1 != add2
@@ -121,7 +113,7 @@ def test_cost_duplicated_term():
 
 def test_simplify_pow_2():
 
-    A = Term("A")
+    A = named_term("A")
     expr = Pow(A, 2)
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
@@ -153,15 +145,15 @@ def test_simplify_pow_2():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert term1[0].endswith("Term___init__")
-    assert term2[0].endswith("Term___init__")
+    assert term1[0].endswith("named_term")
+    assert term2[0].endswith("named_term")
     assert term1 == term2
     assert graphroot.endswith("GraphRoot")
     assert mul1.endswith("Mul")
 
 
 def test_simplify_pow_3():
-    A = Term("A")
+    A = named_term("A")
     expr = Pow(A, 3)
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
@@ -193,7 +185,7 @@ def test_simplify_pow_3():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert term1[0].endswith("Term___init__")
+    assert term1[0].endswith("named_term")
     assert term1 == term2
     assert term1 == term3
     assert graphroot.endswith("GraphRoot")
@@ -215,7 +207,7 @@ def test_scaled_cost_func():
 
 
 def test_loop_multiplier():
-    A = Term("A")
+    A = named_term("A")
     expr = Loop(Pow(A, 3))
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
@@ -234,7 +226,7 @@ def test_loop_multiplier():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert term1[0].endswith("Term___init__")
+    assert term1[0].endswith("named_term")
     assert term1 == term2
     assert term1 == term3
     assert graphroot.endswith("GraphRoot")
@@ -244,7 +236,7 @@ def test_loop_multiplier():
 
 
 def test_const_factor():
-    A = Term("A")
+    A = named_term("A")
     expr = Repeat(A, 13)
     egraph = EGraph()
     egraph.register(GraphRoot(expr))
@@ -262,7 +254,7 @@ def test_const_factor():
             pass
         case _:
             assert False, f"failed to match: {extracted}"
-    assert term[0].endswith("Term___init__")
+    assert term[0].endswith("named_term")
     assert literal.startswith("primitive-i64-")
     assert graphroot.endswith("GraphRoot")
     assert repeat.endswith("Repeat")

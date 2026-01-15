@@ -1,5 +1,5 @@
 import html
-from typing import Any
+from typing import Any, cast
 
 from sealir import ase
 from sealir.ase import SExpr
@@ -16,7 +16,7 @@ def find_source_md(node: SExpr) -> SExpr | None:
 
     out = metadata_find_original(node, loc_test)
     if out is not None:
-        return out._args[-1]
+        return cast(SExpr, out._args[-1])
     else:
         return None
 
@@ -29,20 +29,20 @@ def to_html(root: SExpr) -> str:
 
     class ToHtml(TreeRewriter[str]):
 
-        reference_already = set()
+        reference_already: set[SExpr] = set()
 
         def rewrite_generic(
             self, orig: SExpr, args: tuple[Any, ...], updated: bool
         ) -> str | SExpr:
             if orig in reachable:
-                args = list(args)
+                args_list = list(args)
                 for i, child in enumerate(orig._args):
                     if isinstance(child, SExpr):
                         if (
                             not ase.is_simple(child)
                             and child in self.reference_already
                         ):
-                            args[i] = (
+                            args_list[i] = (
                                 "<div class='handle_ref handle' "
                                 f"data-ref='{child._handle}'>"
                                 f"${child._handle}"
@@ -50,6 +50,7 @@ def to_html(root: SExpr) -> str:
                             )
                         else:
                             self.reference_already.add(child)
+                args = tuple(args_list)
 
                 parts = [html.escape(orig._head)]
                 parts.extend(map(str, args))
@@ -60,7 +61,7 @@ def to_html(root: SExpr) -> str:
                     "</div>"
                 )
                 if src := find_source_md(orig):
-                    si = src._args
+                    si = cast(tuple[int, ...], src._args)
                     pp_src = f"[{si[0]}:{si[1]-1} to {si[2]}:{si[3]}]"
                     data = " ".join(
                         f"data-{k}={v}"
@@ -74,7 +75,7 @@ def to_html(root: SExpr) -> str:
                 out = f"<div class='sexpr'>{handle}{source}{' '.join(parts)}</div>"
                 return out
             else:
-                return None
+                raise AssertionError("unreachable")
 
     cvt = ToHtml()
     ase.apply_bottomup(root, cvt)

@@ -1,7 +1,7 @@
 import json
 from typing import Dict
 
-from model_explorer import (
+from model_explorer import (  # type: ignore[import-not-found]
     Adapter,
     AdapterMetadata,
     ModelExplorerGraphs,

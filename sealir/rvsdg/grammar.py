@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import TypeAlias
 
 from sealir import ase, grammar
+from sealir.grammar import SExprProto
 
 SExpr: TypeAlias = ase.SExpr
 
@@ -49,15 +50,15 @@ class Posargs(_Root):
     args: tuple[SExpr, ...]
 
 
-class Kwargs(_Root):
-    """Used for keyword arguments"""
-
-    kwargs: tuple[SExpr, ...]  # element type is Keyword
-
-
 class Keyword(_Root):
     name: str
     value: SExpr
+
+
+class Kwargs(_Root):
+    """Used for keyword arguments"""
+
+    kwargs: tuple[SExprProto[Keyword], ...]
 
 
 class Port(_Root):
@@ -76,24 +77,24 @@ class RegionBegin(_Root):
 
 class RegionEnd(_Root):
     begin: RegionBegin
-    ports: tuple[Port, ...]
+    ports: tuple[SExprProto[Port], ...]
 
 
 class Func(_Root):
     fname: str
-    args: Args
-    body: RegionEnd
+    args: SExprProto[Args]
+    body: SExprProto[RegionEnd]
 
 
 class IfElse(_Root):
-    cond: SExpr
-    body: RegionEnd
-    orelse: RegionEnd
+    cond: SExpr | None  # Can be None at runtime
+    body: SExprProto[RegionEnd]
+    orelse: SExprProto[RegionEnd]
     operands: tuple[SExpr, ...]
 
 
 class Loop(_Root):
-    body: RegionEnd
+    body: SExprProto[RegionEnd]
     operands: tuple[SExpr, ...]
 
 
@@ -242,10 +243,8 @@ class Unpack(_Root):
 class DbgValue(_Root):
     name: str
     value: SExpr
-    srcloc: Loc
-    "Loc for original source"
-    interloc: Loc
-    "Loc for intermediate form (SCFG)"
+    srcloc: SExprProto[Loc]
+    interloc: SExprProto[Loc]
 
 
 class ArgRef(_Root):

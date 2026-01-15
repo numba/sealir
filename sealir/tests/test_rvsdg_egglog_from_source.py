@@ -1,4 +1,5 @@
-from egglog import EGraph
+# mypy: disable-error-code="empty-body"
+from egglog import Bool, EGraph
 
 from sealir import ase, rvsdg
 from sealir.eqsat import py_eqsat, rvsdg_eqsat
@@ -262,7 +263,7 @@ def test_keyword_argument():
         yield rule(
             TermDict(mapping),
             mapping[String("axis")] == term,
-            mapping[String("keepdims")] == Term.LiteralBool(True),
+            mapping[String("keepdims")] == Term.LiteralBool(Bool(True)),
         ).then(
             # Mark the detection with a Matched
             Matched("kwargs", TermDict(mapping)),

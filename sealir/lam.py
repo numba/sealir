@@ -8,6 +8,7 @@ from typing import Any
 from sealir import ase, grammar
 from sealir.itertools import first
 from sealir.rewriter import TreeRewriter
+from sealir.grammar import SExprProto
 
 
 class _Value(grammar.Rule):
@@ -142,14 +143,14 @@ def beta_reduction(app_expr: ase.SExpr) -> ase.SExpr:
 
     target = app_expr
 
-    app_exprs = []
+    app_exprs: list[SExprProto] = []
     while isinstance(app_expr, App):
         app_exprs.append(app_expr)
         app_expr = app_expr.lam
 
     napps = len(app_exprs)
 
-    arg2repl = {}
+    arg2repl: dict[SExprProto, SExprProto] = {}
     drops = set(app_exprs)
     for parents, child in ase.walk_descendants(app_expr):
         if isinstance(child, Arg):
@@ -187,7 +188,8 @@ def run_abstraction_pass(grm: grammar.Grammar, root_expr: ase.SExpr):
                         if isinstance(arg, ase.SExpr) and not ase.is_simple(
                             arg
                         ):
-                            ctr.update([arg])
+                            # Type-ignore neded due to bug in Counter
+                            ctr.update([arg])  # type: ignore[list-item]
 
         ase.apply_topdown(root_expr, Occurrences())
 
@@ -243,6 +245,7 @@ def replace_by_abstraction(
     # rewrite these children nodes into a new lambda abstraction
     # replacing the `anchor` node with an arg node.
     [old_node] = lamexpr._args
+    assert isinstance(old_node, ase.SExpr)
     new_node = rewrite_into_abstraction(grm, old_node, anchor, lam_depth_map)
     repl = grm.write(App(lam=grm.write(Lam(new_node)), arg=anchor))
     return old_node, repl

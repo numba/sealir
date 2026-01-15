@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from sealir import ase
 from sealir.rvsdg import grammar as rg
+from egglog import Bool
 
 from . import py_eqsat
 from . import rvsdg_eqsat as eg
@@ -214,7 +215,6 @@ def egraph_conversion(root: SExpr):
                 for arg in posargs.args:
                     posarg_terms.append((yield arg))
                 kwarg_dict = {}
-                kw: rg.Keyword
                 for kw in kwargs.kwargs:
                     kwarg_dict[kw.name] = yield kw.value
                 return WrapTerm(
@@ -275,7 +275,7 @@ def egraph_conversion(root: SExpr):
                 return eg.Term.LiteralF64(fval)
 
             case rg.PyBool(bool(val)):
-                return eg.Term.LiteralBool(val)
+                return eg.Term.LiteralBool(Bool(val))
 
             case rg.PyStr(str(val)):
                 return eg.Term.LiteralStr(val)
