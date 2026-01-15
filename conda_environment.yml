@@ -7,6 +7,7 @@ dependencies:
   - pytest
   - networkx
   - numpy
+  - mypy
   # egglog doesn't install this
   - cloudpickle 
   - pip
@@ -16,3 +17,4 @@ dependencies:
 platforms:
   - osx-arm64
   - linux-64
+  

@@ -39,3 +39,8 @@ jobs:
         run: |
           conda activate ./envs/dev
           pytest sealir -v
+
+      - name: Run MyPy
+        run: |
+          conda activate ./envs/dev
+          mypy sealir

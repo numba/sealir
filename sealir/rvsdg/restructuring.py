@@ -633,7 +633,7 @@ def rvsdgization(expr: SExpr, state: RvsdgizeState) -> Generator[Any, Any, Any]:
 
             # wrap up the Loop
             updated_vars = ctx.updated_vars([ctx.scope_map[body]])
-            operands = ctx.load_vars(loopbody.begin.inports)
+            operands = ctx.load_vars(cast(rg.RegionBegin, loopbody.begin).inports)
             dow = grm.write(rg.Loop(body=loopbody, operands=operands))
             # update scope
             for i, k in enumerate(updated_vars):
