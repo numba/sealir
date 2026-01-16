@@ -1116,6 +1116,176 @@ def format_rvsdg(prgm: SExpr, *, format_attrs=ase.pretty_str) -> str:
     return "\n".join(buffer)
 
 
+def format_rvsdg_mermaid(prgm: SExpr) -> str:
+    """
+    Convert an RVSDG expression to a Mermaid flowchart.
+    """
+    node_counter = 0
+    # SExpr -> mermaid_id
+    node_map: dict[ase.SExpr, str] = {}
+    # (from_id, to_id, label)
+    edges: list[tuple[str, str, str]] = []
+    # mermaid_id -> "mermaid_id[label]"
+    node_defs: dict[str, str] = {}
+    visited: set[ase.SExpr] = set()
+
+    def get_node_id(expr: ase.SExpr) -> str:
+        """Get or create a unique node ID for an expression."""
+        nonlocal node_counter
+        if expr not in node_map:
+            new_id = f"n{node_counter}"
+            node_counter += 1
+            node_map[expr] = new_id
+        return node_map[expr]
+
+    def get_node_label(expr: ase.SExpr) -> str:
+        """Generate a clean label for a node."""
+        head = expr._head
+        if head == "Func":
+            return f"Function({getattr(expr, 'fname', 'func')})"
+        if head == "RegionBegin":
+            inports = getattr(expr, 'inports', ())
+            return f"Region Start<br>({', '.join(inports)})"
+        if head == "RegionEnd":
+            return "Region End"
+        if head == "IfElse":
+            return "If-Else"
+        if head == "Loop":
+            return "Loop"
+        if head == "PyForLoop":
+            return "For Loop"
+        if head == "IO":
+            return "IO State"
+        if head == "Undef":
+            name = getattr(expr, 'name', '?')
+            return f"Undef({name})"
+        if head == "ArgRef":
+            return f"Arg({getattr(expr, 'idx', '?')}:{getattr(expr, 'name', '?')})"
+        if head == "ArgSpec":
+            return f"ArgSpec({getattr(expr, 'name', '?')})"
+        if head == "Unpack":
+            return f"Unpack[{getattr(expr, 'idx', '?')}]"
+        if head == "Port":
+            return f"Port({getattr(expr, 'name', '?')})"
+        if head == "DbgValue":
+            return f"Var({getattr(expr, 'name', '?')})"
+        if head == "PyBinOp" or head == "PyBinOpPure" or head == "PyInplaceBinOp":
+            return f"BinOp({getattr(expr, 'op', '?')})"
+        if head == "PyUnaryOp":
+            return f"UnaryOp({getattr(expr, 'op', '?')})"
+        if head == "PyCall" or head == "PyCallPure":
+            return "Call"
+        if head == "PyLoadGlobal":
+            return f"Global({getattr(expr, 'name', '?')})"
+        if head == "PyAttr":
+            return f"Attr(.{getattr(expr, 'attrname', '?')})"
+        if head == "PySubscript":
+            return "Subscript"
+        if head in ("PyInt", "PyFloat", "PyBool", "PyStr"):
+            val = getattr(expr, 'value', expr._args[0] if expr._args else '?')
+            if head == "PyStr":
+                return f"Str('{val}')"
+            return f"{head.replace('Py', '')}({val})"
+        if head == "PyNone":
+            return "None"
+        if head in ("PyTuple", "PyList"):
+            return head.replace("Py", "")
+        return head
+
+    def get_node_shape(expr: ase.SExpr) -> str:
+        """Determine the Mermaid shape for a node."""
+        head = expr._head
+        label = get_node_label(expr)
+        if head == "Func":
+            return f'["{label}"]'
+        if head in ["RegionBegin", "RegionEnd"]:
+            return f'["{label}"]'
+        if head in ["IfElse", "Loop", "PyForLoop"]:
+            return f'{{{label}}}'
+        if head in ["PyInt", "PyFloat", "PyBool", "PyStr", "PyNone"]:
+            return f'(["{label}"])'
+        if head in ["ArgRef", "Undef"]:
+            return f'>"{label}"]'
+        if head == "IO":
+            return f'(("{label}"))'
+        return f'["{label}"]'
+
+    def build_graph(expr: ase.SExpr, parent_id: str = None, edge_label: str = ""):
+        """Recursively build the graph structure in a top-down manner."""
+        if expr in visited:
+            if parent_id:
+                node_id = get_node_id(expr)
+                edges.append((parent_id, node_id, edge_label))
+            return
+
+        visited.add(expr)
+        node_id = get_node_id(expr)
+        node_defs[node_id] = f"{node_id}{get_node_shape(expr)}"
+
+        if parent_id:
+            edges.append((parent_id, node_id, edge_label))
+
+        # Process children based on RVSDG structure
+        _process_children(expr, node_id)
+
+    def _process_children(expr: ase.SExpr, node_id: str):
+        """Process children of an RVSDG node"""
+        head = expr._head
+        
+        # Generic fallback - process all SExpr args
+        for i, arg in enumerate(expr._args):
+            if isinstance(arg, ase.SExpr):
+                label = f"arg{i}"
+                if head == 'Func' and i == 0: label = 'args'
+                if head == 'Func' and i == 1: label = 'body'
+                if head == 'RegionEnd' and i == 0: label = 'begin'
+                if head == 'RegionEnd' and i > 0: label = f"port{i-1}"
+                if head == 'IfElse' and i == 0: label = 'cond'
+                if head == 'IfElse' and i == 1: label = 'then'
+                if head == 'IfElse' and i == 2: label = 'else'
+                if head == 'IfElse' and i > 2: label = f"op{i-3}"
+                if head in ["Loop", "PyForLoop"] and i == 0: label = 'body'
+                if head in ["Loop", "PyForLoop"] and i > 0: label = f"op{i-1}"
+                if head == 'Port' and i == 1: label = 'value'
+                if head == 'DbgValue' and i == 1: label = 'value'
+                if head == 'Unpack' and i == 0: label = 'val'
+                if head in ["PyBinOp", "PyBinOpPure", "PyInplaceBinOp"] and i == 0: label = 'io'
+                if head in ["PyBinOp", "PyBinOpPure", "PyInplaceBinOp"] and i == 1: label = 'lhs'
+                if head in ["PyBinOp", "PyBinOpPure", "PyInplaceBinOp"] and i == 2: label = 'rhs'
+                if head == "PyUnaryOp" and i == 0: label = 'io'
+                if head == "PyUnaryOp" and i == 1: label = 'operand'
+                if head in ["PyCall", "PyCallPure"] and i == 0: label = 'func'
+                if head in ["PyCall", "PyCallPure"] and i == 1: label = 'io'
+                if head in ["PyCall", "PyCallPure"] and i > 1: label = f"arg{i-2}"
+                if head == "PyLoadGlobal" and i == 0: label = 'io'
+                if head in ["PyTuple", "PyList"] and i >= 0: label = f"elem{i}"
+                build_graph(arg, node_id, label)
+
+    build_graph(prgm)
+
+    mermaid_lines = ["flowchart TD"]
+    mermaid_lines.extend(f"    {v}" for v in node_defs.values())
+    for from_id, to_id, label in edges:
+        if label:
+            mermaid_lines.append(f"    {from_id} -->|{label}| {to_id}")
+        else:
+            mermaid_lines.append(f"    {from_id} --> {to_id}")
+
+    mermaid_lines.extend([
+        "",
+        "    %% Styling",
+        "    classDef function fill:#e3f2fd,stroke:#1976d2,stroke-width:2px",
+        "    classDef control fill:#e1f5fe,stroke:#01579b,stroke-width:2px",
+        "    classDef operation fill:#f3e5f5,stroke:#4a148c,stroke-width:2px",
+        "    classDef literal fill:#e8f5e8,stroke:#1b5e20,stroke-width:2px",
+        "    classDef param fill:#fff3e0,stroke:#e65100,stroke-width:2px",
+        "    classDef io fill:#fce4ec,stroke:#ad1457,stroke-width:2px",
+        "    classDef variable fill:#f1f8e9,stroke:#33691e,stroke-width:2px",
+    ])
+
+    return "\n".join(mermaid_lines)
+
+
 def convert_to_rvsdg(grm: rg.Grammar, prgm: SExpr):
     # pp(prgm)
 
